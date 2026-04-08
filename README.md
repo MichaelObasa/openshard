@@ -2,7 +2,7 @@
   <img src="OpenShard Logo.png" alt="OpenShard Logo" width="200"/>
 </p>
 
-<h1 align="center">OpenShard</h1>
+<h1 align="center" style="font-size: 96px; font-weight: bold;">OpenShard</h1>
 
 <p align="center">
   <strong>The routing layer for AI coding.</strong>
