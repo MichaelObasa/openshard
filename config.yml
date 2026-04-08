@@ -1,6 +1,11 @@
 # OpenShard configuration
 # Model tiers are evaluated top-to-bottom; the first matching tier is used.
 
+# OpenRouter API key — obtain from https://openrouter.ai/keys
+# Can also be set via the OPENSHARD_CONFIG env var pointing to a separate file.
+openrouter_api_key: "YOUR_OPENROUTER_API_KEY_HERE"
+
+
 model_tiers:
   - name: fast
     model: claude-haiku-4-5-20251001
