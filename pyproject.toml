@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openshard"
+version = "0.1.0"
+description = "Intelligent task routing and execution across model tiers"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+openshard = "openshard.cli.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["openshard*"]

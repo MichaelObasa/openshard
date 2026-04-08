@@ -1,0 +1,18 @@
+# OpenShard configuration
+# Model tiers are evaluated top-to-bottom; the first matching tier is used.
+
+model_tiers:
+  - name: fast
+    model: claude-haiku-4-5-20251001
+    description: Low-latency tier for simple, well-defined tasks
+    max_tokens: 1024
+
+  - name: balanced
+    model: claude-sonnet-4-6
+    description: General-purpose tier for most tasks
+    max_tokens: 4096
+
+  - name: powerful
+    model: claude-opus-4-6
+    description: High-capability tier for complex reasoning and planning
+    max_tokens: 8192
