@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from openshard.config.settings import get_api_key
 from openshard.providers.openrouter import ChatResponse, OpenRouterClient
 from openshard.routing.engine import RoutingEngine
 
@@ -9,13 +10,7 @@ class TaskRunner:
 
     def __init__(self) -> None:
         self.engine = RoutingEngine()
-        api_key: str = self.engine.config.get("openrouter_api_key", "")
-        if not api_key:
-            raise ValueError(
-                "openrouter_api_key is not set in config.yml. "
-                "Add your key or set OPENSHARD_CONFIG to a config file that contains it."
-            )
-        self.client = OpenRouterClient(api_key)
+        self.client = OpenRouterClient(get_api_key())
 
     def run(self, task: str) -> ChatResponse:
         """Route *task* to the appropriate model and return the response."""

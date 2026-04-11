@@ -88,11 +88,20 @@ class OpenRouterClient:
             for m in data.get("data", [])
         ]
 
-    def send_request(self, model: str, prompt: str) -> ChatResponse:
-        """Send *prompt* to *model* and return a structured response."""
+    def send_request(
+        self, model: str, prompt: str, system: str | None = None
+    ) -> ChatResponse:
+        """Send *prompt* to *model* and return a structured response.
+
+        *system* is an optional system-role message prepended to the conversation.
+        """
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
         payload = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
         }
         data = self._post("/chat/completions", payload)
 

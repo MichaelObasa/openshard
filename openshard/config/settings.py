@@ -26,3 +26,19 @@ def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
         raise FileNotFoundError(f"Config file not found: {config_path}")
     with config_path.open() as fh:
         return yaml.safe_load(fh) or {}
+
+
+def get_api_key() -> str:
+    """Return the OpenRouter API key from the environment.
+
+    Raises ``ValueError`` with a clear message if the variable is not set.
+    """
+    key = os.environ.get("OPENROUTER_API_KEY", "")
+    if not key:
+        raise ValueError(
+            "OPENROUTER_API_KEY environment variable is not set.\n"
+            "Export it before running:\n\n"
+            "  export OPENROUTER_API_KEY=your_key_here\n\n"
+            "Obtain a key from https://openrouter.ai/keys"
+        )
+    return key

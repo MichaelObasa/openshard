@@ -1,23 +1,20 @@
 # OpenShard configuration
 # Model tiers are evaluated top-to-bottom; the first matching tier is used.
-
-# OpenRouter API key — obtain from https://openrouter.ai/keys
-# Can also be set via the OPENSHARD_CONFIG env var pointing to a separate file.
-openrouter_api_key: "YOUR_OPENROUTER_API_KEY_HERE"
-
+#
+# API key: export OPENROUTER_API_KEY=<your_key>
+# Obtain one from https://openrouter.ai/keys
 
 model_tiers:
   - name: fast
-    model: claude-haiku-4-5-20251001
-    description: Low-latency tier for simple, well-defined tasks
+    model: anthropic/claude-haiku-4.5
     max_tokens: 1024
 
   - name: balanced
-    model: claude-sonnet-4-6
-    description: General-purpose tier for most tasks
+    model: anthropic/claude-sonnet-4.6
     max_tokens: 4096
 
   - name: powerful
-    model: claude-opus-4-6
-    description: High-capability tier for complex reasoning and planning
+    model: anthropic/claude-opus-4.6
     max_tokens: 8192
+
+planning_model: anthropic/claude-sonnet-4.6
