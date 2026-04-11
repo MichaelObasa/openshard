@@ -1,6 +1,8 @@
+from pathlib import Path
+
 import click
 
-from openshard.execution.generator import ExecutionGenerator
+from openshard.execution.generator import ChangedFile, ExecutionGenerator
 from openshard.planning.generator import PlanGenerator
 from openshard.providers.openrouter import AuthError, OpenRouterError, RateLimitError
 
@@ -40,7 +42,8 @@ def plan(task: str):
 
 @cli.command()
 @click.argument("task")
-def run(task: str):
+@click.option("--write", is_flag=True, default=False, help="Write generated files to disk.")
+def run(task: str, write: bool):
     """Execute TASK and return a structured result."""
     try:
         generator = ExecutionGenerator()
@@ -68,6 +71,34 @@ def run(task: str):
         click.echo("\nNotes")
         for note in result.notes:
             click.echo(f"  - {note}")
+
+    if write:
+        click.echo("")
+        _write_files(result.files)
+
+
+def _write_files(files: list[ChangedFile]) -> None:
+    cwd = Path.cwd().resolve()
+    for f in files:
+        if not f.path:
+            click.echo(f"  [skip] empty path")
+            continue
+
+        target = (cwd / f.path).resolve()
+        if not str(target).startswith(str(cwd)):
+            click.echo(f"  [skip] unsafe path rejected: {f.path}")
+            continue
+
+        if f.change_type == "delete":
+            if target.exists():
+                target.unlink()
+                click.echo(f"  [deleted] {f.path}")
+            else:
+                click.echo(f"  [skip] not found: {f.path}")
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(f.content, encoding="utf-8")
+            click.echo(f"  [written] {f.path}")
 
 
 @cli.command()

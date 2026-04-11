@@ -22,6 +22,7 @@ Return exactly this structure:
     {
       "path": "<relative/file/path>",
       "change_type": "<create|update|delete>",
+      "content": "<full file content for create/update, empty string for delete>",
       "summary": "<short explanation of the change>"
     }
   ],
@@ -34,6 +35,7 @@ Return exactly this structure:
 Rules:
 - summary: one sentence, past tense, describes what was accomplished
 - files: list every file that would be created, updated, or deleted
+- content: complete file contents for create/update; empty string for delete
 - notes: important follow-up actions or caveats; omit if none
 - change_type must be exactly one of: create, update, delete\
 """
@@ -49,6 +51,7 @@ _VALID_CHANGE_TYPES = {"create", "update", "delete"}
 class ChangedFile:
     path: str
     change_type: str   # "create" | "update" | "delete"
+    content: str
     summary: str
 
 
@@ -109,6 +112,7 @@ class ExecutionGenerator:
             ChangedFile(
                 path=f.get("path", ""),
                 change_type=f.get("change_type") if f.get("change_type") in _VALID_CHANGE_TYPES else "update",
+                content=f.get("content", ""),
                 summary=f.get("summary", ""),
             )
             for f in data.get("files", [])
