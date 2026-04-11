@@ -18,3 +18,4 @@ model_tiers:
     max_tokens: 8192
 
 planning_model: anthropic/claude-sonnet-4.6
+execution_model: anthropic/claude-sonnet-4.6

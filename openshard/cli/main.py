@@ -1,6 +1,6 @@
 import click
 
-from openshard.execution.runner import TaskRunner
+from openshard.execution.generator import ExecutionGenerator
 from openshard.planning.generator import PlanGenerator
 from openshard.providers.openrouter import AuthError, OpenRouterError, RateLimitError
 
@@ -41,17 +41,14 @@ def plan(task: str):
 @cli.command()
 @click.argument("task")
 def run(task: str):
-    """Execute TASK using the appropriate model tier."""
+    """Execute TASK and return a structured result."""
     try:
-        runner = TaskRunner()
-    except ValueError:
-        raise click.ClickException(
-            "OpenRouter API key is not configured.\n"
-            "Set OPENROUTER_API_KEY environment variable."
-        )
+        generator = ExecutionGenerator()
+    except ValueError as exc:
+        raise click.ClickException(str(exc))
 
     try:
-        response = runner.run(task)
+        result = generator.generate(task)
     except AuthError:
         raise click.ClickException(
             "Authentication failed. Check that OPENROUTER_API_KEY is valid."
@@ -61,12 +58,16 @@ def run(task: str):
     except OpenRouterError as exc:
         raise click.ClickException(f"API error: {exc}")
 
-    click.echo(response.content)
-    click.echo(
-        f"\nTokens - prompt: {response.usage.prompt_tokens}, "
-        f"completion: {response.usage.completion_tokens}, "
-        f"total: {response.usage.total_tokens}"
-    )
+    click.echo(f"\nTask: {task}\n")
+    click.echo(f"Summary: {result.summary}\n")
+    if result.files:
+        click.echo("Files changed")
+        for f in result.files:
+            click.echo(f"  - {f.path} [{f.change_type}] - {f.summary}")
+    if result.notes:
+        click.echo("\nNotes")
+        for note in result.notes:
+            click.echo(f"  - {note}")
 
 
 @cli.command()
