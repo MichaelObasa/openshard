@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from pathlib import Path
 
 import click
@@ -43,7 +45,8 @@ def plan(task: str):
 @cli.command()
 @click.argument("task")
 @click.option("--write", is_flag=True, default=False, help="Write generated files to disk.")
-def run(task: str, write: bool):
+@click.option("--verify", is_flag=True, default=False, help="Run verification after writing (requires --write).")
+def run(task: str, write: bool, verify: bool):
     """Execute TASK and return a structured result."""
     try:
         generator = ExecutionGenerator()
@@ -72,9 +75,16 @@ def run(task: str, write: bool):
         for note in result.notes:
             click.echo(f"  - {note}")
 
+    if verify and not write:
+        raise click.ClickException("--verify requires --write.")
+
     if write:
         click.echo("")
         _write_files(result.files)
+
+    if write and verify:
+        click.echo("")
+        _run_verification(Path.cwd())
 
 
 def _write_files(files: list[ChangedFile]) -> None:
@@ -99,6 +109,29 @@ def _write_files(files: list[ChangedFile]) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(f.content, encoding="utf-8")
             click.echo(f"  [written] {f.path}")
+
+
+def _detect_command(cwd: Path) -> list[str] | None:
+    if (cwd / "package.json").exists():
+        return ["npm", "test"]
+    if (cwd / "pyproject.toml").exists() or (cwd / "tests").is_dir():
+        return ["pytest"]
+    return None
+
+
+def _run_verification(cwd: Path) -> None:
+    cmd = _detect_command(cwd)
+    if cmd is None:
+        click.echo("  [verify] no test command detected")
+        return
+
+    click.echo(f"  [verify] running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, cwd=cwd)
+    if result.returncode == 0:
+        click.echo("  [verify] passed")
+    else:
+        click.echo(f"  [verify] failed (exit code {result.returncode})")
+        sys.exit(result.returncode)
 
 
 @cli.command()
