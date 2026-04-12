@@ -63,6 +63,43 @@ class ExecutionResult:
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _extract_json_object(text: str) -> str | None:
+    """Return the first top-level {...} substring from *text*, or None.
+
+    Walks a brace counter from the first '{' so nested objects and braces
+    inside string values are handled correctly.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i, ch in enumerate(text[start:], start):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Generator
 # ---------------------------------------------------------------------------
 
@@ -103,10 +140,18 @@ class ExecutionGenerator:
 
         try:
             data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise OpenRouterError(
-                f"Model returned invalid JSON ({exc}).\nRaw response:\n{raw}"
-            ) from exc
+        except json.JSONDecodeError:
+            extracted = _extract_json_object(raw)
+            if extracted is None:
+                raise OpenRouterError(
+                    f"Model returned no extractable JSON object.\nRaw response:\n{raw}"
+                )
+            try:
+                data = json.loads(extracted)
+            except json.JSONDecodeError as exc:
+                raise OpenRouterError(
+                    f"Model returned invalid JSON ({exc}).\nRaw response:\n{raw}"
+                ) from exc
 
         files = [
             ChangedFile(
