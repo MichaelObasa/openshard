@@ -20,3 +20,10 @@ model_tiers:
 planning_model: anthropic/claude-sonnet-4.6
 execution_model: anthropic/claude-sonnet-4.6
 fixer_model: anthropic/claude-sonnet-4.6
+
+# Optional: override auto-detected verification command.
+# If set, this is used instead of npm test / pytest detection.
+# verification_command:
+#   - python
+#   - -m
+#   - pytest

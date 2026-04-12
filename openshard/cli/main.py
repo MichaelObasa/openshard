@@ -6,6 +6,7 @@ from pathlib import Path
 
 import click
 
+from openshard.config.settings import load_config
 from openshard.execution.generator import ChangedFile, ExecutionGenerator, ExecutionResult
 from openshard.planning.generator import PlanGenerator
 from openshard.providers.openrouter import AuthError, OpenRouterError, RateLimitError
@@ -181,7 +182,15 @@ def _write_files(files: list[ChangedFile], root: Path) -> None:
             click.echo(f"  [written] {f.path}")
 
 
-def _detect_command(cwd: Path) -> list[str] | None:
+def _detect_command(cwd: Path, config: dict | None = None) -> list[str] | None:
+    if config is None:
+        try:
+            config = load_config()
+        except Exception:
+            config = {}
+    cmd = config.get("verification_command")
+    if cmd:
+        return list(cmd)
     if (cwd / "package.json").exists():
         return ["npm", "test"]
     if (cwd / "pyproject.toml").exists() or (cwd / "tests").is_dir():
