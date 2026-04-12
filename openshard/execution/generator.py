@@ -109,12 +109,16 @@ class ExecutionGenerator:
     def __init__(self) -> None:
         config = load_config()
         self.model: str = self._resolve_model(config)
+        self.fixer_model: str = self._resolve_fixer_model(config)
         self.client = OpenRouterClient(get_api_key())
 
-    def generate(self, task: str) -> ExecutionResult:
-        """Call the model and return a parsed :class:`ExecutionResult`."""
+    def generate(self, task: str, model: str | None = None) -> ExecutionResult:
+        """Call the model and return a parsed :class:`ExecutionResult`.
+
+        *model* overrides the default execution model when provided.
+        """
         response = self.client.send_request(
-            model=self.model,
+            model=model or self.model,
             prompt=task,
             system=_SYSTEM_PROMPT,
         )
@@ -133,6 +137,17 @@ class ExecutionGenerator:
             return config["execution_model"]
         balanced = next((t for t in tiers if t.get("name") == "balanced"), None)
         return (balanced or tiers[0])["model"]
+
+    @staticmethod
+    def _resolve_fixer_model(config: dict) -> str:
+        tiers: list[dict] = config.get("model_tiers", [])
+        if not tiers:
+            raise RuntimeError("No model_tiers defined in config.yml")
+        if config.get("fixer_model"):
+            return config["fixer_model"]
+        powerful = next((t for t in tiers if t.get("name") == "powerful"), None)
+        balanced = next((t for t in tiers if t.get("name") == "balanced"), None)
+        return (powerful or balanced or tiers[0])["model"]
 
     def _parse(self, raw: str) -> ExecutionResult:
         text = re.sub(r"^```(?:json)?\s*", "", raw.strip())

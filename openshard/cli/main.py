@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import click
@@ -46,7 +47,8 @@ def plan(task: str):
 @click.argument("task")
 @click.option("--write", is_flag=True, default=False, help="Write generated files to disk.")
 @click.option("--verify", is_flag=True, default=False, help="Run verification after writing (requires --write).")
-def run(task: str, write: bool, verify: bool):
+@click.option("--dry-run", is_flag=True, default=False, help="Preview files without writing.")
+def run(task: str, write: bool, verify: bool, dry_run: bool):
     """Execute TASK and return a structured result."""
     try:
         generator = ExecutionGenerator()
@@ -75,23 +77,27 @@ def run(task: str, write: bool, verify: bool):
         for note in result.notes:
             click.echo(f"  - {note}")
 
+    if dry_run:
+        _print_dry_run(result.files)
+        return
+
     if verify and not write:
         raise click.ClickException("--verify requires --write.")
 
     if write:
-        click.echo("")
-        _write_files(result.files)
+        workspace = Path(tempfile.mkdtemp())
+        click.echo(f"\n  [workspace] {workspace}")
+        _write_files(result.files, workspace)
 
     if write and verify:
-        cwd = Path.cwd()
         click.echo("")
-        code = _run_verification(cwd)
+        code = _run_verification(workspace)
         if code != 0:
             click.echo("  [retry] attempting fix")
-            _, verify_output = _run_verification(cwd, capture=True)
+            _, verify_output = _run_verification(workspace, capture=True)
             retry_prompt = _build_retry_prompt(task, result, verify_output)
             try:
-                retry_result = generator.generate(retry_prompt)
+                retry_result = generator.generate(retry_prompt, model=generator.fixer_model)
             except AuthError:
                 raise click.ClickException(
                     "Authentication failed. Check that OPENROUTER_API_KEY is valid."
@@ -100,14 +106,28 @@ def run(task: str, write: bool, verify: bool):
                 raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
             except OpenRouterError as exc:
                 raise click.ClickException(f"API error: {exc}")
-            _write_files(retry_result.files)
-            code = _run_verification(cwd, label="[retry]")
+            _write_files(retry_result.files, workspace)
+            code = _run_verification(workspace, label="[retry]")
         if code != 0:
             sys.exit(code)
 
 
-def _write_files(files: list[ChangedFile]) -> None:
-    cwd = Path.cwd().resolve()
+def _print_dry_run(files: list[ChangedFile]) -> None:
+    if not files:
+        click.echo("\n(no files to preview)")
+        return
+    click.echo("")
+    for f in files:
+        click.echo(f"--- {f.path} [{f.change_type}] ---")
+        if f.change_type == "delete" or not f.content:
+            click.echo("(no content — file will be deleted)")
+        else:
+            click.echo(f.content)
+        click.echo("")
+
+
+def _write_files(files: list[ChangedFile], root: Path) -> None:
+    cwd = root.resolve()
     for f in files:
         if not f.path:
             click.echo(f"  [skip] empty path")
