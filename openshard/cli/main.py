@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import click
@@ -50,6 +51,9 @@ def plan(task: str):
 @click.option("--dry-run", is_flag=True, default=False, help="Preview files without writing.")
 def run(task: str, write: bool, verify: bool, dry_run: bool):
     """Execute TASK and return a structured result."""
+    start = time.time()
+    retry_triggered = False
+
     try:
         generator = ExecutionGenerator()
     except ValueError as exc:
@@ -66,6 +70,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
     except OpenRouterError as exc:
         raise click.ClickException(f"API error: {exc}")
 
+    final_files = result.files
+
     click.echo(f"\nTask: {task}\n")
     click.echo(f"Summary: {result.summary}\n")
     if result.files:
@@ -79,6 +85,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
 
     if dry_run:
         _print_dry_run(result.files)
+        _print_summary(start, generator, retry_triggered, final_files)
         return
 
     if verify and not write:
@@ -93,6 +100,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
         click.echo("")
         code = _run_verification(workspace)
         if code != 0:
+            retry_triggered = True
             click.echo("  [retry] attempting fix")
             _, verify_output = _run_verification(workspace, capture=True)
             retry_prompt = _build_retry_prompt(task, result, verify_output)
@@ -106,10 +114,33 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
                 raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
             except OpenRouterError as exc:
                 raise click.ClickException(f"API error: {exc}")
+            final_files = retry_result.files
             _write_files(retry_result.files, workspace)
             code = _run_verification(workspace, label="[retry]")
         if code != 0:
+            _print_summary(start, generator, retry_triggered, final_files)
             sys.exit(code)
+
+    _print_summary(start, generator, retry_triggered, final_files)
+
+
+def _print_summary(
+    start: float,
+    generator: ExecutionGenerator,
+    retry_triggered: bool,
+    files: list[ChangedFile],
+) -> None:
+    elapsed = time.time() - start
+    created  = sum(1 for f in files if f.change_type == "create")
+    updated  = sum(1 for f in files if f.change_type == "update")
+    deleted  = sum(1 for f in files if f.change_type == "delete")
+    click.echo("\n[summary]")
+    click.echo(f"  time:            {elapsed:.1f}s")
+    click.echo(f"  execution_model: {generator.model}")
+    if retry_triggered:
+        click.echo(f"  fixer_model:     {generator.fixer_model}")
+    click.echo(f"  retry:           {'yes' if retry_triggered else 'no'}")
+    click.echo(f"  files:           {created} created / {updated} updated / {deleted} deleted")
 
 
 def _print_dry_run(files: list[ChangedFile]) -> None:
