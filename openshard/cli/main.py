@@ -1,3 +1,5 @@
+import datetime
+import json
 import subprocess
 import sys
 import tempfile
@@ -54,6 +56,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
     """Execute TASK and return a structured result."""
     start = time.time()
     retry_triggered = False
+    workspace: Path | None = None
+    verification_passed: bool | None = None
 
     try:
         generator = ExecutionGenerator()
@@ -87,6 +91,12 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
     if dry_run:
         _print_dry_run(result.files)
         _print_summary(start, generator, retry_triggered, final_files)
+        try:
+            _log_run(start, task, generator, retry_triggered, final_files,
+                     verification_attempted=False, verification_passed=None,
+                     workspace=None)
+        except Exception as exc:
+            click.echo(f"  [log] warning: {exc}")
         return
 
     if verify and not write:
@@ -118,11 +128,60 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
             final_files = retry_result.files
             _write_files(retry_result.files, workspace)
             code = _run_verification(workspace, label="[retry]")
+        verification_passed = code == 0
         if code != 0:
             _print_summary(start, generator, retry_triggered, final_files)
+            try:
+                _log_run(start, task, generator, retry_triggered, final_files,
+                         verification_attempted=True, verification_passed=False,
+                         workspace=workspace)
+            except Exception as exc:
+                click.echo(f"  [log] warning: {exc}")
             sys.exit(code)
 
     _print_summary(start, generator, retry_triggered, final_files)
+    try:
+        _log_run(start, task, generator, retry_triggered, final_files,
+                 verification_attempted=(write and verify),
+                 verification_passed=verification_passed,
+                 workspace=workspace)
+    except Exception as exc:
+        click.echo(f"  [log] warning: {exc}")
+
+
+_LOG_PATH = Path(".openshard") / "runs.jsonl"
+
+
+def _log_run(
+    start: float,
+    task: str,
+    generator: ExecutionGenerator,
+    retry_triggered: bool,
+    files: list[ChangedFile],
+    verification_attempted: bool,
+    verification_passed: bool | None,
+    workspace: Path | None,
+) -> None:
+    entry: dict = {
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "task": task,
+        "execution_model": generator.model,
+        "retry_triggered": retry_triggered,
+        "duration_seconds": round(time.time() - start, 2),
+        "files_created": sum(1 for f in files if f.change_type == "create"),
+        "files_updated": sum(1 for f in files if f.change_type == "update"),
+        "files_deleted": sum(1 for f in files if f.change_type == "delete"),
+        "verification_attempted": verification_attempted,
+        "verification_passed": verification_passed,
+        "workspace_path": str(workspace) if workspace else None,
+    }
+    if retry_triggered:
+        entry["fixer_model"] = generator.fixer_model
+
+    log_path = Path.cwd() / _LOG_PATH
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(entry) + "\n")
 
 
 def _print_summary(
