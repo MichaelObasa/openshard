@@ -54,7 +54,14 @@ def plan(task: str):
 @click.option("--dry-run", is_flag=True, default=False, help="Preview files without writing.")
 @click.option("--more", is_flag=True, default=False, help="Show file list, retry info, model names, and token breakdown.")
 @click.option("--full", is_flag=True, default=False, help="Show all details: workspace, verification command, retry prompt, raw output.")
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool):
+@click.option("--no-shrink", is_flag=True, default=False, help="Disable output shrinking for long results.")
+@click.option(
+    "--mode",
+    type=click.Choice(["auto", "ask", "smart"], case_sensitive=False),
+    default=None,
+    help="Execution mode: auto (always proceed), ask (always prompt), smart (prompt on risky tasks).",
+)
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, mode: str | None):
     """Execute TASK and return a structured result."""
     detail = "full" if full else ("more" if more else "default")
     start = time.time()
@@ -87,15 +94,22 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     click.echo(f"Summary: {result.summary}\n")
     if detail != "default" and result.files:
         click.echo("Files changed")
-        for f in result.files:
+        shrinking = _should_shrink(result.files, no_shrink)
+        files_to_show = result.files[:5] if shrinking else result.files
+        for f in files_to_show:
             click.echo(f"  - {f.path} [{f.change_type}] - {f.summary}")
+        if shrinking and len(result.files) > 5:
+            click.echo(f"  ... and {len(result.files) - 5} more (use --no-shrink to see all)")
     if result.notes:
         click.echo("\nNotes")
         for note in result.notes:
             click.echo(f"  - {note}")
 
     if dry_run:
-        _print_dry_run(result.files)
+        if _should_shrink(result.files, no_shrink):
+            _print_shrunk(result.files, result.summary)
+        else:
+            _print_dry_run(result.files)
         _print_summary(start, generator, retry_triggered, final_files, usage=usage, detail=detail)
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
@@ -109,6 +123,18 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         raise click.ClickException("--verify requires --write.")
 
     if write:
+        effective_mode = _resolve_mode(load_config(), mode)
+        if effective_mode == "ask":
+            risks = _detect_risks(task)
+            if not _confirm_proceed(risks if risks else ["write requested"]):
+                click.echo("  Aborted.")
+                return
+        elif effective_mode == "smart":
+            risks = _detect_risks(task)
+            if risks and not _confirm_proceed(risks):
+                click.echo("  Aborted.")
+                return
+
         workspace = Path(tempfile.mkdtemp())
         if detail == "full":
             click.echo(f"\n  [workspace] {workspace}")
@@ -244,6 +270,85 @@ def _print_summary(
         retry_cost_str = f"${retry_usage.estimated_cost:.4f}" if retry_usage.estimated_cost is not None else "-"
         click.echo(f"  retry tokens:    {retry_usage.prompt_tokens} prompt / {retry_usage.completion_tokens} completion / {retry_usage.total_tokens} total")
         click.echo(f"  retry cost:      {retry_cost_str}")
+
+
+_VALID_MODES = {"auto", "ask", "smart"}
+
+_HIGH_RISK_KEYWORDS: dict[str, list[str]] = {
+    "auth":        ["auth", "login", "logout", "jwt", "oauth", "session", "token", "password"],
+    "payments":    ["payment", "stripe", "billing", "invoice", "charge"],
+    "secrets":     ["secret", "api key", "credential", "private key"],
+    "env/config":  [".env", "dotenv", "environment variable"],
+    "infra":       ["deploy", "kubernetes", "docker", "terraform", "ci/cd", "pipeline"],
+    "migrations":  ["migration", "migrate", "schema", "alter table", "drop table"],
+    "deletes":     ["delete", "remove", "drop", "purge", "wipe", "truncate"],
+    "permissions": ["permission", "rbac", "acl", "role", "privilege"],
+    "security":    ["security", "firewall", "ssl", "tls", "certificate", "encryption"],
+}
+
+
+def _resolve_mode(config: dict, cli_mode: str | None) -> str:
+    if cli_mode:
+        return cli_mode.lower()
+    value = config.get("mode", "smart")
+    return value if value in _VALID_MODES else "smart"
+
+
+def _detect_risks(task: str) -> list[str]:
+    lower = task.lower()
+    return [
+        label
+        for label, keywords in _HIGH_RISK_KEYWORDS.items()
+        if any(kw in lower for kw in keywords)
+    ]
+
+
+def _confirm_proceed(risks: list[str]) -> bool:
+    labels = ", ".join(risks)
+    click.echo(f"\n  This looks high-risk ({labels}).")
+    answer = click.prompt("  Proceed? [y/N]", default="N", show_default=False)
+    return answer.strip().lower() == "y"
+
+
+_SHRINK_CHAR_THRESHOLD = 6_000
+_SHRINK_LINE_THRESHOLD = 1_500
+_SHRINK_ERROR_PATTERNS = ("error", "exception", "failed", "traceback")
+
+
+def _should_shrink(files: list[ChangedFile], no_shrink: bool) -> bool:
+    if no_shrink:
+        return False
+    total_chars = sum(len(f.content) for f in files)
+    total_lines = sum(f.content.count("\n") for f in files)
+    return total_chars > _SHRINK_CHAR_THRESHOLD or total_lines > _SHRINK_LINE_THRESHOLD
+
+
+def _print_shrunk(files: list[ChangedFile], result_summary: str) -> None:
+    total_chars = sum(len(f.content) for f in files)
+    click.echo(
+        f"\n  [shrunk — {len(files)} file(s), ~{total_chars} chars;"
+        " use --no-shrink to see full output]"
+    )
+    click.echo(f"\nSummary: {result_summary}\n")
+    click.echo("Key files (top 5):")
+    for f in files[:5]:
+        click.echo(f"  - {f.path} [{f.change_type}] - {f.summary}")
+    if len(files) > 5:
+        click.echo(f"  ... and {len(files) - 5} more")
+
+    error_lines: list[str] = []
+    for f in files:
+        for line in f.content.splitlines():
+            if any(pat in line.lower() for pat in _SHRINK_ERROR_PATTERNS):
+                error_lines.append(line.strip())
+                if len(error_lines) >= 5:
+                    break
+        if len(error_lines) >= 5:
+            break
+    if error_lines:
+        click.echo("\nErrors detected:")
+        for line in error_lines:
+            click.echo(f"  {line}")
 
 
 def _print_dry_run(files: list[ChangedFile]) -> None:

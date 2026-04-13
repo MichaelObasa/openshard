@@ -21,6 +21,12 @@ planning_model: anthropic/claude-sonnet-4.6
 execution_model: anthropic/claude-sonnet-4.6
 fixer_model: anthropic/claude-sonnet-4.6
 
+# Execution mode: auto | ask | smart (default)
+# auto  — always proceed without asking
+# ask   — always prompt before writing
+# smart — prompt only for higher-risk tasks (auth, payments, secrets, etc.)
+mode: smart
+
 # Optional: override auto-detected verification command.
 # If set, this is used instead of npm test / pytest detection.
 # verification_command:
