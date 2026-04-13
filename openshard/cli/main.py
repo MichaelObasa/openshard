@@ -331,7 +331,50 @@ def _build_retry_prompt(task: str, result: ExecutionResult, verify_output: str) 
 @cli.command()
 def report():
     """Display a summary report of recent executions."""
-    click.echo("[report] Fetching execution report...")
+    log_path = Path.cwd() / _LOG_PATH
+
+    if not log_path.exists():
+        click.echo("No run history found. Run 'openshard run' to get started.")
+        return
+
+    entries = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    if not entries:
+        click.echo("No runs recorded yet.")
+        return
+
+    total         = len(entries)
+    verify_passed = sum(1 for e in entries if e.get("verification_passed") is True)
+    verify_failed = sum(1 for e in entries if e.get("verification_passed") is False)
+    retry_count   = sum(1 for e in entries if e.get("retry_triggered") is True)
+    avg_duration  = sum(e.get("duration_seconds", 0) for e in entries) / total
+
+    click.echo("\n[report]")
+    click.echo(f"  total runs:             {total}")
+    click.echo(f"  successful verifications: {verify_passed}")
+    click.echo(f"  failed verifications:   {verify_failed}")
+    click.echo(f"  retries triggered:      {retry_count}")
+    click.echo(f"  average duration:       {avg_duration:.1f}s")
+
+    click.echo("\n  recent runs:")
+    for entry in entries[-5:][::-1]:
+        ts = entry.get("timestamp", "")
+        ts = ts.rstrip("Z").replace("T", " ").split(".")[0]
+        task  = entry.get("task", "")[:50]
+        model = entry.get("execution_model", "")
+        retry = "yes" if entry.get("retry_triggered") else "no"
+        vp    = entry.get("verification_passed")
+        vstr  = "passed" if vp is True else ("failed" if vp is False else "-")
+        click.echo(f"  {ts}  {task}")
+        click.echo(f"    model: {model}  retry: {retry}  verify: {vstr}")
 
 if __name__ == "__main__":
     cli()
