@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 
 from openshard.config.settings import get_api_key, load_config
-from openshard.providers.openrouter import OpenRouterClient, OpenRouterError
+from openshard.providers.openrouter import OpenRouterClient, OpenRouterError, UsageStats
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -53,6 +53,7 @@ class PlanStage:
 class ExecutionPlan:
     summary: str
     stages: list[PlanStage]
+    usage: UsageStats | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +78,9 @@ class PlanGenerator:
             prompt=task,
             system=_SYSTEM_PROMPT,
         )
-        return self._parse(response.content)
+        plan = self._parse(response.content)
+        plan.usage = response.usage
+        return plan
 
     # ------------------------------------------------------------------
     # Internal

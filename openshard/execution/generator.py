@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 
 from openshard.config.settings import get_api_key, load_config
-from openshard.providers.openrouter import OpenRouterClient, OpenRouterError
+from openshard.providers.openrouter import OpenRouterClient, OpenRouterError, UsageStats
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -60,6 +60,7 @@ class ExecutionResult:
     summary: str
     files: list[ChangedFile]
     notes: list[str]
+    usage: UsageStats | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +123,9 @@ class ExecutionGenerator:
             prompt=task,
             system=_SYSTEM_PROMPT,
         )
-        return self._parse(response.content)
+        result = self._parse(response.content)
+        result.usage = response.usage
+        return result
 
     # ------------------------------------------------------------------
     # Internal

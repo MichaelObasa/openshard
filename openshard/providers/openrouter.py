@@ -44,6 +44,7 @@ class UsageStats:
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    estimated_cost: float | None = None
 
 
 @dataclass
@@ -111,10 +112,12 @@ class OpenRouterClient:
 
         content = choices[0].get("message", {}).get("content", "")
         usage_raw = data.get("usage", {})
+        raw_cost = usage_raw.get("cost")
         usage = UsageStats(
             prompt_tokens=usage_raw.get("prompt_tokens", 0),
             completion_tokens=usage_raw.get("completion_tokens", 0),
             total_tokens=usage_raw.get("total_tokens", 0),
+            estimated_cost=float(raw_cost) if raw_cost is not None else None,
         )
         return ChatResponse(content=content, model=data.get("model", model), usage=usage)
 

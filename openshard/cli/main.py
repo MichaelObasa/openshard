@@ -58,6 +58,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
     retry_triggered = False
     workspace: Path | None = None
     verification_passed: bool | None = None
+    usage = None
+    retry_usage = None
 
     try:
         generator = ExecutionGenerator()
@@ -75,6 +77,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
     except OpenRouterError as exc:
         raise click.ClickException(f"API error: {exc}")
 
+    usage = result.usage
     final_files = result.files
 
     click.echo(f"\nTask: {task}\n")
@@ -90,11 +93,11 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
 
     if dry_run:
         _print_dry_run(result.files)
-        _print_summary(start, generator, retry_triggered, final_files)
+        _print_summary(start, generator, retry_triggered, final_files, usage=usage)
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
                      verification_attempted=False, verification_passed=None,
-                     workspace=None)
+                     workspace=None, usage=usage)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
         return
@@ -125,26 +128,29 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
                 raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
             except OpenRouterError as exc:
                 raise click.ClickException(f"API error: {exc}")
+            retry_usage = retry_result.usage
             final_files = retry_result.files
             _write_files(retry_result.files, workspace)
             code = _run_verification(workspace, label="[retry]")
         verification_passed = code == 0
         if code != 0:
-            _print_summary(start, generator, retry_triggered, final_files)
+            _print_summary(start, generator, retry_triggered, final_files,
+                           usage=usage, retry_usage=retry_usage)
             try:
                 _log_run(start, task, generator, retry_triggered, final_files,
                          verification_attempted=True, verification_passed=False,
-                         workspace=workspace)
+                         workspace=workspace, usage=usage, retry_usage=retry_usage)
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
             sys.exit(code)
 
-    _print_summary(start, generator, retry_triggered, final_files)
+    _print_summary(start, generator, retry_triggered, final_files,
+                   usage=usage, retry_usage=retry_usage)
     try:
         _log_run(start, task, generator, retry_triggered, final_files,
                  verification_attempted=(write and verify),
                  verification_passed=verification_passed,
-                 workspace=workspace)
+                 workspace=workspace, usage=usage, retry_usage=retry_usage)
     except Exception as exc:
         click.echo(f"  [log] warning: {exc}")
 
@@ -161,9 +167,11 @@ def _log_run(
     verification_attempted: bool,
     verification_passed: bool | None,
     workspace: Path | None,
+    usage=None,
+    retry_usage=None,
 ) -> None:
     entry: dict = {
-        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
         "task": task,
         "execution_model": generator.model,
         "retry_triggered": retry_triggered,
@@ -177,6 +185,16 @@ def _log_run(
     }
     if retry_triggered:
         entry["fixer_model"] = generator.fixer_model
+    if usage is not None:
+        entry["prompt_tokens"] = usage.prompt_tokens
+        entry["completion_tokens"] = usage.completion_tokens
+        entry["total_tokens"] = usage.total_tokens
+        entry["estimated_cost"] = usage.estimated_cost
+    if retry_usage is not None:
+        entry["retry_prompt_tokens"] = retry_usage.prompt_tokens
+        entry["retry_completion_tokens"] = retry_usage.completion_tokens
+        entry["retry_total_tokens"] = retry_usage.total_tokens
+        entry["retry_estimated_cost"] = retry_usage.estimated_cost
 
     log_path = Path.cwd() / _LOG_PATH
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -189,6 +207,8 @@ def _print_summary(
     generator: ExecutionGenerator,
     retry_triggered: bool,
     files: list[ChangedFile],
+    usage=None,
+    retry_usage=None,
 ) -> None:
     elapsed = time.time() - start
     created  = sum(1 for f in files if f.change_type == "create")
@@ -201,6 +221,14 @@ def _print_summary(
         click.echo(f"  fixer_model:     {generator.fixer_model}")
     click.echo(f"  retry:           {'yes' if retry_triggered else 'no'}")
     click.echo(f"  files:           {created} created / {updated} updated / {deleted} deleted")
+    if usage is not None:
+        cost_str = f"${usage.estimated_cost:.4f}" if usage.estimated_cost is not None else "-"
+        click.echo(f"  tokens:          {usage.prompt_tokens} prompt / {usage.completion_tokens} completion / {usage.total_tokens} total")
+        click.echo(f"  cost:            {cost_str}")
+    if retry_triggered and retry_usage is not None:
+        retry_cost_str = f"${retry_usage.estimated_cost:.4f}" if retry_usage.estimated_cost is not None else "-"
+        click.echo(f"  retry tokens:    {retry_usage.prompt_tokens} prompt / {retry_usage.completion_tokens} completion / {retry_usage.total_tokens} total")
+        click.echo(f"  retry cost:      {retry_cost_str}")
 
 
 def _print_dry_run(files: list[ChangedFile]) -> None:
@@ -408,6 +436,10 @@ def report():
     verify_failed = sum(1 for e in entries if e.get("verification_passed") is False)
     retry_count   = sum(1 for e in entries if e.get("retry_triggered") is True)
     avg_duration  = sum(e.get("duration_seconds", 0) for e in entries) / total
+    total_tokens  = sum(e.get("total_tokens", 0) for e in entries)
+    costs = [e["estimated_cost"] for e in entries if e.get("estimated_cost") is not None]
+    total_cost    = sum(costs) if costs else None
+    avg_cost      = total_cost / len(costs) if costs else None
 
     click.echo("\n[report]")
     click.echo(f"  total runs:             {total}")
@@ -415,6 +447,9 @@ def report():
     click.echo(f"  failed verifications:   {verify_failed}")
     click.echo(f"  retries triggered:      {retry_count}")
     click.echo(f"  average duration:       {avg_duration:.1f}s")
+    click.echo(f"  total tokens:           {total_tokens}")
+    click.echo(f"  total cost:             {'$' + f'{total_cost:.4f}' if total_cost is not None else '-'}")
+    click.echo(f"  average cost per run:   {'$' + f'{avg_cost:.4f}' if avg_cost is not None else '-'}")
 
     click.echo("\n  recent runs:")
     for entry in entries[-5:][::-1]:
