@@ -76,6 +76,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     except ValueError as exc:
         raise click.ClickException(str(exc))
 
+    click.echo("\nRunning task...")
     try:
         result = generator.generate(task)
     except AuthError:
@@ -90,20 +91,23 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     usage = result.usage
     final_files = result.files
 
-    click.echo(f"\nTask: {task}\n")
-    click.echo(f"Summary: {result.summary}\n")
-    if detail != "default" and result.files:
-        click.echo("Files changed")
+    click.echo("\n✔ Done")
+    click.echo(result.summary)
+    if result.files:
+        click.echo("\nFiles")
         shrinking = _should_shrink(result.files, no_shrink)
         files_to_show = result.files[:5] if shrinking else result.files
         for f in files_to_show:
-            click.echo(f"  - {f.path} [{f.change_type}] - {f.summary}")
+            if detail == "default":
+                click.echo(f"  {f.path} ({_CHANGE_LABEL.get(f.change_type, f.change_type)})")
+            else:
+                click.echo(f"  {f.path} ({_CHANGE_LABEL.get(f.change_type, f.change_type)})  — {f.summary}")
         if shrinking and len(result.files) > 5:
             click.echo(f"  ... and {len(result.files) - 5} more (use --no-shrink to see all)")
     if result.notes:
         click.echo("\nNotes")
         for note in result.notes:
-            click.echo(f"  - {note}")
+            click.echo(f"  {note}")
 
     if dry_run:
         if _should_shrink(result.files, no_shrink):
@@ -142,11 +146,11 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
 
     if write and verify:
         click.echo("")
-        code = _run_verification(workspace, show_command=(detail == "full"))
+        code = _run_verification(workspace, detail=detail)
         if code != 0:
             retry_triggered = True
             if detail != "default":
-                click.echo("  [retry] attempting fix")
+                click.echo("  Retrying with fixer model...")
             _, verify_output = _run_verification(workspace, capture=True)
             retry_prompt = _build_retry_prompt(task, result, verify_output)
             if detail == "full":
@@ -167,7 +171,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             retry_usage = retry_result.usage
             final_files = retry_result.files
             _write_files(retry_result.files, workspace)
-            code = _run_verification(workspace, label="[retry]", show_command=(detail == "full"))
+            code = _run_verification(workspace, label="[retry]", detail=detail)
         verification_passed = code == 0
         if code != 0:
             _print_summary(start, generator, retry_triggered, final_files,
@@ -248,28 +252,44 @@ def _print_summary(
     detail: str = "default",
 ) -> None:
     elapsed = time.time() - start
-    created  = sum(1 for f in files if f.change_type == "create")
-    updated  = sum(1 for f in files if f.change_type == "update")
-    deleted  = sum(1 for f in files if f.change_type == "delete")
-    click.echo("\n[summary]")
-    click.echo(f"  time:            {elapsed:.1f}s")
-    if detail != "default":
-        click.echo(f"  execution_model: {generator.model}")
-        if retry_triggered:
-            click.echo(f"  fixer_model:     {generator.fixer_model}")
-        click.echo(f"  retry:           {'yes' if retry_triggered else 'no'}")
-    click.echo(f"  files:           {created} created / {updated} updated / {deleted} deleted")
+    cost_str = (
+        f"${usage.estimated_cost:.4f}"
+        if usage is not None and usage.estimated_cost is not None
+        else "-"
+    )
+
+    if detail == "default":
+        click.echo(f"\nTime: {elapsed:.1f}s   Cost: {cost_str}")
+        return
+
+    # more and full
+    click.echo(f"\nModel: {generator.model}")
+    if retry_triggered:
+        click.echo(f"Fixer model: {generator.fixer_model}")
+        click.echo("Retried: yes")
     if usage is not None:
-        cost_str = f"${usage.estimated_cost:.4f}" if usage.estimated_cost is not None else "-"
-        if detail == "default":
-            click.echo(f"  tokens:          {usage.total_tokens} total")
-        else:
-            click.echo(f"  tokens:          {usage.prompt_tokens} prompt / {usage.completion_tokens} completion / {usage.total_tokens} total")
-        click.echo(f"  cost:            {cost_str}")
-    if detail == "full" and retry_triggered and retry_usage is not None:
-        retry_cost_str = f"${retry_usage.estimated_cost:.4f}" if retry_usage.estimated_cost is not None else "-"
-        click.echo(f"  retry tokens:    {retry_usage.prompt_tokens} prompt / {retry_usage.completion_tokens} completion / {retry_usage.total_tokens} total")
-        click.echo(f"  retry cost:      {retry_cost_str}")
+        click.echo(
+            f"Tokens: {usage.prompt_tokens} prompt / "
+            f"{usage.completion_tokens} completion / "
+            f"{usage.total_tokens} total"
+        )
+    if detail == "full":
+        created = sum(1 for f in files if f.change_type == "create")
+        updated = sum(1 for f in files if f.change_type == "update")
+        deleted = sum(1 for f in files if f.change_type == "delete")
+        click.echo(f"Files: {created} created / {updated} updated / {deleted} deleted")
+        if retry_triggered and retry_usage is not None:
+            retry_cost_str = (
+                f"${retry_usage.estimated_cost:.4f}"
+                if retry_usage.estimated_cost is not None else "-"
+            )
+            click.echo(
+                f"Retry tokens: {retry_usage.prompt_tokens} prompt / "
+                f"{retry_usage.completion_tokens} completion / "
+                f"{retry_usage.total_tokens} total"
+            )
+            click.echo(f"Retry cost: {retry_cost_str}")
+    click.echo(f"Time: {elapsed:.1f}s   Cost: {cost_str}")
 
 
 _VALID_MODES = {"auto", "ask", "smart"}
@@ -310,6 +330,8 @@ def _confirm_proceed(risks: list[str]) -> bool:
     return answer.strip().lower() == "y"
 
 
+_CHANGE_LABEL = {"create": "created", "update": "updated", "delete": "deleted"}
+
 _SHRINK_CHAR_THRESHOLD = 6_000
 _SHRINK_LINE_THRESHOLD = 1_500
 _SHRINK_ERROR_PATTERNS = ("error", "exception", "failed", "traceback")
@@ -326,13 +348,13 @@ def _should_shrink(files: list[ChangedFile], no_shrink: bool) -> bool:
 def _print_shrunk(files: list[ChangedFile], result_summary: str) -> None:
     total_chars = sum(len(f.content) for f in files)
     click.echo(
-        f"\n  [shrunk — {len(files)} file(s), ~{total_chars} chars;"
-        " use --no-shrink to see full output]"
+        f"\n  Output condensed — {len(files)} file(s), ~{total_chars} chars."
+        " Use --no-shrink to see full content."
     )
-    click.echo(f"\nSummary: {result_summary}\n")
-    click.echo("Key files (top 5):")
+    click.echo(f"\n{result_summary}\n")
+    click.echo("Files")
     for f in files[:5]:
-        click.echo(f"  - {f.path} [{f.change_type}] - {f.summary}")
+        click.echo(f"  {f.path} ({f.change_type})  — {f.summary}")
     if len(files) > 5:
         click.echo(f"  ... and {len(files) - 5} more")
 
@@ -406,7 +428,7 @@ def _detect_command(cwd: Path, config: dict | None = None) -> list[str] | None:
 
 
 def _run_verification(
-    cwd: Path, label: str = "[verify]", capture: bool = False, show_command: bool = True
+    cwd: Path, label: str = "[verify]", capture: bool = False, detail: str = "default"
 ) -> int | tuple[int, str]:
     """Run the detected test command.
 
@@ -415,11 +437,11 @@ def _run_verification(
     """
     cmd = _detect_command(cwd)
     if cmd is None:
-        if not capture:
+        if not capture and detail == "full":
             click.echo(f"  {label} no test command detected")
         return (0, "") if capture else 0
 
-    if not capture and show_command:
+    if not capture and detail == "full":
         click.echo(f"  {label} running: {' '.join(cmd)}")
     proc = subprocess.run(
         cmd,
@@ -431,10 +453,16 @@ def _run_verification(
     if capture:
         return proc.returncode, proc.stdout or ""
 
-    if proc.returncode == 0:
-        click.echo(f"  {label} passed")
+    if detail == "full":
+        if proc.returncode == 0:
+            click.echo(f"  {label} passed")
+        else:
+            click.echo(f"  {label} failed (exit code {proc.returncode})")
     else:
-        click.echo(f"  {label} failed (exit code {proc.returncode})")
+        if proc.returncode == 0:
+            click.echo("  ✔ Verified")
+        else:
+            click.echo(f"  ✗ Verification failed (exit {proc.returncode})")
     return proc.returncode
 
 
