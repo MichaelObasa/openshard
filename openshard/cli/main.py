@@ -52,8 +52,11 @@ def plan(task: str):
 @click.option("--write", is_flag=True, default=False, help="Write generated files to disk.")
 @click.option("--verify", is_flag=True, default=False, help="Run verification after writing (requires --write).")
 @click.option("--dry-run", is_flag=True, default=False, help="Preview files without writing.")
-def run(task: str, write: bool, verify: bool, dry_run: bool):
+@click.option("--more", is_flag=True, default=False, help="Show file list, retry info, model names, and token breakdown.")
+@click.option("--full", is_flag=True, default=False, help="Show all details: workspace, verification command, retry prompt, raw output.")
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool):
     """Execute TASK and return a structured result."""
+    detail = "full" if full else ("more" if more else "default")
     start = time.time()
     retry_triggered = False
     workspace: Path | None = None
@@ -82,7 +85,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
 
     click.echo(f"\nTask: {task}\n")
     click.echo(f"Summary: {result.summary}\n")
-    if result.files:
+    if detail != "default" and result.files:
         click.echo("Files changed")
         for f in result.files:
             click.echo(f"  - {f.path} [{f.change_type}] - {f.summary}")
@@ -93,7 +96,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
 
     if dry_run:
         _print_dry_run(result.files)
-        _print_summary(start, generator, retry_triggered, final_files, usage=usage)
+        _print_summary(start, generator, retry_triggered, final_files, usage=usage, detail=detail)
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
                      verification_attempted=False, verification_passed=None,
@@ -107,17 +110,24 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
 
     if write:
         workspace = Path(tempfile.mkdtemp())
-        click.echo(f"\n  [workspace] {workspace}")
+        if detail == "full":
+            click.echo(f"\n  [workspace] {workspace}")
         _write_files(result.files, workspace)
 
     if write and verify:
         click.echo("")
-        code = _run_verification(workspace)
+        code = _run_verification(workspace, show_command=(detail == "full"))
         if code != 0:
             retry_triggered = True
-            click.echo("  [retry] attempting fix")
+            if detail != "default":
+                click.echo("  [retry] attempting fix")
             _, verify_output = _run_verification(workspace, capture=True)
             retry_prompt = _build_retry_prompt(task, result, verify_output)
+            if detail == "full":
+                snippet = retry_prompt[:300] + ("..." if len(retry_prompt) > 300 else "")
+                click.echo(f"\n  [retry prompt] {snippet}")
+                if verify_output.strip():
+                    click.echo(f"\n  [verify output] {verify_output.strip()[:300]}")
             try:
                 retry_result = generator.generate(retry_prompt, model=generator.fixer_model)
             except AuthError:
@@ -131,11 +141,11 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
             retry_usage = retry_result.usage
             final_files = retry_result.files
             _write_files(retry_result.files, workspace)
-            code = _run_verification(workspace, label="[retry]")
+            code = _run_verification(workspace, label="[retry]", show_command=(detail == "full"))
         verification_passed = code == 0
         if code != 0:
             _print_summary(start, generator, retry_triggered, final_files,
-                           usage=usage, retry_usage=retry_usage)
+                           usage=usage, retry_usage=retry_usage, detail=detail)
             try:
                 _log_run(start, task, generator, retry_triggered, final_files,
                          verification_attempted=True, verification_passed=False,
@@ -145,7 +155,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool):
             sys.exit(code)
 
     _print_summary(start, generator, retry_triggered, final_files,
-                   usage=usage, retry_usage=retry_usage)
+                   usage=usage, retry_usage=retry_usage, detail=detail)
     try:
         _log_run(start, task, generator, retry_triggered, final_files,
                  verification_attempted=(write and verify),
@@ -209,6 +219,7 @@ def _print_summary(
     files: list[ChangedFile],
     usage=None,
     retry_usage=None,
+    detail: str = "default",
 ) -> None:
     elapsed = time.time() - start
     created  = sum(1 for f in files if f.change_type == "create")
@@ -216,16 +227,20 @@ def _print_summary(
     deleted  = sum(1 for f in files if f.change_type == "delete")
     click.echo("\n[summary]")
     click.echo(f"  time:            {elapsed:.1f}s")
-    click.echo(f"  execution_model: {generator.model}")
-    if retry_triggered:
-        click.echo(f"  fixer_model:     {generator.fixer_model}")
-    click.echo(f"  retry:           {'yes' if retry_triggered else 'no'}")
+    if detail != "default":
+        click.echo(f"  execution_model: {generator.model}")
+        if retry_triggered:
+            click.echo(f"  fixer_model:     {generator.fixer_model}")
+        click.echo(f"  retry:           {'yes' if retry_triggered else 'no'}")
     click.echo(f"  files:           {created} created / {updated} updated / {deleted} deleted")
     if usage is not None:
         cost_str = f"${usage.estimated_cost:.4f}" if usage.estimated_cost is not None else "-"
-        click.echo(f"  tokens:          {usage.prompt_tokens} prompt / {usage.completion_tokens} completion / {usage.total_tokens} total")
+        if detail == "default":
+            click.echo(f"  tokens:          {usage.total_tokens} total")
+        else:
+            click.echo(f"  tokens:          {usage.prompt_tokens} prompt / {usage.completion_tokens} completion / {usage.total_tokens} total")
         click.echo(f"  cost:            {cost_str}")
-    if retry_triggered and retry_usage is not None:
+    if detail == "full" and retry_triggered and retry_usage is not None:
         retry_cost_str = f"${retry_usage.estimated_cost:.4f}" if retry_usage.estimated_cost is not None else "-"
         click.echo(f"  retry tokens:    {retry_usage.prompt_tokens} prompt / {retry_usage.completion_tokens} completion / {retry_usage.total_tokens} total")
         click.echo(f"  retry cost:      {retry_cost_str}")
@@ -286,7 +301,7 @@ def _detect_command(cwd: Path, config: dict | None = None) -> list[str] | None:
 
 
 def _run_verification(
-    cwd: Path, label: str = "[verify]", capture: bool = False
+    cwd: Path, label: str = "[verify]", capture: bool = False, show_command: bool = True
 ) -> int | tuple[int, str]:
     """Run the detected test command.
 
@@ -299,7 +314,7 @@ def _run_verification(
             click.echo(f"  {label} no test command detected")
         return (0, "") if capture else 0
 
-    if not capture:
+    if not capture and show_command:
         click.echo(f"  {label} running: {' '.join(cmd)}")
     proc = subprocess.run(
         cmd,
