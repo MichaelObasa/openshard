@@ -329,6 +329,58 @@ def _build_retry_prompt(task: str, result: ExecutionResult, verify_output: str) 
 
 
 @cli.command()
+@click.argument("task")
+def explain(task: str):
+    """Explain how OpenShard would approach TASK and which model strengths apply."""
+    try:
+        generator = PlanGenerator()
+    except ValueError as exc:
+        raise click.ClickException(str(exc))
+
+    try:
+        result = generator.generate(task)
+    except AuthError:
+        raise click.ClickException(
+            "Authentication failed. Check that OPENROUTER_API_KEY is valid."
+        )
+    except RateLimitError:
+        raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
+    except OpenRouterError as exc:
+        raise click.ClickException(f"API error: {exc}")
+
+    strong = [s for s in result.stages if s.tier == "strong"]
+    medium = [s for s in result.stages if s.tier == "medium"]
+    cheap  = [s for s in result.stages if s.tier == "cheap"]
+
+    click.echo(f"\nTask: {task}\n")
+    click.echo(f"Summary: {result.summary}\n")
+
+    if strong:
+        click.echo("Hard parts (strong model):")
+        for s in strong:
+            click.echo(f"  - {s.name}: {s.reasoning}")
+        click.echo("")
+
+    if medium:
+        click.echo("Standard parts:")
+        for s in medium:
+            click.echo(f"  - {s.name}: {s.reasoning}")
+        click.echo("")
+
+    if cheap:
+        click.echo("Low-risk parts (cheap model):")
+        for s in cheap:
+            click.echo(f"  - {s.name}: {s.reasoning}")
+        click.echo("")
+
+    click.echo("Retry / fix:")
+    if strong:
+        click.echo("  Complex task — fixer would benefit from a stronger model.")
+    else:
+        click.echo("  Straightforward task — default fixer model should be sufficient.")
+
+
+@cli.command()
 def report():
     """Display a summary report of recent executions."""
     log_path = Path.cwd() / _LOG_PATH
