@@ -1,8 +1,10 @@
 import datetime
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -10,6 +12,7 @@ import click
 
 from openshard.config.settings import load_config
 from openshard.execution.generator import ChangedFile, ExecutionGenerator, ExecutionResult
+from openshard.execution.opencode_executor import OpenCodeExecutor
 from openshard.planning.generator import PlanGenerator
 from openshard.providers.openrouter import AuthError, OpenRouterError, RateLimitError
 
@@ -61,7 +64,13 @@ def plan(task: str):
     default=None,
     help="Execution mode: auto (always proceed), ask (always prompt), smart (prompt on risky tasks).",
 )
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, mode: str | None):
+@click.option(
+    "--executor",
+    type=click.Choice(["direct", "opencode"], case_sensitive=False),
+    default=None,
+    help="Execution backend: direct (default, calls OpenRouter API) or opencode (calls opencode CLI).",
+)
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, mode: str | None, executor: str | None):
     """Execute TASK and return a structured result."""
     detail = "full" if full else ("more" if more else "default")
     start = time.time()
@@ -72,13 +81,46 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     retry_usage = None
 
     try:
-        generator = ExecutionGenerator()
-    except ValueError as exc:
+        _cfg = load_config()
+        effective_executor = (executor or _cfg.get("executor", "direct")).lower()
+        if effective_executor == "opencode":
+            generator: ExecutionGenerator | OpenCodeExecutor = OpenCodeExecutor()
+        else:
+            generator = ExecutionGenerator()
+    except (ValueError, RuntimeError) as exc:
         raise click.ClickException(str(exc))
 
-    click.echo("\nRunning task...")
+    opencode_mode = (effective_executor == "opencode")
+
+    # OpenCode always writes to a workspace — create, populate, and safety-check
+    # before the model runs so it sees the real codebase from the first call.
+    if opencode_mode:
+        effective_mode = _resolve_mode(_cfg, mode)
+        if effective_mode == "ask":
+            risks = _detect_risks(task)
+            if not _confirm_proceed(risks if risks else ["write requested"]):
+                click.echo("  Aborted.")
+                return
+        elif effective_mode == "smart":
+            risks = _detect_risks(task)
+            if risks and not _confirm_proceed(risks):
+                click.echo("  Aborted.")
+                return
+        workspace = Path(tempfile.mkdtemp())
+        _copy_cwd_to_workspace(workspace)
+        if detail == "full":
+            click.echo(f"\n  [workspace] {workspace}")
+
+    spinner = _Spinner()
+    click.echo("")
+    spinner.start("Executing...")
     try:
-        result = generator.generate(task)
+        if opencode_mode:
+            result = generator.generate(task, workspace=workspace)
+        else:
+            result = generator.generate(task)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc))
     except AuthError:
         raise click.ClickException(
             "Authentication failed. Check that OPENROUTER_API_KEY is valid."
@@ -87,6 +129,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
     except OpenRouterError as exc:
         raise click.ClickException(f"API error: {exc}")
+    finally:
+        spinner.stop()
 
     usage = result.usage
     final_files = result.files
@@ -127,30 +171,30 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         raise click.ClickException("--verify requires --write.")
 
     if write:
-        effective_mode = _resolve_mode(load_config(), mode)
-        if effective_mode == "ask":
-            risks = _detect_risks(task)
-            if not _confirm_proceed(risks if risks else ["write requested"]):
-                click.echo("  Aborted.")
-                return
-        elif effective_mode == "smart":
-            risks = _detect_risks(task)
-            if risks and not _confirm_proceed(risks):
-                click.echo("  Aborted.")
-                return
-
-        workspace = Path(tempfile.mkdtemp())
-        if detail == "full":
-            click.echo(f"\n  [workspace] {workspace}")
-        _write_files(result.files, workspace)
+        if not opencode_mode:
+            # Direct executor: safety check, create workspace, write files.
+            effective_mode = _resolve_mode(load_config(), mode)
+            if effective_mode == "ask":
+                risks = _detect_risks(task)
+                if not _confirm_proceed(risks if risks else ["write requested"]):
+                    click.echo("  Aborted.")
+                    return
+            elif effective_mode == "smart":
+                risks = _detect_risks(task)
+                if risks and not _confirm_proceed(risks):
+                    click.echo("  Aborted.")
+                    return
+            workspace = Path(tempfile.mkdtemp())
+            if detail == "full":
+                click.echo(f"\n  [workspace] {workspace}")
+            _write_files(result.files, workspace)
+        # OpenCode: workspace already created and populated before generate().
 
     if write and verify:
         click.echo("")
         code = _run_verification(workspace, detail=detail)
         if code != 0:
             retry_triggered = True
-            if detail != "default":
-                click.echo("  Retrying with fixer model...")
             _, verify_output = _run_verification(workspace, capture=True)
             retry_prompt = _build_retry_prompt(task, result, verify_output)
             if detail == "full":
@@ -158,8 +202,18 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 click.echo(f"\n  [retry prompt] {snippet}")
                 if verify_output.strip():
                     click.echo(f"\n  [verify output] {verify_output.strip()[:300]}")
+            spinner.start("Retrying...")
             try:
-                retry_result = generator.generate(retry_prompt, model=generator.fixer_model)
+                if opencode_mode:
+                    retry_result = generator.generate(
+                        retry_prompt, model=generator.fixer_model, workspace=workspace
+                    )
+                else:
+                    retry_result = generator.generate(
+                        retry_prompt, model=generator.fixer_model
+                    )
+            except RuntimeError as exc:
+                raise click.ClickException(str(exc))
             except AuthError:
                 raise click.ClickException(
                     "Authentication failed. Check that OPENROUTER_API_KEY is valid."
@@ -168,9 +222,12 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
             except OpenRouterError as exc:
                 raise click.ClickException(f"API error: {exc}")
+            finally:
+                spinner.stop()
             retry_usage = retry_result.usage
             final_files = retry_result.files
-            _write_files(retry_result.files, workspace)
+            if not opencode_mode:
+                _write_files(retry_result.files, workspace)
             code = _run_verification(workspace, label="[retry]", detail=detail)
         verification_passed = code == 0
         if code != 0:
@@ -387,6 +444,58 @@ def _print_dry_run(files: list[ChangedFile]) -> None:
         click.echo("")
 
 
+class _Spinner:
+    """Animated terminal spinner with phase label and elapsed time."""
+
+    _FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+    def __init__(self) -> None:
+        self.phase: str = ""
+        self._t0: float = 0.0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self, phase: str) -> None:
+        self.phase = phase
+        self._t0 = time.time()
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._thread is None:
+            return
+        self._stop.set()
+        self._thread.join()
+        self._thread = None
+        sys.stdout.write("\r" + " " * 72 + "\r")
+        sys.stdout.flush()
+
+    def _run(self) -> None:
+        i = 0
+        while not self._stop.wait(0.1):
+            elapsed = time.time() - self._t0
+            frame = self._FRAMES[i % len(self._FRAMES)]
+            line = f"  {frame} {self.phase}  {elapsed:.1f}s"
+            sys.stdout.write(f"\r{line:<70}")
+            sys.stdout.flush()
+            i += 1
+
+
+def _copy_cwd_to_workspace(workspace: Path) -> None:
+    """Copy the current working directory into *workspace*, excluding noise."""
+    shutil.copytree(
+        Path.cwd(),
+        workspace,
+        dirs_exist_ok=True,
+        ignore=shutil.ignore_patterns(
+            ".git", "node_modules", "__pycache__", "*.pyc",
+            ".venv", "venv", "env", "*.egg-info", ".tox",
+            ".pytest_cache", ".mypy_cache", "dist", "build",
+        ),
+    )
+
+
 def _write_files(files: list[ChangedFile], root: Path) -> None:
     cwd = root.resolve()
     for f in files:
@@ -441,8 +550,11 @@ def _run_verification(
             click.echo(f"  {label} no test command detected")
         return (0, "") if capture else 0
 
-    if not capture and detail == "full":
-        click.echo(f"  {label} running: {' '.join(cmd)}")
+    if not capture:
+        if detail == "full":
+            click.echo(f"  {label} running: {' '.join(cmd)}")
+        else:
+            click.echo("  Verifying...")
     proc = subprocess.run(
         cmd,
         cwd=cwd,

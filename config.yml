@@ -21,6 +21,9 @@ planning_model: anthropic/claude-sonnet-4.6
 execution_model: anthropic/claude-sonnet-4.6
 fixer_model: anthropic/claude-sonnet-4.6
 
+# Execution backend: direct (default, calls OpenRouter API) or opencode (calls opencode CLI)
+executor: direct
+
 # Execution mode: auto | ask | smart (default)
 # auto  — always proceed without asking
 # ask   — always prompt before writing
