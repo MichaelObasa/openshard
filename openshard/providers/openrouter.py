@@ -39,6 +39,30 @@ class ModelInfo:
     pricing: dict  # {"prompt": str, "completion": str, ...} — varies by model
 
 
+# ---------------------------------------------------------------------------
+# Pricing snapshot
+# ---------------------------------------------------------------------------
+
+# Dollars per million tokens — (prompt, completion).  Updated 2026-04.
+MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "anthropic/claude-haiku-4.5":          (0.80,   4.00),
+    "anthropic/claude-haiku-4.5-20251001": (0.80,   4.00),
+    "anthropic/claude-sonnet-4.6":         (3.00,  15.00),
+    "anthropic/claude-opus-4.6":           (15.00, 75.00),
+}
+
+
+def compute_cost(
+    model: str, prompt_tokens: int, completion_tokens: int
+) -> float | None:
+    """Return estimated cost in USD from token counts, or None if model unknown."""
+    pricing = MODEL_PRICING.get(model)
+    if pricing is None:
+        return None
+    p_per_m, c_per_m = pricing
+    return (prompt_tokens * p_per_m + completion_tokens * c_per_m) / 1_000_000
+
+
 @dataclass
 class UsageStats:
     prompt_tokens: int
@@ -113,13 +137,20 @@ class OpenRouterClient:
         content = choices[0].get("message", {}).get("content", "")
         usage_raw = data.get("usage", {})
         raw_cost = usage_raw.get("cost")
+        resolved_model = data.get("model", model)
+        estimated_cost = float(raw_cost) if raw_cost is not None else None
         usage = UsageStats(
             prompt_tokens=usage_raw.get("prompt_tokens", 0),
             completion_tokens=usage_raw.get("completion_tokens", 0),
             total_tokens=usage_raw.get("total_tokens", 0),
-            estimated_cost=float(raw_cost) if raw_cost is not None else None,
+            estimated_cost=estimated_cost,
         )
-        return ChatResponse(content=content, model=data.get("model", model), usage=usage)
+        # Fallback: compute cost from token counts when provider omits it
+        if usage.estimated_cost is None and usage.total_tokens > 0:
+            usage.estimated_cost = compute_cost(
+                resolved_model, usage.prompt_tokens, usage.completion_tokens
+            )
+        return ChatResponse(content=content, model=resolved_model, usage=usage)
 
     def close(self) -> None:
         self._client.close()

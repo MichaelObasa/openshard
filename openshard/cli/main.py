@@ -14,7 +14,10 @@ from openshard.config.settings import load_config
 from openshard.execution.generator import ChangedFile, ExecutionGenerator, ExecutionResult
 from openshard.execution.opencode_executor import OpenCodeExecutor
 from openshard.planning.generator import PlanGenerator
-from openshard.providers.openrouter import AuthError, OpenRouterError, RateLimitError
+from openshard.providers.openrouter import (
+    AuthError, OpenRouterError, RateLimitError,
+    MODEL_PRICING, compute_cost,
+)
 
 
 @click.group()
@@ -82,7 +85,19 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
 
     try:
         _cfg = load_config()
-        effective_executor = (executor or _cfg.get("executor", "direct")).lower()
+        _cfg_executor = _cfg.get("executor", "direct").lower()
+        _policy_executor, _policy_reason = _suggest_executor(task)
+        if executor:
+            # CLI flag is absolute; policy note is suppressed
+            effective_executor = executor.lower()
+            _policy_reason = ""
+        elif _cfg_executor != "direct":
+            # Config explicitly overrides default
+            effective_executor = _cfg_executor
+            _policy_reason = ""
+        else:
+            # Auto-route by policy; direct remains the default
+            effective_executor = _policy_executor
         if effective_executor == "opencode":
             generator: ExecutionGenerator | OpenCodeExecutor = OpenCodeExecutor()
         else:
@@ -113,6 +128,12 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
 
     spinner = _Spinner()
     click.echo("")
+    if detail != "default" and _policy_reason:
+        click.echo(f"  [routing] {effective_executor} - {_policy_reason}")
+    if not opencode_mode:
+        hint = _pre_run_cost_hint(generator.model, task)
+        if hint:
+            click.echo(f"  Cost estimate: {hint}")
     spinner.start("Executing...")
     try:
         if opencode_mode:
@@ -145,7 +166,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             if detail == "default":
                 click.echo(f"  {f.path} ({_CHANGE_LABEL.get(f.change_type, f.change_type)})")
             else:
-                click.echo(f"  {f.path} ({_CHANGE_LABEL.get(f.change_type, f.change_type)})  — {f.summary}")
+                click.echo(f"  {f.path} ({_CHANGE_LABEL.get(f.change_type, f.change_type)}) - {f.summary}")
         if shrinking and len(result.files) > 5:
             click.echo(f"  ... and {len(result.files) - 5} more (use --no-shrink to see all)")
     if result.notes:
@@ -349,6 +370,59 @@ def _print_summary(
     click.echo(f"Time: {elapsed:.1f}s   Cost: {cost_str}")
 
 
+# ---------------------------------------------------------------------------
+# Execution policy
+# ---------------------------------------------------------------------------
+
+_OPENCODE_SIGNALS: list[tuple[list[str], str]] = [
+    (["all files", "every file", "multiple files", "many files"], "multi-file scope"),
+    (["throughout", "across the codebase", "across all"],         "multi-file scope"),
+    (["refactor"],                                                 "broad refactor"),
+    (["migrat"],                                                   "migration"),
+    (["architectur", "restructur"],                               "architecture change"),
+    (["codebase"],                                                 "whole-codebase task"),
+]
+
+
+def _suggest_executor(task: str) -> tuple[str, str]:
+    """Return ``(executor, reason)`` recommendation for *task*.
+
+    - Defaults to ``"direct"`` for short, focused tasks.
+    - Returns ``"opencode"`` for large, multi-file, or ambiguous tasks.
+    """
+    lower = task.lower()
+    if len(task.split()) > 60:
+        return "opencode", "large or complex task"
+    for keywords, label in _OPENCODE_SIGNALS:
+        if any(kw in lower for kw in keywords):
+            return "opencode", label
+    return "direct", "focused task"
+
+
+# ---------------------------------------------------------------------------
+# Pre-run cost hint
+# ---------------------------------------------------------------------------
+
+_SYSTEM_OVERHEAD_TOKENS = 200   # rough execution system-prompt size
+
+
+def _pre_run_cost_hint(model: str, task: str) -> str | None:
+    """Return a rough pre-run cost range string, or None if pricing is unknown.
+
+    Uses the prompt token estimate + a 0.5×–3× completion range heuristic.
+    Clearly labelled as an estimate — not shown as exact.
+    """
+    if model not in MODEL_PRICING:
+        return None
+    prompt_tokens = _SYSTEM_OVERHEAD_TOKENS + len(task) // 4
+    cost_low  = compute_cost(model, prompt_tokens, max(100, prompt_tokens // 2))
+    cost_high = compute_cost(model, prompt_tokens, prompt_tokens * 3)
+    if cost_low is None or cost_high is None:
+        return None
+    tier = "low" if cost_high < 0.005 else ("medium" if cost_high < 0.02 else "high")
+    return f"~${cost_low:.4f}–${cost_high:.4f}  ({tier})"
+
+
 _VALID_MODES = {"auto", "ask", "smart"}
 
 _HIGH_RISK_KEYWORDS: dict[str, list[str]] = {
@@ -405,13 +479,13 @@ def _should_shrink(files: list[ChangedFile], no_shrink: bool) -> bool:
 def _print_shrunk(files: list[ChangedFile], result_summary: str) -> None:
     total_chars = sum(len(f.content) for f in files)
     click.echo(
-        f"\n  Output condensed — {len(files)} file(s), ~{total_chars} chars."
+        f"\n  Output condensed: {len(files)} file(s), ~{total_chars} chars."
         " Use --no-shrink to see full content."
     )
     click.echo(f"\n{result_summary}\n")
     click.echo("Files")
     for f in files[:5]:
-        click.echo(f"  {f.path} ({f.change_type})  — {f.summary}")
+        click.echo(f"  {f.path} ({f.change_type}) - {f.summary}")
     if len(files) > 5:
         click.echo(f"  ... and {len(files) - 5} more")
 
@@ -438,7 +512,7 @@ def _print_dry_run(files: list[ChangedFile]) -> None:
     for f in files:
         click.echo(f"--- {f.path} [{f.change_type}] ---")
         if f.change_type == "delete" or not f.content:
-            click.echo("(no content — file will be deleted)")
+            click.echo("(no content, file will be deleted)")
         else:
             click.echo(f.content)
         click.echo("")
@@ -489,9 +563,19 @@ def _copy_cwd_to_workspace(workspace: Path) -> None:
         workspace,
         dirs_exist_ok=True,
         ignore=shutil.ignore_patterns(
-            ".git", "node_modules", "__pycache__", "*.pyc",
-            ".venv", "venv", "env", "*.egg-info", ".tox",
-            ".pytest_cache", ".mypy_cache", "dist", "build",
+            # version control
+            ".git",
+            # dependency trees
+            "node_modules", ".venv", "venv", "env", ".tox",
+            # build / cache artefacts
+            "__pycache__", "*.pyc", "*.egg-info",
+            ".pytest_cache", ".mypy_cache",
+            "dist", "build", "coverage", ".next",
+            # openshard-internal files OpenCode doesn't need
+            ".openshard", ".claude",
+            # binary assets — waste context tokens for no gain
+            "*.png", "*.jpg", "*.jpeg", "*.gif", "*.svg", "*.ico",
+            "*.pdf", "*.zip", "*.tar", "*.gz",
         ),
     )
 
@@ -561,6 +645,7 @@ def _run_verification(
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.STDOUT if capture else None,
         text=capture,
+        **({"encoding": "utf-8", "errors": "replace"} if capture else {}),
     )
     if capture:
         return proc.returncode, proc.stdout or ""
@@ -663,9 +748,9 @@ def explain(task: str):
 
     click.echo("Retry / fix:")
     if strong:
-        click.echo("  Complex task — fixer would benefit from a stronger model.")
+        click.echo("  Complex task - fixer would benefit from a stronger model.")
     else:
-        click.echo("  Straightforward task — default fixer model should be sufficient.")
+        click.echo("  Straightforward task - default fixer model should be sufficient.")
 
 
 @cli.command()
