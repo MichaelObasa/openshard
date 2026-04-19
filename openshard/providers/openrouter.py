@@ -44,11 +44,24 @@ class ModelInfo:
 # ---------------------------------------------------------------------------
 
 # Dollars per million tokens — (prompt, completion).  Updated 2026-04.
+# Prices marked ~est are approximate; verify current rates at openrouter.ai/models.
 MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "anthropic/claude-haiku-4.5":          (0.80,   4.00),
-    "anthropic/claude-haiku-4.5-20251001": (0.80,   4.00),
-    "anthropic/claude-sonnet-4.6":         (3.00,  15.00),
-    "anthropic/claude-opus-4.6":           (15.00, 75.00),
+    # Anthropic
+    "anthropic/claude-haiku-4.5":           (0.80,   4.00),
+    "anthropic/claude-haiku-4.5-20251001":  (0.80,   4.00),
+    "anthropic/claude-sonnet-4.6":          (3.00,  15.00),
+    "anthropic/claude-opus-4.6":            (15.00, 75.00),
+    "anthropic/claude-opus-4.7":            (15.00, 75.00),   # ~est
+    # Main worker
+    "z-ai/glm-5.1":                         (0.10,   0.10),   # ~est
+    # Cheap coding
+    "deepseek/deepseek-v3.2":              (0.14,   0.28),   # ~est
+    # Visual / multimodal
+    "moonshotai/kimi-k2.5":                 (0.45,   2.20),
+    # Long-horizon
+    "minimax/m2.7":                         (0.20,   1.10),   # ~est
+    # Tiny helpers
+    "openai/gpt-5.4-nano":                  (0.10,   0.40),   # ~est
 }
 
 

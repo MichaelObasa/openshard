@@ -18,6 +18,10 @@ from openshard.providers.openrouter import (
     AuthError, OpenRouterError, RateLimitError,
     MODEL_PRICING, compute_cost,
 )
+from openshard.routing.engine import ESCALATION_CHAIN, RoutingDecision, route
+from openshard.execution.stages import (
+    Stage, StageRun, split_task, route_stage, should_use_stages, run_planning_stage,
+)
 
 
 @click.group()
@@ -62,18 +66,12 @@ def plan(task: str):
 @click.option("--full", is_flag=True, default=False, help="Show all details: workspace, verification command, retry prompt, raw output.")
 @click.option("--no-shrink", is_flag=True, default=False, help="Disable output shrinking for long results.")
 @click.option(
-    "--mode",
-    type=click.Choice(["auto", "ask", "smart"], case_sensitive=False),
-    default=None,
-    help="Execution mode: auto (always proceed), ask (always prompt), smart (prompt on risky tasks).",
-)
-@click.option(
     "--executor",
     type=click.Choice(["direct", "opencode"], case_sensitive=False),
     default=None,
     help="Execution backend: direct (default, calls OpenRouter API) or opencode (calls opencode CLI).",
 )
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, mode: str | None, executor: str | None):
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, executor: str | None):
     """Execute TASK and return a structured result."""
     detail = "full" if full else ("more" if more else "default")
     start = time.time()
@@ -106,21 +104,15 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         raise click.ClickException(str(exc))
 
     opencode_mode = (effective_executor == "opencode")
+    routing_decision: RoutingDecision | None = route(task) if not opencode_mode else None
+    _use_stages = (
+        not opencode_mode
+        and routing_decision is not None
+        and should_use_stages(routing_decision.category)
+    )
+    stage_runs: list[StageRun] = []
 
-    # OpenCode always writes to a workspace — create, populate, and safety-check
-    # before the model runs so it sees the real codebase from the first call.
     if opencode_mode:
-        effective_mode = _resolve_mode(_cfg, mode)
-        if effective_mode == "ask":
-            risks = _detect_risks(task)
-            if not _confirm_proceed(risks if risks else ["write requested"]):
-                click.echo("  Aborted.")
-                return
-        elif effective_mode == "smart":
-            risks = _detect_risks(task)
-            if risks and not _confirm_proceed(risks):
-                click.echo("  Aborted.")
-                return
         workspace = Path(tempfile.mkdtemp())
         _copy_cwd_to_workspace(workspace)
         if detail == "full":
@@ -129,61 +121,150 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     spinner = _Spinner()
     click.echo("")
     if detail != "default" and _policy_reason:
-        click.echo(f"  [routing] {effective_executor} - {_policy_reason}")
-    if not opencode_mode:
-        hint = _pre_run_cost_hint(generator.model, task)
+        click.echo(f"  [executor] {effective_executor} - {_policy_reason}")
+    if routing_decision is not None:
+        if detail != "default":
+            click.echo(f"  [routing] {routing_decision.model} - {routing_decision.rationale}")
+        hint = _pre_run_cost_hint(routing_decision.model, task)
         if hint:
             click.echo(f"  Cost estimate: {hint}")
-    spinner.start("Executing...")
-    try:
-        if opencode_mode:
-            result = generator.generate(task, workspace=workspace)
-        else:
-            result = generator.generate(task)
-    except RuntimeError as exc:
-        raise click.ClickException(str(exc))
-    except AuthError:
-        raise click.ClickException(
-            "Authentication failed. Check that OPENROUTER_API_KEY is valid."
-        )
-    except RateLimitError:
-        raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
-    except OpenRouterError as exc:
-        raise click.ClickException(f"API error: {exc}")
-    finally:
-        spinner.stop()
+    _routed_model = routing_decision.model if routing_decision else None
+
+    # --- Stage-based execution (direct mode, security/complex tasks) ----------
+    _impl_task = task          # may be augmented with a plan
+    result = None
+
+    if _use_stages:
+        stages = split_task(task)
+        for _stage in stages:
+            _stage_t0 = time.time()
+
+            if _stage.stage_type == "planning":
+                spinner.start("Planning...")
+                try:
+                    _plan_text, _plan_usage = run_planning_stage(generator.client, task)
+                    _impl_task = (
+                        f"Task: {task}\n\nImplementation plan:\n{_plan_text}"
+                        "\n\nExecute the task following the plan above."
+                    )
+                    stage_runs.append(StageRun(
+                        stage=_stage,
+                        model=route_stage(_stage),
+                        duration=time.time() - _stage_t0,
+                        cost=_plan_usage.estimated_cost if _plan_usage else None,
+                        summary="Implementation plan produced",
+                    ))
+                except (AuthError, RateLimitError, OpenRouterError):
+                    _impl_task = task   # planning failed — fall back to plain task
+                    if detail == "full":
+                        click.echo("  [stages] planning call failed, continuing without plan")
+                finally:
+                    spinner.stop()
+
+            elif _stage.stage_type == "implementation":
+                _stage_model = _routed_model or route_stage(_stage)
+                spinner.start("Executing...")
+                try:
+                    result = generator.generate(_impl_task, model=_stage_model)
+                except RuntimeError as exc:
+                    raise click.ClickException(str(exc))
+                except AuthError:
+                    raise click.ClickException(
+                        "Authentication failed. Check that OPENROUTER_API_KEY is valid."
+                    )
+                except RateLimitError:
+                    raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
+                except OpenRouterError as exc:
+                    raise click.ClickException(f"API error: {exc}")
+                finally:
+                    spinner.stop()
+                stage_runs.append(StageRun(
+                    stage=_stage,
+                    model=_stage_model,
+                    duration=time.time() - _stage_t0,
+                    cost=result.usage.estimated_cost if result.usage else None,
+                    summary=result.summary,
+                ))
+
+    # --- Single-stage execution (simple tasks, opencode, stages not triggered) -
+    if result is None:
+        spinner.start("Executing...")
+        try:
+            if opencode_mode:
+                result = generator.generate(task, workspace=workspace)
+            else:
+                result = generator.generate(task, model=_routed_model)
+        except RuntimeError as exc:
+            raise click.ClickException(str(exc))
+        except AuthError:
+            raise click.ClickException(
+                "Authentication failed. Check that OPENROUTER_API_KEY is valid."
+            )
+        except RateLimitError:
+            raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
+        except OpenRouterError as exc:
+            raise click.ClickException(f"API error: {exc}")
+        finally:
+            spinner.stop()
 
     usage = result.usage
+    # When stages ran, fold the planning cost into the reported total
+    if stage_runs and usage is not None:
+        total_stage_cost = sum(sr.cost for sr in stage_runs if sr.cost is not None)
+        if usage.estimated_cost is not None:
+            usage.estimated_cost = total_stage_cost
+        else:
+            usage.estimated_cost = total_stage_cost or None
     final_files = result.files
 
-    click.echo("\n✔ Done")
+    click.echo("\nDone")
     click.echo(result.summary)
+
+    # Stages — shown before file count so the reader sees what ran (--more only)
+    if detail != "default" and stage_runs:
+        click.echo("\nStages")
+        for sr in stage_runs:
+            _sr_cost = f"${sr.cost:.4f}" if sr.cost is not None else "-"
+            click.echo(f"  {sr.stage.stage_type.capitalize()} ({sr.model}): {sr.duration:.1f}s, {_sr_cost}")
+
     if result.files:
-        click.echo("\nFiles")
-        shrinking = _should_shrink(result.files, no_shrink)
-        files_to_show = result.files[:5] if shrinking else result.files
-        for f in files_to_show:
-            if detail == "default":
-                click.echo(f"  {f.path} ({_CHANGE_LABEL.get(f.change_type, f.change_type)})")
-            else:
-                click.echo(f"  {f.path} ({_CHANGE_LABEL.get(f.change_type, f.change_type)}) - {f.summary}")
-        if shrinking and len(result.files) > 5:
-            click.echo(f"  ... and {len(result.files) - 5} more (use --no-shrink to see all)")
-    if result.notes:
-        click.echo("\nNotes")
-        for note in result.notes:
-            click.echo(f"  {note}")
+        _fc = sum(1 for f in result.files if f.change_type == "create")
+        _fu = sum(1 for f in result.files if f.change_type == "update")
+        _fd = sum(1 for f in result.files if f.change_type == "delete")
+        _counts = ", ".join(p for p in [
+            f"{_fc} created" if _fc else "",
+            f"{_fu} updated" if _fu else "",
+            f"{_fd} deleted" if _fd else "",
+        ] if p)
+        click.echo(f"\nFiles: {_counts}")
+        if detail != "default":
+            for f in result.files:
+                _desc = f" - {f.summary}" if f.summary else ""
+                click.echo(f"  {f.path}{_desc}")
+
+    if detail != "default" and result.notes:
+        def _truncate_note(n: str, limit: int = 200) -> str:
+            line = n.split("\n")[0]
+            if len(line) <= limit:
+                return line
+            cut = line.rfind(" ", 0, limit)
+            return line[:cut] + "..." if cut > 0 else line[:limit] + "..."
+        _notes = [_truncate_note(n) for n in result.notes if n][:3]
+        if _notes:
+            click.echo("\nNotes")
+            for note in _notes:
+                click.echo(f"  {note}")
 
     if dry_run:
         if _should_shrink(result.files, no_shrink):
             _print_shrunk(result.files, result.summary)
         else:
             _print_dry_run(result.files)
-        _print_summary(start, generator, retry_triggered, final_files, usage=usage, detail=detail)
+        _print_summary(start, generator, retry_triggered, final_files, usage=usage, detail=detail, model=_routed_model, stage_runs=stage_runs)
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
                      verification_attempted=False, verification_passed=None,
-                     workspace=None, usage=usage)
+                     workspace=None, usage=usage, model=_routed_model)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
         return
@@ -193,18 +274,6 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
 
     if write:
         if not opencode_mode:
-            # Direct executor: safety check, create workspace, write files.
-            effective_mode = _resolve_mode(load_config(), mode)
-            if effective_mode == "ask":
-                risks = _detect_risks(task)
-                if not _confirm_proceed(risks if risks else ["write requested"]):
-                    click.echo("  Aborted.")
-                    return
-            elif effective_mode == "smart":
-                risks = _detect_risks(task)
-                if risks and not _confirm_proceed(risks):
-                    click.echo("  Aborted.")
-                    return
             workspace = Path(tempfile.mkdtemp())
             if detail == "full":
                 click.echo(f"\n  [workspace] {workspace}")
@@ -214,25 +283,31 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     if write and verify:
         click.echo("")
         code = _run_verification(workspace, detail=detail)
-        if code != 0:
+        # Escalation loop: try each model in chain until verification passes.
+        # Direct mode uses ESCALATION_CHAIN (sonnet → opus).
+        # OpenCode mode uses a single fixer-model retry (no chain).
+        _escalation = ESCALATION_CHAIN if not opencode_mode else [generator.fixer_model]
+        _last_attempt = result
+        for _esc_model in _escalation:
+            if code == 0:
+                break
             retry_triggered = True
             _, verify_output = _run_verification(workspace, capture=True)
-            retry_prompt = _build_retry_prompt(task, result, verify_output)
+            retry_prompt = _build_retry_prompt(task, _last_attempt, verify_output)
             if detail == "full":
                 snippet = retry_prompt[:300] + ("..." if len(retry_prompt) > 300 else "")
                 click.echo(f"\n  [retry prompt] {snippet}")
                 if verify_output.strip():
                     click.echo(f"\n  [verify output] {verify_output.strip()[:300]}")
-            spinner.start("Retrying...")
+            _esc_label = _esc_model.split("/")[-1]
+            spinner.start(f"Retrying with {_esc_label}...")
             try:
                 if opencode_mode:
-                    retry_result = generator.generate(
-                        retry_prompt, model=generator.fixer_model, workspace=workspace
+                    _last_attempt = generator.generate(
+                        retry_prompt, model=_esc_model, workspace=workspace
                     )
                 else:
-                    retry_result = generator.generate(
-                        retry_prompt, model=generator.fixer_model
-                    )
+                    _last_attempt = generator.generate(retry_prompt, model=_esc_model)
             except RuntimeError as exc:
                 raise click.ClickException(str(exc))
             except AuthError:
@@ -245,30 +320,30 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 raise click.ClickException(f"API error: {exc}")
             finally:
                 spinner.stop()
-            retry_usage = retry_result.usage
-            final_files = retry_result.files
+            retry_usage = _last_attempt.usage
+            final_files = _last_attempt.files
             if not opencode_mode:
-                _write_files(retry_result.files, workspace)
-            code = _run_verification(workspace, label="[retry]", detail=detail)
+                _write_files(_last_attempt.files, workspace)
+            code = _run_verification(workspace, label=f"[retry/{_esc_label}]", detail=detail)
         verification_passed = code == 0
         if code != 0:
             _print_summary(start, generator, retry_triggered, final_files,
-                           usage=usage, retry_usage=retry_usage, detail=detail)
+                           usage=usage, retry_usage=retry_usage, detail=detail, model=_routed_model, stage_runs=stage_runs)
             try:
                 _log_run(start, task, generator, retry_triggered, final_files,
                          verification_attempted=True, verification_passed=False,
-                         workspace=workspace, usage=usage, retry_usage=retry_usage)
+                         workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model)
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
             sys.exit(code)
 
     _print_summary(start, generator, retry_triggered, final_files,
-                   usage=usage, retry_usage=retry_usage, detail=detail)
+                   usage=usage, retry_usage=retry_usage, detail=detail, model=_routed_model, stage_runs=stage_runs)
     try:
         _log_run(start, task, generator, retry_triggered, final_files,
                  verification_attempted=(write and verify),
                  verification_passed=verification_passed,
-                 workspace=workspace, usage=usage, retry_usage=retry_usage)
+                 workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model)
     except Exception as exc:
         click.echo(f"  [log] warning: {exc}")
 
@@ -287,11 +362,12 @@ def _log_run(
     workspace: Path | None,
     usage=None,
     retry_usage=None,
+    model: str | None = None,
 ) -> None:
     entry: dict = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
         "task": task,
-        "execution_model": generator.model,
+        "execution_model": model or generator.model,
         "retry_triggered": retry_triggered,
         "duration_seconds": round(time.time() - start, 2),
         "files_created": sum(1 for f in files if f.change_type == "create"),
@@ -328,6 +404,8 @@ def _print_summary(
     usage=None,
     retry_usage=None,
     detail: str = "default",
+    model: str | None = None,
+    stage_runs: list[StageRun] | None = None,
 ) -> None:
     elapsed = time.time() - start
     cost_str = (
@@ -341,7 +419,8 @@ def _print_summary(
         return
 
     # more and full
-    click.echo(f"\nModel: {generator.model}")
+    if not stage_runs:
+        click.echo(f"\nModel: {model or generator.model}")
     if retry_triggered:
         click.echo(f"Fixer model: {generator.fixer_model}")
         click.echo("Retried: yes")
@@ -367,7 +446,7 @@ def _print_summary(
                 f"{retry_usage.total_tokens} total"
             )
             click.echo(f"Retry cost: {retry_cost_str}")
-    click.echo(f"Time: {elapsed:.1f}s   Cost: {cost_str}")
+    click.echo(f"\nTime: {elapsed:.1f}s   Cost: {cost_str}")
 
 
 # ---------------------------------------------------------------------------
@@ -376,11 +455,8 @@ def _print_summary(
 
 _OPENCODE_SIGNALS: list[tuple[list[str], str]] = [
     (["all files", "every file", "multiple files", "many files"], "multi-file scope"),
-    (["throughout", "across the codebase", "across all"],         "multi-file scope"),
-    (["refactor"],                                                 "broad refactor"),
-    (["migrat"],                                                   "migration"),
-    (["architectur", "restructur"],                               "architecture change"),
-    (["codebase"],                                                 "whole-codebase task"),
+    (["throughout the", "across the codebase", "across all files"], "multi-file scope"),
+    # refactor / architecture / codebase are now handled in direct mode via minimax
 ]
 
 
@@ -419,46 +495,8 @@ def _pre_run_cost_hint(model: str, task: str) -> str | None:
     cost_high = compute_cost(model, prompt_tokens, prompt_tokens * 3)
     if cost_low is None or cost_high is None:
         return None
-    tier = "low" if cost_high < 0.005 else ("medium" if cost_high < 0.02 else "high")
-    return f"~${cost_low:.4f}–${cost_high:.4f}  ({tier})"
+    return f"~${cost_low:.4f}-${cost_high:.4f}"
 
-
-_VALID_MODES = {"auto", "ask", "smart"}
-
-_HIGH_RISK_KEYWORDS: dict[str, list[str]] = {
-    "auth":        ["auth", "login", "logout", "jwt", "oauth", "session", "token", "password"],
-    "payments":    ["payment", "stripe", "billing", "invoice", "charge"],
-    "secrets":     ["secret", "api key", "credential", "private key"],
-    "env/config":  [".env", "dotenv", "environment variable"],
-    "infra":       ["deploy", "kubernetes", "docker", "terraform", "ci/cd", "pipeline"],
-    "migrations":  ["migration", "migrate", "schema", "alter table", "drop table"],
-    "deletes":     ["delete", "remove", "drop", "purge", "wipe", "truncate"],
-    "permissions": ["permission", "rbac", "acl", "role", "privilege"],
-    "security":    ["security", "firewall", "ssl", "tls", "certificate", "encryption"],
-}
-
-
-def _resolve_mode(config: dict, cli_mode: str | None) -> str:
-    if cli_mode:
-        return cli_mode.lower()
-    value = config.get("mode", "smart")
-    return value if value in _VALID_MODES else "smart"
-
-
-def _detect_risks(task: str) -> list[str]:
-    lower = task.lower()
-    return [
-        label
-        for label, keywords in _HIGH_RISK_KEYWORDS.items()
-        if any(kw in lower for kw in keywords)
-    ]
-
-
-def _confirm_proceed(risks: list[str]) -> bool:
-    labels = ", ".join(risks)
-    click.echo(f"\n  This looks high-risk ({labels}).")
-    answer = click.prompt("  Proceed? [y/N]", default="N", show_default=False)
-    return answer.strip().lower() == "y"
 
 
 _CHANGE_LABEL = {"create": "created", "update": "updated", "delete": "deleted"}
@@ -521,7 +559,8 @@ def _print_dry_run(files: list[ChangedFile]) -> None:
 class _Spinner:
     """Animated terminal spinner with phase label and elapsed time."""
 
-    _FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    _FRAMES_UNICODE = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    _FRAMES_ASCII   = ["-", "\\", "|", "/"]
 
     def __init__(self) -> None:
         self.phase: str = ""
@@ -546,10 +585,12 @@ class _Spinner:
         sys.stdout.flush()
 
     def _run(self) -> None:
+        encoding = getattr(sys.stdout, "encoding", "utf-8") or "utf-8"
+        frames = self._FRAMES_UNICODE if encoding.lower().replace("-", "") in ("utf8", "utf16", "utf32") else self._FRAMES_ASCII
         i = 0
         while not self._stop.wait(0.1):
             elapsed = time.time() - self._t0
-            frame = self._FRAMES[i % len(self._FRAMES)]
+            frame = frames[i % len(frames)]
             line = f"  {frame} {self.phase}  {elapsed:.1f}s"
             sys.stdout.write(f"\r{line:<70}")
             sys.stdout.flush()
@@ -657,9 +698,9 @@ def _run_verification(
             click.echo(f"  {label} failed (exit code {proc.returncode})")
     else:
         if proc.returncode == 0:
-            click.echo("  ✔ Verified")
+            click.echo("  Verified")
         else:
-            click.echo(f"  ✗ Verification failed (exit {proc.returncode})")
+            click.echo(f"  Verification failed (exit {proc.returncode})")
     return proc.returncode
 
 
