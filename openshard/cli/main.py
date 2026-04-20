@@ -555,8 +555,43 @@ _RATIONALE_SHORT: dict[str, str] = {
 }
 
 
+_ABBREV_WORDS = {"gpt", "llm", "ai", "api", "url", "id", "ui", "ml"}
+
+
+def _format_model_slug(raw: str) -> str:
+    """Format an unknown model ID into a readable label.
+
+    gpt-5.4-nano  -> GPT-5.4 Nano
+    gemini-2.0-flash -> Gemini 2.0 Flash
+    llama-3.3-70b -> Llama 3.3 70B
+    """
+    parts = [p for p in raw.split("/")[-1].split("-") if p]
+    tagged: list[tuple[str, str]] = []
+    for part in parts:
+        lower = part.lower()
+        if lower in _ABBREV_WORDS:
+            tagged.append(("abbrev", part.upper()))
+        elif re.match(r"^v\d", lower):
+            tagged.append(("version", part[0].upper() + part[1:]))
+        elif re.match(r"^\d+[a-z]+$", lower):
+            tagged.append(("version", re.sub(r"[a-z]+$", lambda m: m.group().upper(), part)))
+        elif part[0].isdigit():
+            tagged.append(("version", part))
+        else:
+            tagged.append(("word", part.capitalize()))
+    out = ""
+    for i, (kind, text) in enumerate(tagged):
+        if i == 0:
+            out = text
+        elif kind == "version" and tagged[i - 1][0] == "abbrev":
+            out += "-" + text
+        else:
+            out += " " + text
+    return out
+
+
 def _model_label(model: str) -> str:
-    return _MODEL_SHORT.get(model, model.split("/")[-1])
+    return _MODEL_SHORT.get(model, _format_model_slug(model))
 
 
 def _build_routing_line(
