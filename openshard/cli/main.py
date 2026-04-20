@@ -1,5 +1,6 @@
 import datetime
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -18,7 +19,7 @@ from openshard.providers.openrouter import (
     AuthError, OpenRouterError, RateLimitError,
     MODEL_PRICING, compute_cost,
 )
-from openshard.routing.engine import ESCALATION_CHAIN, RoutingDecision, route
+from openshard.routing.engine import ESCALATION_CHAIN, MODEL_STRONG, RoutingDecision, route
 from openshard.execution.stages import (
     Stage, StageRun, split_task, route_stage, should_use_stages, run_planning_stage,
 )
@@ -124,11 +125,15 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         click.echo(f"  [executor] {effective_executor} - {_policy_reason}")
     if routing_decision is not None:
         if detail != "default":
-            click.echo(f"  [routing] {routing_decision.model} - {routing_decision.rationale}")
+            click.echo(f"  [routing] {_model_label(routing_decision.model)} - {routing_decision.rationale}")
         hint = _pre_run_cost_hint(routing_decision.model, task)
         if hint:
             click.echo(f"  Cost estimate: {hint}")
     _routed_model = routing_decision.model if routing_decision else None
+    if detail == "default":
+        _routing_msg = _build_routing_line(routing_decision, _use_stages)
+        if _routing_msg:
+            click.echo(_routing_msg)
 
     # --- Stage-based execution (direct mode, security/complex tasks) ----------
     _impl_task = task          # may be augmented with a plan
@@ -140,8 +145,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             _stage_t0 = time.time()
 
             if _stage.stage_type == "planning":
-                click.echo("  Planning...")
-                spinner.start("Planning...")
+                spinner.start("Planning - mapping out implementation approach")
                 try:
                     _plan_text, _plan_usage = run_planning_stage(generator.client, task)
                     _impl_task = (
@@ -164,12 +168,10 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
 
             elif _stage.stage_type == "implementation":
                 _stage_model = _routed_model or route_stage(_stage)
-                _impl_reason = _RATIONALE_SHORT.get(
+                spinner.start(_exec_message(
+                    _stage_model,
                     routing_decision.rationale if routing_decision else "",
-                    routing_decision.category if routing_decision else "implementation",
-                )
-                click.echo(f"  Using {_model_label(_stage_model)} ({_impl_reason})...")
-                spinner.start("Executing...")
+                ))
                 try:
                     result = generator.generate(_impl_task, model=_stage_model)
                 except RuntimeError as exc:
@@ -194,14 +196,12 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
 
     # --- Single-stage execution (simple tasks, opencode, stages not triggered) -
     if result is None:
-        if routing_decision is not None:
-            _single_reason = _RATIONALE_SHORT.get(routing_decision.rationale, routing_decision.category)
-            click.echo(f"  Using {_model_label(_routed_model)} ({_single_reason})...")
-        elif opencode_mode:
-            click.echo("  Running with OpenCode...")
-        else:
-            click.echo("  Executing...")
-        spinner.start("Executing...")
+        _single_msg = (
+            _exec_message(_routed_model, routing_decision.rationale)
+            if routing_decision is not None
+            else ("Executing - running with OpenCode" if opencode_mode else "Executing - running task")
+        )
+        spinner.start(_single_msg)
         try:
             if opencode_mode:
                 result = generator.generate(task, workspace=workspace)
@@ -242,7 +242,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         click.echo("\nStages")
         for sr in stage_runs:
             _sr_cost = f"${sr.cost:.4f}" if sr.cost is not None else "-"
-            click.echo(f"  {sr.stage.stage_type.capitalize()} ({sr.model}): {sr.duration:.1f}s, {_sr_cost}")
+            click.echo(f"  {sr.stage.stage_type.capitalize()} ({_model_label(sr.model)}): {sr.duration:.1f}s, {_sr_cost}")
 
     if result.files:
         _fc = sum(1 for f in result.files if f.change_type == "create")
@@ -313,8 +313,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 if verify_output.strip():
                     click.echo(f"\n  [verify output] {verify_output.strip()[:300]}")
             _esc_label = _esc_model.split("/")[-1]
-            click.echo(f"  Retrying with {_esc_label}...")
-            spinner.start(f"Retrying with {_esc_label}...")
+            spinner.start(f"Retrying - escalating to {_model_label(_esc_model)}")
             try:
                 if opencode_mode:
                     _last_attempt = generator.generate(
@@ -461,10 +460,8 @@ def _print_summary(
         return
 
     # more and full
-    if not stage_runs:
-        click.echo(f"\nModel: {model or generator.model}")
     if retry_triggered:
-        click.echo(f"Fixer model: {generator.fixer_model}")
+        click.echo(f"Fixer model: {_model_label(generator.fixer_model)}")
         click.echo("Retried: yes")
     if usage is not None:
         click.echo(
@@ -521,20 +518,19 @@ def _suggest_executor(task: str) -> tuple[str, str]:
 # Pre-run cost hint
 # ---------------------------------------------------------------------------
 
-_SYSTEM_OVERHEAD_TOKENS = 200   # rough execution system-prompt size
+_SYSTEM_OVERHEAD_TOKENS = 500   # execution system-prompt is substantial
 
 
 def _pre_run_cost_hint(model: str, task: str) -> str | None:
-    """Return a rough pre-run cost range string, or None if pricing is unknown.
+    """Return a conservative pre-run cost range, or None if pricing is unknown.
 
-    Uses the prompt token estimate + a 0.5×–3× completion range heuristic.
-    Clearly labelled as an estimate — not shown as exact.
+    Assumes 300–1500 completion tokens — small code output to a full module.
     """
     if model not in MODEL_PRICING:
         return None
     prompt_tokens = _SYSTEM_OVERHEAD_TOKENS + len(task) // 4
-    cost_low  = compute_cost(model, prompt_tokens, max(100, prompt_tokens // 2))
-    cost_high = compute_cost(model, prompt_tokens, prompt_tokens * 3)
+    cost_low  = compute_cost(model, prompt_tokens, 300)
+    cost_high = compute_cost(model, prompt_tokens, 1500)
     if cost_low is None or cost_high is None:
         return None
     return f"~${cost_low:.4f}-${cost_high:.4f}"
@@ -561,6 +557,36 @@ _RATIONALE_SHORT: dict[str, str] = {
 
 def _model_label(model: str) -> str:
     return _MODEL_SHORT.get(model, model.split("/")[-1])
+
+
+def _build_routing_line(
+    routing_decision: "RoutingDecision | None",
+    use_stages: bool,
+) -> str | None:
+    """One-line routing summary shown in default output before execution starts."""
+    if routing_decision is None:
+        return None
+    impl_label = _model_label(routing_decision.model)
+    reason = _RATIONALE_SHORT.get(routing_decision.rationale, routing_decision.category)
+    if use_stages:
+        plan_label = _model_label(MODEL_STRONG)
+        if plan_label == impl_label:
+            return f"  Routing - {impl_label} for planning and {reason}"
+        return f"  Routing - {plan_label} for planning -> {impl_label} for {reason}"
+    return f"  Routing - {impl_label} for {reason}"
+
+
+def _exec_message(model: str, rationale: str) -> str:
+    """Human-readable spinner message for the execution phase."""
+    label = _model_label(model)
+    desc = {
+        "security-sensitive code requires careful reasoning": f"{label} handling security-sensitive logic",
+        "UI or visual task routed to multimodal specialist":  f"{label} handling UI work",
+        "multi-file or long-horizon task":                    f"{label} working through multi-file changes",
+        "low-risk boilerplate task":                          f"{label} generating boilerplate",
+        "standard feature implementation":                    f"{label} writing implementation",
+    }
+    return "Executing - " + desc.get(rationale, f"{label} running task")
 
 
 def _build_model_line(
@@ -655,10 +681,9 @@ def _print_dry_run(files: list[ChangedFile]) -> None:
 
 
 class _Spinner:
-    """Animated terminal spinner with phase label and elapsed time."""
+    """Animated progress line: looping dots + elapsed time, updates in place."""
 
-    _FRAMES_UNICODE = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-    _FRAMES_ASCII   = ["-", "\\", "|", "/"]
+    _DOTS = [".", "..", "..."]
 
     def __init__(self) -> None:
         self.phase: str = ""
@@ -679,18 +704,16 @@ class _Spinner:
         self._stop.set()
         self._thread.join()
         self._thread = None
-        sys.stdout.write("\r" + " " * 72 + "\r")
+        sys.stdout.write("\r" + " " * 82 + "\r")
         sys.stdout.flush()
 
     def _run(self) -> None:
-        encoding = getattr(sys.stdout, "encoding", "utf-8") or "utf-8"
-        frames = self._FRAMES_UNICODE if encoding.lower().replace("-", "") in ("utf8", "utf16", "utf32") else self._FRAMES_ASCII
         i = 0
-        while not self._stop.wait(0.1):
+        while not self._stop.wait(0.4):
             elapsed = time.time() - self._t0
-            frame = frames[i % len(frames)]
-            line = f"  {frame} {self.phase}  {elapsed:.1f}s"
-            sys.stdout.write(f"\r{line:<70}")
+            dots = self._DOTS[i % len(self._DOTS)]
+            line = f"  {self.phase}{dots}   {elapsed:.1f}s"
+            sys.stdout.write(f"\r{line:<82}")
             sys.stdout.flush()
             i += 1
 
@@ -985,7 +1008,7 @@ def _render_log_entry(entry: dict, detail: str) -> None:
         click.echo("\nStages")
         for sr in stage_runs_data:
             cost_s = f"${sr['cost']:.4f}" if sr.get("cost") is not None else "-"
-            click.echo(f"  {sr['stage_type'].capitalize()} ({sr['model']}): {sr['duration']:.1f}s, {cost_s}")
+            click.echo(f"  {sr['stage_type'].capitalize()} ({_model_label(sr['model'])}): {sr['duration']:.1f}s, {cost_s}")
 
     # Files
     fc = entry.get("files_created", 0)
