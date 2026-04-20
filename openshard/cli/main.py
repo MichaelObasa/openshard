@@ -220,6 +220,10 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     click.echo("\nDone")
     click.echo(result.summary)
 
+    _model_line = _build_model_line(routing_decision, stage_runs)
+    if _model_line:
+        click.echo(f"\n{_model_line}")
+
     # Stages — shown before file count so the reader sees what ran (--more only)
     if detail != "default" and stage_runs:
         click.echo("\nStages")
@@ -497,6 +501,54 @@ def _pre_run_cost_hint(model: str, task: str) -> str | None:
         return None
     return f"~${cost_low:.4f}-${cost_high:.4f}"
 
+
+
+_MODEL_SHORT: dict[str, str] = {
+    "deepseek/deepseek-v3.2":          "DeepSeek V3.2",
+    "z-ai/glm-5.1":                    "GLM-5.1",
+    "anthropic/claude-sonnet-4.6":     "Sonnet 4.6",
+    "anthropic/claude-opus-4.7":       "Opus 4.7",
+    "moonshotai/kimi-k2.5":            "Kimi K2.5",
+    "minimax/m2.7":                    "MiniMax M2.7",
+}
+
+_RATIONALE_SHORT: dict[str, str] = {
+    "security-sensitive code requires careful reasoning": "security-sensitive",
+    "UI or visual task routed to multimodal specialist":  "UI / visual",
+    "multi-file or long-horizon task":                    "complex task",
+    "low-risk boilerplate task":                          "boilerplate",
+    "standard feature implementation":                    "standard coding",
+}
+
+
+def _model_label(model: str) -> str:
+    return _MODEL_SHORT.get(model, model.split("/")[-1])
+
+
+def _build_model_line(
+    routing_decision: "RoutingDecision | None",
+    stage_runs: "list[StageRun]",
+) -> str | None:
+    """Return a single 'Model: ...' or 'Models: ...' line for default output."""
+    if stage_runs:
+        seen: dict[str, list[str]] = {}
+        for sr in stage_runs:
+            label = _model_label(sr.model)
+            seen.setdefault(label, []).append(sr.stage.stage_type)
+        parts = []
+        for label, types in seen.items():
+            reason = " + ".join(types)
+            parts.append(f"{label} ({reason})")
+        prefix = "Model" if len(seen) == 1 else "Models"
+        return f"{prefix}: {', '.join(parts)}"
+
+    if routing_decision is not None:
+        label = _model_label(routing_decision.model)
+        reason = _RATIONALE_SHORT.get(routing_decision.rationale, "")
+        suffix = f" ({reason})" if reason else ""
+        return f"Model: {label}{suffix}"
+
+    return None
 
 
 _CHANGE_LABEL = {"create": "created", "update": "updated", "delete": "deleted"}
