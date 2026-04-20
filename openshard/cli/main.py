@@ -140,6 +140,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             _stage_t0 = time.time()
 
             if _stage.stage_type == "planning":
+                click.echo("  Planning...")
                 spinner.start("Planning...")
                 try:
                     _plan_text, _plan_usage = run_planning_stage(generator.client, task)
@@ -163,6 +164,11 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
 
             elif _stage.stage_type == "implementation":
                 _stage_model = _routed_model or route_stage(_stage)
+                _impl_reason = _RATIONALE_SHORT.get(
+                    routing_decision.rationale if routing_decision else "",
+                    routing_decision.category if routing_decision else "implementation",
+                )
+                click.echo(f"  Using {_model_label(_stage_model)} ({_impl_reason})...")
                 spinner.start("Executing...")
                 try:
                     result = generator.generate(_impl_task, model=_stage_model)
@@ -188,6 +194,13 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
 
     # --- Single-stage execution (simple tasks, opencode, stages not triggered) -
     if result is None:
+        if routing_decision is not None:
+            _single_reason = _RATIONALE_SHORT.get(routing_decision.rationale, routing_decision.category)
+            click.echo(f"  Using {_model_label(_routed_model)} ({_single_reason})...")
+        elif opencode_mode:
+            click.echo("  Running with OpenCode...")
+        else:
+            click.echo("  Executing...")
         spinner.start("Executing...")
         try:
             if opencode_mode:
@@ -247,12 +260,6 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 click.echo(f"  {f.path}{_desc}")
 
     if detail != "default" and result.notes:
-        def _truncate_note(n: str, limit: int = 200) -> str:
-            line = n.split("\n")[0]
-            if len(line) <= limit:
-                return line
-            cut = line.rfind(" ", 0, limit)
-            return line[:cut] + "..." if cut > 0 else line[:limit] + "..."
         _notes = [_truncate_note(n) for n in result.notes if n][:3]
         if _notes:
             click.echo("\nNotes")
@@ -268,7 +275,9 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
                      verification_attempted=False, verification_passed=None,
-                     workspace=None, usage=usage, model=_routed_model)
+                     workspace=None, usage=usage, model=_routed_model,
+                     summary=result.summary, notes=result.notes,
+                     stage_runs=stage_runs, routing_decision=routing_decision)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
         return
@@ -304,6 +313,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 if verify_output.strip():
                     click.echo(f"\n  [verify output] {verify_output.strip()[:300]}")
             _esc_label = _esc_model.split("/")[-1]
+            click.echo(f"  Retrying with {_esc_label}...")
             spinner.start(f"Retrying with {_esc_label}...")
             try:
                 if opencode_mode:
@@ -336,7 +346,9 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             try:
                 _log_run(start, task, generator, retry_triggered, final_files,
                          verification_attempted=True, verification_passed=False,
-                         workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model)
+                         workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
+                         summary=result.summary, notes=result.notes,
+                         stage_runs=stage_runs, routing_decision=routing_decision)
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
             sys.exit(code)
@@ -347,7 +359,9 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         _log_run(start, task, generator, retry_triggered, final_files,
                  verification_attempted=(write and verify),
                  verification_passed=verification_passed,
-                 workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model)
+                 workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
+                 summary=result.summary, notes=result.notes,
+                 stage_runs=stage_runs, routing_decision=routing_decision)
     except Exception as exc:
         click.echo(f"  [log] warning: {exc}")
 
@@ -367,6 +381,10 @@ def _log_run(
     usage=None,
     retry_usage=None,
     model: str | None = None,
+    summary: str = "",
+    notes: list | None = None,
+    stage_runs=None,
+    routing_decision=None,
 ) -> None:
     entry: dict = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -380,7 +398,27 @@ def _log_run(
         "verification_attempted": verification_attempted,
         "verification_passed": verification_passed,
         "workspace_path": str(workspace) if workspace else None,
+        "summary": summary,
+        "files_detail": [
+            {"path": f.path, "change_type": f.change_type, "summary": f.summary or ""}
+            for f in files
+        ],
     }
+    if notes:
+        entry["notes"] = [n.split("\n")[0][:300] for n in notes if n][:5]
+    if stage_runs:
+        entry["stage_runs"] = [
+            {
+                "stage_type": sr.stage.stage_type,
+                "model": sr.model,
+                "duration": round(sr.duration, 2),
+                "cost": sr.cost,
+            }
+            for sr in stage_runs
+        ]
+    if routing_decision is not None:
+        entry["routing_model"] = routing_decision.model
+        entry["routing_rationale"] = routing_decision.rationale
     if retry_triggered:
         entry["fixer_model"] = generator.fixer_model
     if usage is not None:
@@ -549,6 +587,14 @@ def _build_model_line(
         return f"Model: {label}{suffix}"
 
     return None
+
+
+def _truncate_note(text: str, limit: int = 200) -> str:
+    line = text.split("\n")[0]
+    if len(line) <= limit:
+        return line
+    cut = line.rfind(" ", 0, limit)
+    return line[:cut] + "..." if cut > 0 else line[:limit] + "..."
 
 
 _CHANGE_LABEL = {"create": "created", "update": "updated", "delete": "deleted"}
@@ -900,6 +946,121 @@ def report():
         vstr  = "passed" if vp is True else ("failed" if vp is False else "-")
         click.echo(f"  {ts}  {task}")
         click.echo(f"    model: {model}  retry: {retry}  verify: {vstr}")
+
+def _render_log_entry(entry: dict, detail: str) -> None:
+    """Render a stored run log entry at the requested detail level."""
+    ts = entry.get("timestamp", "").rstrip("Z").replace("T", " ").split(".")[0]
+    task = entry.get("task", "")
+    summary = entry.get("summary", "")
+    stage_runs_data: list[dict] = entry.get("stage_runs", [])
+    routing_model: str = entry.get("routing_model", "")
+    routing_rationale: str = entry.get("routing_rationale", "")
+    files_detail: list[dict] = entry.get("files_detail", [])
+    notes: list[str] = entry.get("notes", [])
+
+    click.echo(f"\nTask: {task}")
+    if ts:
+        click.echo(f"At: {ts} UTC")
+    click.echo("\nDone")
+    if summary:
+        click.echo(summary)
+
+    # Model line — always shown
+    if stage_runs_data:
+        seen: dict[str, list[str]] = {}
+        for sr in stage_runs_data:
+            lbl = _model_label(sr["model"])
+            seen.setdefault(lbl, []).append(sr["stage_type"])
+        parts = [f"{lbl} ({' + '.join(types)})" for lbl, types in seen.items()]
+        prefix = "Model" if len(seen) == 1 else "Models"
+        click.echo(f"\n{prefix}: {', '.join(parts)}")
+    elif routing_model:
+        lbl = _model_label(routing_model)
+        reason = _RATIONALE_SHORT.get(routing_rationale, "")
+        suffix = f" ({reason})" if reason else ""
+        click.echo(f"\nModel: {lbl}{suffix}")
+
+    # Stages (--more / --full)
+    if detail != "default" and stage_runs_data:
+        click.echo("\nStages")
+        for sr in stage_runs_data:
+            cost_s = f"${sr['cost']:.4f}" if sr.get("cost") is not None else "-"
+            click.echo(f"  {sr['stage_type'].capitalize()} ({sr['model']}): {sr['duration']:.1f}s, {cost_s}")
+
+    # Files
+    fc = entry.get("files_created", 0)
+    fu = entry.get("files_updated", 0)
+    fd = entry.get("files_deleted", 0)
+    if fc or fu or fd:
+        counts = ", ".join(p for p in [
+            f"{fc} created" if fc else "",
+            f"{fu} updated" if fu else "",
+            f"{fd} deleted" if fd else "",
+        ] if p)
+        click.echo(f"\nFiles: {counts}")
+        if detail != "default":
+            for f in files_detail:
+                desc = f" - {f['summary']}" if f.get("summary") else ""
+                click.echo(f"  {f['path']}{desc}")
+
+    # Notes (--more / --full)
+    if detail != "default" and notes:
+        _notes = [_truncate_note(n) for n in notes if n][:3]
+        if _notes:
+            click.echo("\nNotes")
+            for note in _notes:
+                click.echo(f"  {note}")
+
+    # Token / model detail (--more / --full)
+    if detail != "default":
+        full_model = entry.get("execution_model", "")
+        if full_model and not stage_runs_data:
+            click.echo(f"\nModel: {full_model}")
+        pt = entry.get("prompt_tokens", 0)
+        ct = entry.get("completion_tokens", 0)
+        tt = entry.get("total_tokens", 0)
+        if tt:
+            click.echo(f"Tokens: {pt} prompt / {ct} completion / {tt} total")
+        if entry.get("retry_triggered"):
+            click.echo("Retried: yes")
+        if detail == "full":
+            vp = entry.get("verification_passed")
+            if vp is not None:
+                click.echo(f"Verification: {'passed' if vp else 'failed'}")
+            ws = entry.get("workspace_path")
+            if ws:
+                click.echo(f"Workspace: {ws}")
+
+    duration = entry.get("duration_seconds", 0)
+    cost = entry.get("estimated_cost")
+    cost_str = f"${cost:.4f}" if cost is not None else "-"
+    click.echo(f"\nTime: {duration:.1f}s   Cost: {cost_str}")
+
+
+@cli.command()
+@click.option("--more", is_flag=True, default=False, help="Show file list, model names, and token breakdown.")
+@click.option("--full", is_flag=True, default=False, help="Show all stored details including verification and workspace.")
+def last(more: bool, full: bool):
+    """Show details of the most recent run without rerunning it."""
+    detail = "full" if full else ("more" if more else "default")
+    log_path = Path.cwd() / _LOG_PATH
+    if not log_path.exists():
+        click.echo("No run history found. Run a task first with 'openshard run'.")
+        return
+    entries = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    if not entries:
+        click.echo("No runs recorded yet.")
+        return
+    _render_log_entry(entries[-1], detail)
+
 
 if __name__ == "__main__":
     cli()
