@@ -265,6 +265,20 @@ requirements.txt - Flask, PyJWT, pytest
 
 Time: 87.2s | Cost: $0.12
 ```
+This is 70% cheaper than using just Opus 4.6 to run the whole task instead.
+
+---
+
+## More examples
+
+See the [examples/](examples/) folder for detailed breakdowns:
+
+- **[Simple refactor](examples/simple-refactor.md)** - Shows cheap model handling low-risk work (95% savings)
+- **[Security-sensitive auth](examples/security-sensitive-auth.md)** - Shows automatic retry/escalation on failure
+- **[Complex multi-stage](examples/complex-multi-stage.md)** - Shows multi-model routing across different stages (74% savings)
+
+---
+
 ## Configuration
 
 > Model references below are accurate at time of release. The AI landscape 
