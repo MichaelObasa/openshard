@@ -18,6 +18,22 @@
 
 ---
 
+## Demo
+
+### Running a task
+
+<p align="center">
+  <img src="demos/Openshard_Final_Demo_Full.gif" alt="OpenShard Demo" width="800"/>
+</p>
+
+### Inspecting the result
+
+<p align="center">
+  <img src="demos/openshard_last_--more.gif" alt="OpenShard Last --more" width="800"/>
+</p>
+
+---
+
 ## Why routing matters now
 
 Most coding tasks aren't uniformly hard. Think about what a typical feature 
