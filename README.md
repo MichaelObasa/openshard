@@ -29,7 +29,7 @@ actually involves:
 - **Tests** - structured generation
 - **Refactoring** - consistency and correctness
 
-Only a small portion genuinely needs the best model available. The rest just 
+Only a fraction of that genuinely needs the best model available. The rest just 
 needs something good enough.
 
 But developers are still doing the routing themselves - manually switching 
@@ -57,10 +57,10 @@ Inspecting repo...
 Stack detected: Next.js + TypeScript + PostgreSQL
 
 Plan:
-  Auth design          ->  strong model    (security-sensitive)
-  UI scaffolding       ->  cheap model     (low-risk boilerplate)
-  Test generation      ->  mid model       (generation-heavy)
-  Final review         ->  strong model    (verification)
+  Auth design          ->  strong model      (security-sensitive)
+  UI scaffolding       ->  cheaper model     (low-risk boilerplate)
+  Test generation      ->  mid model         (generation-heavy)
+  Final review         ->  strong model      (verification)
 
 Estimated cost: $1.82
 Proceed? [y/N]
@@ -191,19 +191,20 @@ workflow:
 routing:
   planning:
     preferred_models:
-      - anthropic/claude-opus-4-6        # strong reasoning
+      - anthropic/claude-sonnet-4-6      # strong reasoning
       - openai/gpt-5.4-thinking          # strong reasoning alternative
   hard_implementation:
     preferred_models:
-      - openai/gpt-5.4-thinking          # strong coding
-      - anthropic/claude-opus-4-6        # strong coding alternative
+      - anthropic/claude-sonnet-4-6      # strong coding
+      - openai/gpt-5.4-thinking          # strong coding alternative
+      - anthropic/claude-opus-4-7        # fallback/escalatiob
   cheap_execution:
     preferred_models:
       - google/gemini-3.1-pro            # capable, cost-efficient
       - google/gemma-4-31b               # open-source, low cost
       - zhipu/glm-5-1                    # open-source, low cost
-      - moonshot/kimi-k2-5               # open-source, low cost
-      - minimax/minimax-2-5              # open-source, low cost
+      - moonshot/kimi-k2-6               # open-source, low cost
+      - minimax/minimax-2-7              # open-source, low cost
       - deepseek/deepseek-v3-2           # open-source, low cost
   review:
     preferred_models:
