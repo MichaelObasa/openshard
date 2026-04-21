@@ -248,30 +248,23 @@ The model list is not hardcoded. Routing adapts as new models emerge.
 ```bash
 openshard run "add JWT authentication with login endpoint and token helpers" --write
 ```
-
-**Result:**
-Task: add JWT authentication with login endpoint and token helpers
-Done
-Added JWT authentication with login endpoint, token helpers, middleware,
+```
+**What OpenShard delivered:**
+Done - Added JWT authentication with login endpoint, token helpers, middleware,
 and a protected route example
+
 Model: Sonnet 4.6 (planning + implementation)
-Stages
-Planning (Sonnet 4.6): 7.8s, $0.0037
-Implementation (Sonnet 4.6): 78.7s, $0.1144
+
 Files: 6 created
 jwt_helpers.py - Token generation and validation helpers
 auth.py - User store, credential helpers, and login endpoint
 app.py - Flask app with auth blueprint and protected routes
-tests/test_jwt_helpers.py - Unit tests for token helpers
-tests/test_auth.py - Integration tests for login endpoint
-requirements.txt - Minimal dependencies (Flask, PyJWT, pytest)
-Notes
-Set JWT_SECRET environment variable in production
-Replace SHA-256 password hashing with bcrypt before deployment
-Token expiry defaults to 60 minutes (configurable via JWT_EXPIRY_MINUTES)
-Time: 87.2s   Cost: $0.1181
+tests/test_jwt_helpers.py - Unit tests covering generate_token and decode_token
+tests/test_auth.py - Integration tests for login endpoint and protected routes
+requirements.txt - Flask, PyJWT, pytest
 
-
+Time: 87.2s | Cost: $0.12
+```
 ## Configuration
 
 > Model references below are accurate at time of release. The AI landscape 
@@ -349,41 +342,17 @@ A: OpenShard automatically retries with a stronger model. If that fails, you get
 
 ---
 
-## Status and roadmap
+## Status
 
-Alpha. The core CLI, routing engine, and OpenRouter integration work today.
+**What works now:**
 
-**v0.1 - current (working now)**
-- CLI with core commands
-- OpenRouter integration
-- Basic routing (direct vs agentic)
-- Cost tracking and reporting
-- Retry logic with model escalation
-- Run history
-- Post-run inspection (`openshard last`)
+OpenShard is a working CLI. It understands tasks, routes them across models, executes code changes, tracks costs, retries failures with stronger models, and logs everything. You can run tasks with `openshard run`, inspect results with `openshard last --more`, and see full cost breakdowns. OpenRouter integration is live. Direct and agentic execution paths both work.
 
-**v0.2 - next (coming soon)**
-- Task-type classification (auth, tests, refactoring, etc.)
-- Benchmark-informed routing
-- Better cost estimation
-- Multi-provider support (OpenAI, Anthropic direct)
-- Baseline cost comparisons
+**What's coming:**
 
-**v0.3 - future**
-- Team policies ("always use X model for auth")
-- Hosted run history
-- Usage analytics
-- Adaptive routing from success/failure data
-- IDE extensions
-
-**Long-term vision**
-- Control plane for AI agents
-- Multi-agent orchestration
-- Agent IAM and governance
-- Full observability platform
+Smarter routing that learns from task types and benchmarks. Team policies for shared workflows. Hosted dashboards for usage analytics. Multi-provider support beyond OpenRouter. Eventually: a full control plane for AI agents with orchestration, IAM, and observability.
 
 ---
-
 ## Why open source?
 
 Routing decisions should be inspectable. If a tool is deciding which model 
