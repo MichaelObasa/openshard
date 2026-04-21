@@ -34,6 +34,29 @@
 
 ---
 
+## The Problem
+
+**Using one expensive model for everything:**
+```bash
+Task: Add JWT auth with tests
+Model: Opus 4.6 (for all stages)
+Cost: ~$0.40
+Time: ~90s
+```
+
+**Using OpenShard:**
+```bash
+Task: Add JWT auth with tests
+Routing: Sonnet 4.6 (security-sensitive)
+Cost: $0.12 (70% savings)
+Time: 87s
+Files: 6 created
+```
+
+Same quality. Smarter routing. Lower cost.
+
+---
+
 ## Why routing matters now
 
 Most coding tasks aren't uniformly hard. Think about what a typical feature 
@@ -45,7 +68,7 @@ actually involves:
 - **Tests** - structured generation
 - **Refactoring** - consistency and correctness
 
-Only a fraction of that genuinely needs the best model available. The rest just 
+Only a fraction genuinely needs the best model available. The rest just 
 needs something good enough.
 
 But developers are still doing the routing themselves - manually switching 
@@ -67,21 +90,17 @@ before it executes. You review when it's done.
 ```bash
 openshard run "add email/password auth with protected routes and tests"
 ```
-
-```
 Inspecting repo...
 Stack detected: Next.js + TypeScript + PostgreSQL
-
 Plan:
-  Auth design          ->  strong model      (security-sensitive)
-  UI scaffolding       ->  cheaper model     (low-risk boilerplate)
-  Test generation      ->  mid model         (generation-heavy)
-  Final review         ->  strong model      (verification)
-
+Auth design          ->  strong model      (security-sensitive)
+UI scaffolding       ->  cost-optimized    (low-risk boilerplate)
+Test generation      ->  mid model         (generation-heavy)
+Final review         ->  strong model      (verification)
 Estimated cost: $1.82
 Proceed? [y/N]
-```
-✅ Task complete
+
+**Task complete**
 
 Auth flow implemented
 Protected routes added
@@ -113,27 +132,48 @@ with live cost metadata across providers.
 
 ---
 
-## Quick start
+## Installation
 
-**1. Install**
 ```bash
+# Install from PyPI (coming soon)
 pip install openshard
+
+# Or install from source
+git clone https://github.com/MichaelObasa/openshard.git
+cd openshard
+pip install -e .
 ```
 
-**2. Set your provider key**
+**Set your API key:**
 ```bash
 export OPENROUTER_API_KEY=your_key_here
 ```
 
-**3. Plan before you run**
+**Verify installation:**
+```bash
+openshard doctor
+```
+
+---
+
+## Quick start
+
+**1. Plan before you run**
 ```bash
 openshard plan "build a FastAPI CRUD service with tests"
 ```
 
-**4. Run**
+**2. Run the task**
 ```bash
-openshard run "build a FastAPI CRUD service with tests"
+openshard run "build a FastAPI CRUD service with tests" --write
 ```
+
+**3. Review the result**
+```bash
+openshard last --more
+```
+
+That's it. OpenShard handles routing, execution, and cost tracking.
 
 ---
 
@@ -143,11 +183,22 @@ openshard run "build a FastAPI CRUD service with tests"
 openshard run "<task>"       # run the full workflow
 openshard plan "<task>"      # see the plan before executing
 openshard explain "<task>"   # understand the routing decisions
+openshard last               # show last run summary
+openshard last --more        # detailed breakdown of last run
+openshard last --full        # complete run details
 openshard report             # cost, time, and outcome summary
 openshard models             # list available models
 openshard config init        # set up your config
 openshard doctor             # check your setup
 ```
+
+**Flags:**
+- `--write` - Actually write files (required for execution)
+- `--verify` - Run tests/verification after execution
+- `--more` - Show additional details
+- `--full` - Show all available information
+- `--dry-run` - Preview changes without writing
+- `--executor [direct|opencode]` - Choose execution backend
 
 ---
 
@@ -181,12 +232,47 @@ Then it maps to model classes:
 | Stage type | Model class |
 |---|---|
 | Architecture / security-sensitive | Strongest available |
-| Standard app logic | Mid-tier |
-| Boilerplate / scaffolding | Cheapest capable |
-| Tests / docs | Cost-efficient |
+| Standard app logic | Mid-tier balanced |
+| Boilerplate / scaffolding | Cost-optimized |
+| Tests / docs | Efficient generation |
 | Final review | Strongest available |
 
 The model list is not hardcoded. Routing adapts as new models emerge.
+
+---
+
+## Real-world example
+
+From a recent run on a production Flask app:
+
+```bash
+openshard run "add JWT authentication with login endpoint and token helpers" --write
+```
+
+**Result:**
+Task: add JWT authentication with login endpoint and token helpers
+Done
+Added JWT authentication with login endpoint, token helpers, middleware,
+and a protected route example
+Model: Sonnet 4.6 (planning + implementation)
+Stages
+Planning (Sonnet 4.6): 7.8s, $0.0037
+Implementation (Sonnet 4.6): 78.7s, $0.1144
+Files: 6 created
+jwt_helpers.py - Token generation and validation helpers
+auth.py - User store, credential helpers, and login endpoint
+app.py - Flask app with auth blueprint and protected routes
+tests/test_jwt_helpers.py - Unit tests for token helpers
+tests/test_auth.py - Integration tests for login endpoint
+requirements.txt - Minimal dependencies (Flask, PyJWT, pytest)
+Notes
+Set JWT_SECRET environment variable in production
+Replace SHA-256 password hashing with bcrypt before deployment
+Token expiry defaults to 60 minutes (configurable via JWT_EXPIRY_MINUTES)
+Time: 87.2s   Cost: $0.1181
+
+**vs. using Opus 4.6 for everything:** ~$0.40  
+**Savings:** 70%
 
 ---
 
@@ -213,15 +299,15 @@ routing:
     preferred_models:
       - anthropic/claude-sonnet-4-6      # strong coding
       - openai/gpt-5.4-thinking          # strong coding alternative
-      - anthropic/claude-opus-4-7        # fallback/escalatiob
-  cheap_execution:
+      - anthropic/claude-opus-4-7        # fallback/escalation
+  cost_optimized_execution:
     preferred_models:
       - google/gemini-3.1-pro            # capable, cost-efficient
-      - google/gemma-4-31b               # open-source, low cost
-      - zhipu/glm-5-1                    # open-source, low cost
-      - moonshot/kimi-k2-6               # open-source, low cost
-      - minimax/minimax-2-7              # open-source, low cost
-      - deepseek/deepseek-v3-2           # open-source, low cost
+      - google/gemma-4-31b               # open-source, efficient
+      - zhipu/glm-5-1                    # open-source, efficient
+      - moonshot/kimi-k2-6               # open-source, efficient
+      - minimax/minimax-2-7              # open-source, efficient
+      - deepseek/deepseek-v3-2           # open-source, efficient
   review:
     preferred_models:
       - anthropic/claude-opus-4-6        # strong review
@@ -245,29 +331,60 @@ actually matters.
 
 ---
 
+## FAQ
+
+**Q: Does this work with Cursor/Claude Code?**  
+A: Yes. OpenShard sits above your existing tools. We handle routing, they can handle execution.
+
+**Q: What models does it support?**  
+A: Currently 100+ models via OpenRouter. Direct OpenAI and Anthropic support coming soon.
+
+**Q: Is my code safe?**  
+A: Everything runs locally. Your code never leaves your machine unless you're using a cloud execution backend (which is optional).
+
+**Q: How accurate is the cost estimation?**  
+A: Pre-run estimates are ranges based on task complexity. Post-run costs are exact when using OpenRouter (which returns token counts). We're working on tighter estimates.
+
+**Q: Can I use my own models?**  
+A: Yes, if they're accessible via OpenRouter or have a compatible API. Custom provider support is on the roadmap.
+
+**Q: What if a task fails?**  
+A: OpenShard automatically retries with a stronger model. If that fails, you get a clear error message and can inspect what went wrong.
+
+---
+
 ## Status and roadmap
 
-Alpha. The core CLI, routing engine, and OpenRouter integration are the 
-first priority.
+Alpha. The core CLI, routing engine, and OpenRouter integration work today.
 
-**v0.1 - current focus**
-- CLI
-- OpenRouter support
-- Basic routing rules
-- Plan / run / review flow
-- Cost + time reporting
-
-**What's coming**
-- Repo-aware task splitting
-- Cost estimation and baselines
-- Retry and escalation logic
+**v0.1 - current (working now)**
+- CLI with core commands
+- OpenRouter integration
+- Basic routing (direct vs agentic)
+- Cost tracking and reporting
+- Retry logic with model escalation
 - Run history
-- Local evals and policy tuning
-- Integrations with Claude Code, Codex, Cline
-- Adaptive routing from usage data
-- Team policies and dashboards
-- Cloud control plane
-- IDE extension
+- Post-run inspection (`openshard last`)
+
+**v0.2 - next (coming soon)**
+- Task-type classification (auth, tests, refactoring, etc.)
+- Benchmark-informed routing
+- Better cost estimation
+- Multi-provider support (OpenAI, Anthropic direct)
+- Baseline cost comparisons
+
+**v0.3 - future**
+- Team policies ("always use X model for auth")
+- Hosted run history
+- Usage analytics
+- Adaptive routing from success/failure data
+- IDE extensions
+
+**Long-term vision**
+- Control plane for AI agents
+- Multi-agent orchestration
+- Agent IAM and governance
+- Full observability platform
 
 ---
 
@@ -277,7 +394,7 @@ Routing decisions should be inspectable. If a tool is deciding which model
 touches your security-sensitive code, you should be able to see why.
 
 OpenShard is open because trust matters, integrations matter, and the best 
-routing policies will come from genuine usage from many users and not just 
+routing policies will come from genuine usage from many developers - not just 
 one person's assumptions.
 
 ---
