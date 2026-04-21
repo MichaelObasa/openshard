@@ -243,7 +243,7 @@ The model list is not hardcoded. Routing adapts as new models emerge.
 
 ## Real-world example
 
-From a recent run on a production Flask app:
+**Task:** Add JWT authentication to a production Flask app
 
 ```bash
 openshard run "add JWT authentication with login endpoint and token helpers" --write
@@ -271,10 +271,6 @@ Replace SHA-256 password hashing with bcrypt before deployment
 Token expiry defaults to 60 minutes (configurable via JWT_EXPIRY_MINUTES)
 Time: 87.2s   Cost: $0.1181
 
-**vs. using Opus 4.6 for everything:** ~$0.40  
-**Savings:** 70%
-
----
 
 ## Configuration
 
