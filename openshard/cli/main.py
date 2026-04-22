@@ -11,7 +11,7 @@ from pathlib import Path
 
 import click
 
-from openshard.config.settings import get_anthropic_api_key, load_config
+from openshard.config.settings import get_anthropic_api_key, get_openai_api_key, load_config
 from openshard.execution.generator import ChangedFile, ExecutionGenerator, ExecutionResult
 from openshard.execution.opencode_executor import OpenCodeExecutor
 from openshard.planning.generator import PlanGenerator
@@ -72,9 +72,9 @@ def plan(task: str):
 )
 @click.option(
     "--provider",
-    type=click.Choice(["openrouter", "anthropic"], case_sensitive=False),
+    type=click.Choice(["openrouter", "anthropic", "openai"], case_sensitive=False),
     default=None,
-    help="API provider: openrouter (default) or anthropic (direct Anthropic API, requires ANTHROPIC_API_KEY).",
+    help="API provider: openrouter (default), anthropic (requires ANTHROPIC_API_KEY), or openai (requires OPENAI_API_KEY).",
 )
 def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, executor: str | None, provider: str | None):
     """Execute TASK and return a structured result."""
@@ -105,9 +105,13 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         # Resolve provider (only applies to direct executor)
         _provider_instance = None
         _provider_name = (provider or "openrouter").lower()
-        if effective_executor != "opencode" and _provider_name == "anthropic":
-            from openshard.providers.anthropic import AnthropicProvider
-            _provider_instance = AnthropicProvider(get_anthropic_api_key())
+        if effective_executor != "opencode":
+            if _provider_name == "anthropic":
+                from openshard.providers.anthropic import AnthropicProvider
+                _provider_instance = AnthropicProvider(get_anthropic_api_key())
+            elif _provider_name == "openai":
+                from openshard.providers.openai import OpenAIProvider
+                _provider_instance = OpenAIProvider(get_openai_api_key())
 
         if effective_executor == "opencode":
             generator: ExecutionGenerator | OpenCodeExecutor = OpenCodeExecutor()
@@ -118,8 +122,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
 
     opencode_mode = (effective_executor == "opencode")
     routing_decision: RoutingDecision | None = route(task) if not opencode_mode else None
-    # When using Anthropic provider, non-Anthropic routed models (DeepSeek, GLM, etc.)
-    # are not available — fall back to the configured execution model.
+    # When using a third-party provider, non-native routed models are not available.
+    # Fall back to a sensible default for each provider.
     if (
         _provider_name == "anthropic"
         and routing_decision is not None
@@ -127,6 +131,17 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     ):
         routing_decision = RoutingDecision(
             model=generator.model,
+            category=routing_decision.category,
+            rationale=routing_decision.rationale,
+        )
+    elif (
+        _provider_name == "openai"
+        and routing_decision is not None
+        and not routing_decision.model.startswith("openai/")
+    ):
+        from openshard.providers.openai import DEFAULT_MODEL as _OPENAI_DEFAULT
+        routing_decision = RoutingDecision(
+            model=_OPENAI_DEFAULT,
             category=routing_decision.category,
             rationale=routing_decision.rationale,
         )

@@ -69,6 +69,9 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
     "moonshotai/kimi-k2.5":                 (0.45,   2.20),
     # Long-horizon
     "minimax/m2.7":                         (0.20,   1.10),   # ~est
+    # OpenAI
+    "openai/gpt-4o":                        (2.50,  10.00),
+    "openai/gpt-4o-mini":                   (0.15,   0.60),
     # Tiny helpers
     "openai/gpt-5.4-nano":                  (0.10,   0.40),   # ~est
 }

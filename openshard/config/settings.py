@@ -58,3 +58,19 @@ def get_anthropic_api_key() -> str:
             "Obtain a key from https://console.anthropic.com/settings/keys"
         )
     return key
+
+
+def get_openai_api_key() -> str:
+    """Return the OpenAI API key from the environment.
+
+    Raises ``ValueError`` with a clear message if the variable is not set.
+    """
+    key = os.environ.get("OPENAI_API_KEY", "")
+    if not key:
+        raise ValueError(
+            "OPENAI_API_KEY environment variable is not set.\n"
+            "Export it before running:\n\n"
+            "  export OPENAI_API_KEY=your_key_here\n\n"
+            "Obtain a key from https://platform.openai.com/api-keys"
+        )
+    return key
