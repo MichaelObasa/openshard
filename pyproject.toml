@@ -13,6 +13,9 @@ dependencies = [
     "httpx>=0.27",
 ]
 
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40"]
+
 [project.scripts]
 openshard = "openshard.cli.main:cli"
 

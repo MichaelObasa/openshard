@@ -11,14 +11,12 @@ from pathlib import Path
 
 import click
 
-from openshard.config.settings import load_config
+from openshard.config.settings import get_anthropic_api_key, load_config
 from openshard.execution.generator import ChangedFile, ExecutionGenerator, ExecutionResult
 from openshard.execution.opencode_executor import OpenCodeExecutor
 from openshard.planning.generator import PlanGenerator
-from openshard.providers.openrouter import (
-    AuthError, OpenRouterError, RateLimitError,
-    MODEL_PRICING, compute_cost,
-)
+from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
+from openshard.providers.openrouter import MODEL_PRICING, compute_cost
 from openshard.routing.engine import ESCALATION_CHAIN, MODEL_STRONG, RoutingDecision, route
 from openshard.execution.stages import (
     Stage, StageRun, split_task, route_stage, should_use_stages, run_planning_stage,
@@ -42,13 +40,13 @@ def plan(task: str):
 
     try:
         result = generator.generate(task)
-    except AuthError:
+    except ProviderAuthError:
         raise click.ClickException(
-            "Authentication failed. Check that OPENROUTER_API_KEY is valid."
+            "Authentication failed. Check that your provider API key is valid."
         )
-    except RateLimitError:
+    except ProviderRateLimitError:
         raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
-    except OpenRouterError as exc:
+    except ProviderError as exc:
         raise click.ClickException(f"API error: {exc}")
 
     click.echo(f"\nTask: {task}\n")
@@ -72,7 +70,13 @@ def plan(task: str):
     default=None,
     help="Execution backend: direct (default, calls OpenRouter API) or opencode (calls opencode CLI).",
 )
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, executor: str | None):
+@click.option(
+    "--provider",
+    type=click.Choice(["openrouter", "anthropic"], case_sensitive=False),
+    default=None,
+    help="API provider: openrouter (default) or anthropic (direct Anthropic API, requires ANTHROPIC_API_KEY).",
+)
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, executor: str | None, provider: str | None):
     """Execute TASK and return a structured result."""
     detail = "full" if full else ("more" if more else "default")
     start = time.time()
@@ -97,15 +101,35 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         else:
             # Auto-route by policy; direct remains the default
             effective_executor = _policy_executor
+
+        # Resolve provider (only applies to direct executor)
+        _provider_instance = None
+        _provider_name = (provider or "openrouter").lower()
+        if effective_executor != "opencode" and _provider_name == "anthropic":
+            from openshard.providers.anthropic import AnthropicProvider
+            _provider_instance = AnthropicProvider(get_anthropic_api_key())
+
         if effective_executor == "opencode":
             generator: ExecutionGenerator | OpenCodeExecutor = OpenCodeExecutor()
         else:
-            generator = ExecutionGenerator()
+            generator = ExecutionGenerator(provider=_provider_instance)
     except (ValueError, RuntimeError) as exc:
         raise click.ClickException(str(exc))
 
     opencode_mode = (effective_executor == "opencode")
     routing_decision: RoutingDecision | None = route(task) if not opencode_mode else None
+    # When using Anthropic provider, non-Anthropic routed models (DeepSeek, GLM, etc.)
+    # are not available — fall back to the configured execution model.
+    if (
+        _provider_name == "anthropic"
+        and routing_decision is not None
+        and not routing_decision.model.startswith("anthropic/")
+    ):
+        routing_decision = RoutingDecision(
+            model=generator.model,
+            category=routing_decision.category,
+            rationale=routing_decision.rationale,
+        )
     _use_stages = (
         not opencode_mode
         and routing_decision is not None
@@ -159,7 +183,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                         cost=_plan_usage.estimated_cost if _plan_usage else None,
                         summary="Implementation plan produced",
                     ))
-                except (AuthError, RateLimitError, OpenRouterError):
+                except ProviderError:
                     _impl_task = task   # planning failed — fall back to plain task
                     if detail == "full":
                         click.echo("  [stages] planning call failed, continuing without plan")
@@ -176,13 +200,13 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                     result = generator.generate(_impl_task, model=_stage_model)
                 except RuntimeError as exc:
                     raise click.ClickException(str(exc))
-                except AuthError:
+                except ProviderAuthError:
                     raise click.ClickException(
-                        "Authentication failed. Check that OPENROUTER_API_KEY is valid."
+                        "Authentication failed. Check that your provider API key is valid."
                     )
-                except RateLimitError:
+                except ProviderRateLimitError:
                     raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
-                except OpenRouterError as exc:
+                except ProviderError as exc:
                     raise click.ClickException(f"API error: {exc}")
                 finally:
                     spinner.stop()
@@ -209,13 +233,13 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 result = generator.generate(task, model=_routed_model)
         except RuntimeError as exc:
             raise click.ClickException(str(exc))
-        except AuthError:
+        except ProviderAuthError:
             raise click.ClickException(
-                "Authentication failed. Check that OPENROUTER_API_KEY is valid."
+                "Authentication failed. Check that your provider API key is valid."
             )
-        except RateLimitError:
+        except ProviderRateLimitError:
             raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
-        except OpenRouterError as exc:
+        except ProviderError as exc:
             raise click.ClickException(f"API error: {exc}")
         finally:
             spinner.stop()
@@ -323,13 +347,13 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                     _last_attempt = generator.generate(retry_prompt, model=_esc_model)
             except RuntimeError as exc:
                 raise click.ClickException(str(exc))
-            except AuthError:
+            except ProviderAuthError:
                 raise click.ClickException(
-                    "Authentication failed. Check that OPENROUTER_API_KEY is valid."
+                    "Authentication failed. Check that your provider API key is valid."
                 )
-            except RateLimitError:
+            except ProviderRateLimitError:
                 raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
-            except OpenRouterError as exc:
+            except ProviderError as exc:
                 raise click.ClickException(f"API error: {exc}")
             finally:
                 spinner.stop()
@@ -909,13 +933,13 @@ def explain(task: str):
 
     try:
         result = generator.generate(task)
-    except AuthError:
+    except ProviderAuthError:
         raise click.ClickException(
-            "Authentication failed. Check that OPENROUTER_API_KEY is valid."
+            "Authentication failed. Check that your provider API key is valid."
         )
-    except RateLimitError:
+    except ProviderRateLimitError:
         raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
-    except OpenRouterError as exc:
+    except ProviderError as exc:
         raise click.ClickException(f"API error: {exc}")
 
     strong = [s for s in result.stages if s.tier == "strong"]

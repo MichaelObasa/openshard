@@ -1,8 +1,28 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import httpx
+
+from openshard.providers.base import (
+    BaseProvider,
+    ProviderAuthError,
+    ProviderError,
+    ProviderRateLimitError,
+)
+
+# Re-export shared data types so existing imports from this module keep working.
+from openshard.providers.base import ChatResponse, ModelInfo, UsageStats
+
+__all__ = [
+    "OpenRouterClient",
+    "OpenRouterError",
+    "AuthError",
+    "RateLimitError",
+    "ModelInfo",
+    "UsageStats",
+    "ChatResponse",
+    "MODEL_PRICING",
+    "compute_cost",
+]
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -16,27 +36,16 @@ _TIMEOUT = 60.0  # seconds
 # Exceptions
 # ---------------------------------------------------------------------------
 
-class OpenRouterError(Exception):
+class OpenRouterError(ProviderError):
     """Base error for all OpenRouter failures."""
 
 
-class AuthError(OpenRouterError):
+class AuthError(ProviderAuthError, OpenRouterError):
     """Raised when the API key is invalid or missing (HTTP 401/403)."""
 
 
-class RateLimitError(OpenRouterError):
+class RateLimitError(ProviderRateLimitError, OpenRouterError):
     """Raised when the API rate limit is exceeded (HTTP 429)."""
-
-
-# ---------------------------------------------------------------------------
-# Return types
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ModelInfo:
-    id: str
-    name: str
-    pricing: dict  # {"prompt": str, "completion": str, ...} — varies by model
 
 
 # ---------------------------------------------------------------------------
@@ -76,26 +85,11 @@ def compute_cost(
     return (prompt_tokens * p_per_m + completion_tokens * c_per_m) / 1_000_000
 
 
-@dataclass
-class UsageStats:
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
-    estimated_cost: float | None = None
-
-
-@dataclass
-class ChatResponse:
-    content: str
-    model: str
-    usage: UsageStats
-
-
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
 
-class OpenRouterClient:
+class OpenRouterClient(BaseProvider):
     """Thin HTTP client for the OpenRouter API."""
 
     def __init__(self, api_key: str) -> None:
@@ -111,7 +105,7 @@ class OpenRouterClient:
         )
 
     # ------------------------------------------------------------------
-    # Public methods
+    # BaseProvider interface
     # ------------------------------------------------------------------
 
     def list_models(self) -> list[ModelInfo]:
@@ -125,6 +119,23 @@ class OpenRouterClient:
             )
             for m in data.get("data", [])
         ]
+
+    def execute(
+        self, model: str, prompt: str, system: str | None = None
+    ) -> ChatResponse:
+        """Send *prompt* to *model* and return a structured response."""
+        return self.send_request(model, prompt, system)
+
+    def get_model_info(self, model_id: str) -> ModelInfo | None:
+        """Return info for *model_id*, or None if not listed."""
+        for m in self.list_models():
+            if m.id == model_id:
+                return m
+        return None
+
+    # ------------------------------------------------------------------
+    # Legacy method — kept for internal callers; prefer execute()
+    # ------------------------------------------------------------------
 
     def send_request(
         self, model: str, prompt: str, system: str | None = None

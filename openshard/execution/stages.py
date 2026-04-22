@@ -112,7 +112,7 @@ def run_planning_stage(client, task: str) -> tuple[str, object]:
     Uses MODEL_STRONG (Sonnet) unconditionally — planning is cheap in tokens
     and benefits from careful reasoning.
     """
-    response = client.send_request(
+    response = client.execute(
         model=MODEL_STRONG,
         prompt=f"Task: {task}",
         system=PLANNING_SYSTEM,

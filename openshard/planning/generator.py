@@ -5,7 +5,8 @@ import re
 from dataclasses import dataclass
 
 from openshard.config.settings import get_api_key, load_config
-from openshard.providers.openrouter import OpenRouterClient, OpenRouterError, UsageStats
+from openshard.providers.base import BaseProvider, ProviderError, UsageStats
+from openshard.providers.openrouter import OpenRouterClient
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -61,19 +62,21 @@ class ExecutionPlan:
 # ---------------------------------------------------------------------------
 
 class PlanGenerator:
-    """Generate a structured execution plan for a task via OpenRouter."""
+    """Generate a structured execution plan for a task via a provider."""
 
-    def __init__(self) -> None:
+    def __init__(self, provider: BaseProvider | None = None) -> None:
         config = load_config()
         tiers: list[dict] = config.get("model_tiers", [])
         if not tiers:
             raise RuntimeError("No model_tiers defined in config.yml")
         self.model: str = config.get("planning_model") or tiers[0]["model"]
-        self.client = OpenRouterClient(get_api_key())
+        self.client: BaseProvider = (
+            provider if provider is not None else OpenRouterClient(get_api_key())
+        )
 
     def generate(self, task: str) -> ExecutionPlan:
         """Call the model and return a parsed :class:`ExecutionPlan`."""
-        response = self.client.send_request(
+        response = self.client.execute(
             model=self.model,
             prompt=task,
             system=_SYSTEM_PROMPT,
@@ -95,7 +98,7 @@ class PlanGenerator:
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise OpenRouterError(
+            raise ProviderError(
                 f"Model returned invalid JSON ({exc}).\nRaw response:\n{raw}"
             ) from exc
 

@@ -5,7 +5,8 @@ import re
 from dataclasses import dataclass
 
 from openshard.config.settings import get_api_key, load_config
-from openshard.providers.openrouter import OpenRouterClient, OpenRouterError, UsageStats
+from openshard.providers.base import BaseProvider, ProviderError, UsageStats
+from openshard.providers.openrouter import OpenRouterClient
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -105,20 +106,22 @@ def _extract_json_object(text: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 class ExecutionGenerator:
-    """Generate a structured execution result for a task via OpenRouter."""
+    """Generate a structured execution result for a task via a provider."""
 
-    def __init__(self) -> None:
+    def __init__(self, provider: BaseProvider | None = None) -> None:
         config = load_config()
         self.model: str = self._resolve_model(config)
         self.fixer_model: str = self._resolve_fixer_model(config)
-        self.client = OpenRouterClient(get_api_key())
+        self.client: BaseProvider = (
+            provider if provider is not None else OpenRouterClient(get_api_key())
+        )
 
     def generate(self, task: str, model: str | None = None) -> ExecutionResult:
         """Call the model and return a parsed :class:`ExecutionResult`.
 
         *model* overrides the default execution model when provided.
         """
-        response = self.client.send_request(
+        response = self.client.execute(
             model=model or self.model,
             prompt=task,
             system=_SYSTEM_PROMPT,
@@ -161,13 +164,13 @@ class ExecutionGenerator:
         except json.JSONDecodeError:
             extracted = _extract_json_object(raw)
             if extracted is None:
-                raise OpenRouterError(
+                raise ProviderError(
                     f"Model returned no extractable JSON object.\nRaw response:\n{raw}"
                 )
             try:
                 data = json.loads(extracted)
             except json.JSONDecodeError as exc:
-                raise OpenRouterError(
+                raise ProviderError(
                     f"Model returned invalid JSON ({exc}).\nRaw response:\n{raw}"
                 ) from exc
 
