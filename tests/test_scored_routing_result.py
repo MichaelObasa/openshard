@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import unittest
 
+from openshard.cli.main import _build_model_line
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry
+from openshard.routing.engine import RoutingDecision
 from openshard.scoring.filter import prefilter_coding
 from openshard.scoring.requirements import TaskRequirements
 from openshard.scoring.scorer import select_with_info
@@ -94,6 +96,50 @@ class TestPrefilterCoding(unittest.TestCase):
     def test_coding_model_passes_through(self):
         entry = _make_entry("openrouter/fast-model")
         self.assertEqual(prefilter_coding([entry]), [entry])
+
+
+class TestModelLineAlignment(unittest.TestCase):
+
+    def _decision(self, model: str) -> RoutingDecision:
+        return RoutingDecision(model=model, category="standard", rationale="standard feature implementation")
+
+    def test_model_line_uses_routed_model_when_provided(self):
+        decision = self._decision("z-ai/glm-5.1")
+        line = _build_model_line(decision, [], model="anthropic/claude-opus-4.7")
+        self.assertIn("Opus", line)
+        self.assertNotIn("GLM", line)
+
+    def test_model_line_falls_back_to_routing_decision_when_no_model(self):
+        decision = self._decision("z-ai/glm-5.1")
+        line = _build_model_line(decision, [], model=None)
+        self.assertIn("GLM", line)
+
+    def test_model_line_keyword_and_scored_cannot_diverge(self):
+        decision = self._decision("z-ai/glm-5.1")
+        scored_winner = "anthropic/claude-sonnet-4.6"
+        line = _build_model_line(decision, [], model=scored_winner)
+        self.assertNotEqual(line, _build_model_line(decision, [], model=None))
+
+
+class TestWinnerCost(unittest.TestCase):
+
+    def test_select_with_info_returns_cost_when_present(self):
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.10"})
+        reqs = TaskRequirements()
+        result = select_with_info([entry], reqs, "standard")
+        self.assertAlmostEqual(result.selected_cost_per_m, 0.10)
+
+    def test_select_with_info_cost_none_when_pricing_missing(self):
+        entry = _make_entry("openrouter/no-price")
+        reqs = TaskRequirements()
+        result = select_with_info([entry], reqs, "standard")
+        self.assertIsNone(result.selected_cost_per_m)
+
+    def test_select_with_info_cost_none_when_pricing_unparseable(self):
+        entry = _make_entry("openrouter/weird", pricing={"prompt": "n/a"})
+        reqs = TaskRequirements()
+        result = select_with_info([entry], reqs, "standard")
+        self.assertIsNone(result.selected_cost_per_m)
 
 
 if __name__ == "__main__":
