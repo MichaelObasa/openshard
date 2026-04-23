@@ -17,7 +17,10 @@ from openshard.execution.opencode_executor import OpenCodeExecutor
 from openshard.planning.generator import PlanGenerator
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
 from openshard.providers.openrouter import MODEL_PRICING, compute_cost
+from openshard.providers.manager import ProviderManager
 from openshard.routing.engine import ESCALATION_CHAIN, MODEL_STRONG, RoutingDecision, route
+from openshard.scoring.requirements import requirements_from_category
+from openshard.scoring.scorer import select_candidate
 from openshard.execution.stages import (
     Stage, StageRun, split_task, route_stage, should_use_stages, run_planning_stage,
 )
@@ -169,6 +172,20 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         if hint:
             click.echo(f"  Cost estimate: {hint}")
     _routed_model = routing_decision.model if routing_decision else None
+
+    # Attempt scored model selection; fall back silently to keyword routing.
+    if not opencode_mode and routing_decision is not None:
+        try:
+            _mgr = ProviderManager()
+            _inv = _mgr.get_inventory()
+            _reqs = requirements_from_category(routing_decision.category)
+            _entries = [e for e in _inv.models if e.provider == _provider_name]
+            _sel = select_candidate(_entries, _reqs)
+            if _sel is not None and _mgr.providers.get(_sel.provider) is not None:
+                _routed_model = _sel.model.id
+        except Exception:
+            pass
+
     if detail == "default":
         _routing_msg = _build_routing_line(routing_decision, _use_stages)
         if _routing_msg:
