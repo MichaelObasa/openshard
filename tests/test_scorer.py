@@ -76,6 +76,23 @@ class TestScoreModel(unittest.TestCase):
         self.assertEqual(score_model(entry, req), 10.0)
 
 
+    def test_alias_id_penalised(self):
+        entry = _entry("~anthropic/claude-opus-latest")
+        req = TaskRequirements()
+        self.assertEqual(score_model(entry, req), 9.0)
+
+    def test_versioned_id_beats_alias_when_otherwise_equal(self):
+        versioned = _entry("anthropic/claude-opus-4.7")
+        alias = _entry("~anthropic/claude-opus-latest")
+        req = TaskRequirements()
+        self.assertGreater(score_model(versioned, req), score_model(alias, req))
+
+    def test_non_alias_id_unaffected(self):
+        entry = _entry("anthropic/claude-opus-4.7")
+        req = TaskRequirements()
+        self.assertEqual(score_model(entry, req), 10.0)
+
+
 class TestSelectCandidate(unittest.TestCase):
 
     def test_empty_list_returns_none(self):

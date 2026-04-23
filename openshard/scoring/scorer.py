@@ -43,6 +43,11 @@ def score_model(entry: InventoryEntry, requirements: TaskRequirements) -> float:
         if cost <= 0.25:
             score += 1.0
 
+    # Penalise rolling alias IDs (e.g. ~anthropic/claude-opus-latest).
+    # Explicit versioned IDs are preferred for deterministic behaviour.
+    if m.id.startswith("~"):
+        score -= 1.0
+
     return score
 
 
