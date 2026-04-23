@@ -34,7 +34,7 @@ class TestTaskRequirements(unittest.TestCase):
             complexity="complex",
         )
         req = requirements_from_stage(stage)
-        self.assertEqual(req.min_context_window, 8000)
+        self.assertEqual(req.min_context_window, 100_000)
         self.assertTrue(req.security_sensitive)
         self.assertEqual(req.complexity, "complex")
         self.assertFalse(req.needs_vision)

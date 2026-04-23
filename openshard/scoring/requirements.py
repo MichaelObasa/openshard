@@ -17,7 +17,7 @@ class TaskRequirements:
 
 def requirements_from_stage(stage: Stage) -> TaskRequirements:
     return TaskRequirements(
-        min_context_window=8000 if stage.complexity == "complex" else None,
+        min_context_window=100_000 if stage.complexity == "complex" else None,
         needs_vision=False,
         needs_tools=False,
         complexity=stage.complexity,
