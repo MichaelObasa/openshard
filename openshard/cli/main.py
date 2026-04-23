@@ -322,7 +322,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     click.echo("\nDone")
     click.echo(result.summary)
 
-    _model_line = _build_model_line(routing_decision, stage_runs)
+    _model_line = _build_model_line(routing_decision, stage_runs, model=_routed_model)
     if _model_line:
         click.echo(f"\n{_model_line}")
 
@@ -726,6 +726,7 @@ def _exec_message(model: str, rationale: str) -> str:
 def _build_model_line(
     routing_decision: "RoutingDecision | None",
     stage_runs: "list[StageRun]",
+    model: str | None = None,
 ) -> str | None:
     """Return a single 'Model: ...' or 'Models: ...' line for default output."""
     if stage_runs:
@@ -741,7 +742,7 @@ def _build_model_line(
         return f"{prefix}: {', '.join(parts)}"
 
     if routing_decision is not None:
-        label = _model_label(routing_decision.model)
+        label = _model_label(model or routing_decision.model)
         reason = _RATIONALE_SHORT.get(routing_decision.rationale, "")
         suffix = f" ({reason})" if reason else ""
         return f"Model: {label}{suffix}"
