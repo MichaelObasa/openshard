@@ -999,6 +999,31 @@ def explain(task: str):
 @click.option("--refresh", is_flag=True, default=False, help="Fetch models from provider API and update cache.")
 def models(provider: str | None, refresh: bool):
     """List cached models and their capabilities."""
+    if provider is None:
+        from openshard.providers.manager import ProviderManager
+        manager = ProviderManager()
+        if not manager.providers:
+            click.echo("No providers configured. Set at least one API key.")
+            return
+        inventory = manager.get_inventory(refresh=refresh)
+        if refresh:
+            from collections import Counter
+            counts = Counter(e.provider for e in inventory.models)
+            for pname, count in sorted(counts.items()):
+                click.echo(f"  {pname}: {count} models cached")
+            return
+        header = f"{'Provider':<12}  {'Model ID':<50}  {'Context':>9}  {'MaxOut':>7}  {'Vision':<6}  {'Tools':<5}"
+        click.echo(header)
+        click.echo("-" * len(header))
+        for entry in inventory.models:
+            m = entry.model
+            ctx = str(m.context_window or "-")
+            out = str(m.max_output_tokens or "-")
+            vis = "yes" if m.supports_vision else "no"
+            tls = "yes" if m.supports_tools else "no"
+            click.echo(f"{entry.provider:<12}  {m.id:<50}  {ctx:>9}  {out:>7}  {vis:<6}  {tls:<5}")
+        return
+
     from openshard.providers.cache import (
         CACHE_TTL_HOURS,
         build_cache_entry,
