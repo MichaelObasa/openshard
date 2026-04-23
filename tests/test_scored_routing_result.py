@@ -79,8 +79,16 @@ class TestPrefilterCoding(unittest.TestCase):
         entry = _make_entry("somevendor/model/image")
         self.assertEqual(prefilter_coding([entry]), [])
 
+    def test_image_variant_excluded(self):
+        entry = _make_entry("gpt-5.4-image")
+        self.assertEqual(prefilter_coding([entry]), [])
+
+    def test_vision_model_excluded(self):
+        entry = _make_entry("gemini-vision")
+        self.assertEqual(prefilter_coding([entry]), [])
+
     def test_claude_passes_through(self):
-        entry = _make_entry("anthropic/claude-sonnet-4-6")
+        entry = _make_entry("claude-sonnet-4.6")
         self.assertEqual(prefilter_coding([entry]), [entry])
 
     def test_coding_model_passes_through(self):

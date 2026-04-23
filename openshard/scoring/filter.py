@@ -12,6 +12,8 @@ _NONCODING_SUBSTRINGS = (
     "moderation",
     "transcri",
     "/image-",
+    "image",
+    "vision",
 )
 
 
