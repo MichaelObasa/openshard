@@ -217,7 +217,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         if _scored.used_fallback:
             click.echo(f"  [routing] candidates: {_scored.candidate_count} → fallback (keyword routing)")
         else:
-            click.echo(f"  [routing] candidates: {_scored.candidate_count} → {_model_label(_scored.selected_model)}")
+            _cost_str = f"cost: ${_scored.selected_cost_per_m:.2f}/M" if _scored.selected_cost_per_m is not None else "cost: unknown"
+            click.echo(f"  [routing] candidates: {_scored.candidate_count} → {_model_label(_scored.selected_model)} ({_cost_str})")
 
     if detail == "default":
         _routing_msg = _build_routing_line(routing_decision, _use_stages)

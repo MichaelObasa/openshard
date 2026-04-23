@@ -16,6 +16,7 @@ class ScoredRoutingResult:
     selected_model: str | None
     selected_provider: str | None
     used_fallback: bool
+    selected_cost_per_m: float | None = None
 
 
 def score_model(entry: InventoryEntry, requirements: TaskRequirements) -> float:
@@ -91,4 +92,5 @@ def select_with_info(
         selected_model=winner.model.id,
         selected_provider=winner.provider,
         used_fallback=False,
+        selected_cost_per_m=_parse_cost(winner.model.pricing),
     )
