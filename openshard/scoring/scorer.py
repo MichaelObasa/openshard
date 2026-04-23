@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from openshard.providers.manager import InventoryEntry
-from openshard.scoring.filter import _parse_cost, filter_inventory
+from openshard.scoring.filter import _parse_cost, filter_inventory, prefilter_coding
 from openshard.scoring.requirements import TaskRequirements
 
 
@@ -56,7 +56,8 @@ def select_candidate(
     requirements: TaskRequirements,
 ) -> InventoryEntry | None:
     """Filter entries by requirements, score survivors, return top scorer."""
-    candidates = filter_inventory(entries, requirements)
+    candidates = prefilter_coding(entries)
+    candidates = filter_inventory(candidates, requirements)
     if not candidates:
         return None
     return max(candidates, key=lambda e: score_model(e, requirements))
@@ -68,7 +69,8 @@ def select_with_info(
     category: str,
 ) -> ScoredRoutingResult:
     """Filter and score entries; return a full record of the decision."""
-    candidates = filter_inventory(entries, requirements)
+    candidates = prefilter_coding(entries)
+    candidates = filter_inventory(candidates, requirements)
     if not candidates:
         return ScoredRoutingResult(
             category=category,

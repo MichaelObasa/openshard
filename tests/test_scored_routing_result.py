@@ -4,6 +4,7 @@ import unittest
 
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry
+from openshard.scoring.filter import prefilter_coding
 from openshard.scoring.requirements import TaskRequirements
 from openshard.scoring.scorer import select_with_info
 
@@ -54,6 +55,37 @@ class TestSelectWithInfo(unittest.TestCase):
         result = select_with_info([entry], reqs, "standard")
         self.assertEqual(result.selected_provider, "anthropic")
         self.assertEqual(result.selected_model, "claude-sonnet")
+
+
+class TestPrefilterCoding(unittest.TestCase):
+
+    def test_embedding_model_excluded(self):
+        entry = _make_entry("openai/text-embedding-3-small")
+        self.assertEqual(prefilter_coding([entry]), [])
+
+    def test_whisper_model_excluded(self):
+        entry = _make_entry("openai/whisper-1")
+        self.assertEqual(prefilter_coding([entry]), [])
+
+    def test_dalle_model_excluded(self):
+        entry = _make_entry("openai/dall-e-3")
+        self.assertEqual(prefilter_coding([entry]), [])
+
+    def test_tts_model_excluded(self):
+        entry = _make_entry("openai/tts-1")
+        self.assertEqual(prefilter_coding([entry]), [])
+
+    def test_image_path_excluded(self):
+        entry = _make_entry("somevendor/model/image")
+        self.assertEqual(prefilter_coding([entry]), [])
+
+    def test_claude_passes_through(self):
+        entry = _make_entry("anthropic/claude-sonnet-4-6")
+        self.assertEqual(prefilter_coding([entry]), [entry])
+
+    def test_coding_model_passes_through(self):
+        entry = _make_entry("openrouter/fast-model")
+        self.assertEqual(prefilter_coding([entry]), [entry])
 
 
 if __name__ == "__main__":

@@ -3,6 +3,30 @@ from __future__ import annotations
 from openshard.providers.manager import InventoryEntry
 from openshard.scoring.requirements import TaskRequirements
 
+_NONCODING_SUBSTRINGS = (
+    "embed",
+    "tts",
+    "whisper",
+    "dall-e",
+    "stable-diffusion",
+    "moderation",
+    "transcri",
+    "/image-",
+)
+
+
+def prefilter_coding(entries: list[InventoryEntry]) -> list[InventoryEntry]:
+    """Drop models that are clearly non-coding (embeddings, TTS, image gen, etc.)."""
+    result = []
+    for entry in entries:
+        mid = entry.model.id.lower()
+        if any(s in mid for s in _NONCODING_SUBSTRINGS):
+            continue
+        if mid.endswith("/image"):
+            continue
+        result.append(entry)
+    return result
+
 
 def _parse_cost(pricing: dict) -> float | None:
     raw = pricing.get("prompt", "")
