@@ -11,7 +11,7 @@ from pathlib import Path
 
 import click
 
-from openshard.config.settings import get_anthropic_api_key, get_openai_api_key, load_config
+from openshard.config.settings import get_api_key, get_anthropic_api_key, get_openai_api_key, load_config
 from openshard.execution.generator import ChangedFile, ExecutionGenerator, ExecutionResult
 from openshard.execution.opencode_executor import OpenCodeExecutor
 from openshard.planning.generator import PlanGenerator
