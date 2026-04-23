@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from click.testing import CliRunner
 
@@ -116,3 +116,25 @@ class TestScoredRoutingIntegration(unittest.TestCase):
         self._run([task, "--provider", "openrouter"], manager, generator)
 
         generator.generate.assert_called_once_with(task, model="openrouter/basic")
+
+    def test_scored_routing_logged(self):
+        """_log_run is called with a ScoredRoutingResult that reflects the winning candidate."""
+        task = "implement a feature"
+        entry = _make_entry("openrouter/fast-model")
+        manager = _make_manager_mock([entry], ["openrouter"])
+        generator = _make_generator_mock()
+
+        with patch("openshard.cli.main.ProviderManager", return_value=manager), \
+             patch("openshard.cli.main.ExecutionGenerator", return_value=generator), \
+             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+             patch("openshard.cli.main._log_run") as mock_log:
+            runner = CliRunner()
+            runner.invoke(cli, ["run", task])
+
+        mock_log.assert_called_once()
+        _scored = mock_log.call_args.kwargs.get("_scored")
+        self.assertIsNotNone(_scored)
+        self.assertEqual(_scored.category, "standard")
+        self.assertEqual(_scored.selected_model, "openrouter/fast-model")
+        self.assertEqual(_scored.selected_provider, "openrouter")
+        self.assertFalse(_scored.used_fallback)

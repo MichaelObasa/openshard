@@ -366,7 +366,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                      verification_attempted=False, verification_passed=None,
                      workspace=None, usage=usage, model=_routed_model,
                      summary=result.summary, notes=result.notes,
-                     stage_runs=stage_runs, routing_decision=routing_decision)
+                     stage_runs=stage_runs, routing_decision=routing_decision,
+                     _scored=_scored)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
         return
@@ -436,7 +437,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                          verification_attempted=True, verification_passed=False,
                          workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
                          summary=result.summary, notes=result.notes,
-                         stage_runs=stage_runs, routing_decision=routing_decision)
+                         stage_runs=stage_runs, routing_decision=routing_decision,
+                         _scored=_scored)
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
             sys.exit(code)
@@ -449,7 +451,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                  verification_passed=verification_passed,
                  workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
                  summary=result.summary, notes=result.notes,
-                 stage_runs=stage_runs, routing_decision=routing_decision)
+                 stage_runs=stage_runs, routing_decision=routing_decision,
+                 _scored=_scored)
     except Exception as exc:
         click.echo(f"  [log] warning: {exc}")
 
@@ -473,6 +476,7 @@ def _log_run(
     notes: list | None = None,
     stage_runs=None,
     routing_decision=None,
+    _scored: ScoredRoutingResult | None = None,
 ) -> None:
     entry: dict = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -507,6 +511,12 @@ def _log_run(
     if routing_decision is not None:
         entry["routing_model"] = routing_decision.model
         entry["routing_rationale"] = routing_decision.rationale
+    if _scored is not None:
+        entry["routing_category"] = _scored.category
+        entry["routing_candidate_count"] = _scored.candidate_count
+        entry["routing_selected_model"] = _scored.selected_model
+        entry["routing_selected_provider"] = _scored.selected_provider
+        entry["routing_used_fallback"] = _scored.used_fallback
     if retry_triggered:
         entry["fixer_model"] = generator.fixer_model
     if usage is not None:
