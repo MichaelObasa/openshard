@@ -20,7 +20,7 @@ from openshard.providers.openrouter import MODEL_PRICING, compute_cost
 from openshard.providers.manager import ProviderManager
 from openshard.routing.engine import ESCALATION_CHAIN, MODEL_STRONG, RoutingDecision, route
 from openshard.scoring.requirements import requirements_from_category
-from openshard.scoring.scorer import select_candidate
+from openshard.scoring.scorer import ScoredRoutingResult, select_with_info
 from openshard.execution.stages import (
     Stage, StageRun, split_task, route_stage, should_use_stages, run_planning_stage,
 )
@@ -172,6 +172,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         if hint:
             click.echo(f"  Cost estimate: {hint}")
     _routed_model = routing_decision.model if routing_decision else None
+    _scored: ScoredRoutingResult | None = None
 
     # Attempt scored model selection; fall back silently to keyword routing.
     if not opencode_mode and routing_decision is not None:
@@ -180,11 +181,43 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             _inv = _mgr.get_inventory()
             _reqs = requirements_from_category(routing_decision.category)
             _entries = [e for e in _inv.models if e.provider == _provider_name]
-            _sel = select_candidate(_entries, _reqs)
-            if _sel is not None and _mgr.providers.get(_sel.provider) is not None:
-                _routed_model = _sel.model.id
+            _scored = select_with_info(_entries, _reqs, routing_decision.category)
+            if (
+                _scored.selected_model is not None
+                and _mgr.providers.get(_scored.selected_provider) is not None
+            ):
+                _routed_model = _scored.selected_model
+            else:
+                _scored = ScoredRoutingResult(
+                    category=_scored.category,
+                    requirements=_scored.requirements,
+                    candidate_count=_scored.candidate_count,
+                    selected_model=None,
+                    selected_provider=None,
+                    used_fallback=True,
+                )
         except Exception:
             pass
+
+    if detail != "default" and _scored is not None:
+        _req = _scored.requirements
+        _req_parts: list[str] = []
+        if _req.security_sensitive:
+            _req_parts.append("security_sensitive")
+        if _req.needs_vision:
+            _req_parts.append("needs_vision")
+        if _req.needs_tools:
+            _req_parts.append("needs_tools")
+        if _req.complexity != "standard":
+            _req_parts.append(_req.complexity)
+        if _req.min_context_window:
+            _req_parts.append(f"ctx>={_req.min_context_window // 1_000}k")
+        _req_str = ", ".join(_req_parts) if _req_parts else "none"
+        click.echo(f"  [routing] category: {_scored.category}, requirements: {_req_str}")
+        if _scored.used_fallback:
+            click.echo(f"  [routing] candidates: {_scored.candidate_count} → fallback (keyword routing)")
+        else:
+            click.echo(f"  [routing] candidates: {_scored.candidate_count} → {_model_label(_scored.selected_model)}")
 
     if detail == "default":
         _routing_msg = _build_routing_line(routing_decision, _use_stages)
