@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from openshard.providers.manager import InventoryEntry
 from openshard.scoring.filter import _parse_cost, filter_inventory, prefilter_coding
 from openshard.scoring.requirements import TaskRequirements
+from openshard.scoring.shortlist import build_shortlist
 
 
 @dataclass
@@ -57,6 +58,7 @@ def select_candidate(
 ) -> InventoryEntry | None:
     """Filter entries by requirements, score survivors, return top scorer."""
     candidates = prefilter_coding(entries)
+    candidates = build_shortlist(candidates)
     candidates = filter_inventory(candidates, requirements)
     if not candidates:
         return None
@@ -70,6 +72,7 @@ def select_with_info(
 ) -> ScoredRoutingResult:
     """Filter and score entries; return a full record of the decision."""
     candidates = prefilter_coding(entries)
+    candidates = build_shortlist(candidates)
     candidates = filter_inventory(candidates, requirements)
     if not candidates:
         return ScoredRoutingResult(

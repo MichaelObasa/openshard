@@ -55,6 +55,9 @@ def _family_key(model_id: str) -> str:
 
 def build_shortlist(entries: list[InventoryEntry]) -> list[InventoryEntry]:
     trusted = [e for e in entries if is_trusted_model(e.model.id)]
+    # If no trusted models found, don't discard the whole pool.
+    if not trusted:
+        return entries
 
     groups: dict[str, list[InventoryEntry]] = {}
     for entry in trusted:
