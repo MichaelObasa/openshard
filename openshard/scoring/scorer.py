@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from openshard.providers.manager import InventoryEntry
 from openshard.scoring.filter import _parse_cost, filter_inventory
 from openshard.scoring.requirements import TaskRequirements
+
+
+@dataclass
+class ScoredRoutingResult:
+    category: str
+    requirements: TaskRequirements
+    candidate_count: int
+    selected_model: str | None
+    selected_provider: str | None
+    used_fallback: bool
 
 
 def score_model(entry: InventoryEntry, requirements: TaskRequirements) -> float:
@@ -43,3 +55,30 @@ def select_candidate(
     if not candidates:
         return None
     return max(candidates, key=lambda e: score_model(e, requirements))
+
+
+def select_with_info(
+    entries: list[InventoryEntry],
+    requirements: TaskRequirements,
+    category: str,
+) -> ScoredRoutingResult:
+    """Filter and score entries; return a full record of the decision."""
+    candidates = filter_inventory(entries, requirements)
+    if not candidates:
+        return ScoredRoutingResult(
+            category=category,
+            requirements=requirements,
+            candidate_count=0,
+            selected_model=None,
+            selected_provider=None,
+            used_fallback=True,
+        )
+    winner = max(candidates, key=lambda e: score_model(e, requirements))
+    return ScoredRoutingResult(
+        category=category,
+        requirements=requirements,
+        candidate_count=len(candidates),
+        selected_model=winner.model.id,
+        selected_provider=winner.provider,
+        used_fallback=False,
+    )
