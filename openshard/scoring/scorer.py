@@ -35,15 +35,21 @@ def score_model(entry: InventoryEntry, requirements: TaskRequirements) -> float:
         if m.context_window >= 200_000:
             score += 1.0
 
-    if requirements.security_sensitive and "claude" in m.id.lower():
-        score += 3.0
-
-    cost = _parse_cost(m.pricing)
-    if cost is not None:
-        if cost <= 1.0:
+    if requirements.security_sensitive:
+        mid = m.id.lower()
+        if "opus" in mid:
+            score += 3.0
+        elif "sonnet" in mid:
             score += 2.0
-        if cost <= 0.25:
-            score += 1.0
+        elif "haiku" in mid or "nano" in mid or "mini" in mid:
+            score -= 2.0
+    else:
+        cost = _parse_cost(m.pricing)
+        if cost is not None:
+            if cost <= 1.0:
+                score += 2.0
+            if cost <= 0.25:
+                score += 1.0
 
     # Penalise rolling alias IDs (e.g. ~anthropic/claude-opus-latest).
     # Explicit versioned IDs are preferred for deterministic behaviour.

@@ -48,7 +48,24 @@ class TestScoreModel(unittest.TestCase):
     def test_security_claude_bonus(self):
         entry = _entry("anthropic/claude-sonnet-4.6")
         req = TaskRequirements(security_sensitive=True)
-        self.assertEqual(score_model(entry, req), 13.0)
+        self.assertEqual(score_model(entry, req), 12.0)
+
+    def test_security_prefers_opus_over_haiku(self):
+        opus = _entry("anthropic/claude-opus-4.7")
+        haiku = _entry("anthropic/claude-haiku-4.5", pricing={"prompt": "0.0000001"})
+        req = TaskRequirements(security_sensitive=True)
+        self.assertGreater(score_model(opus, req), score_model(haiku, req))
+
+    def test_security_ignores_cheap_bonus(self):
+        entry = _entry("anthropic/claude-haiku-4.5", pricing={"prompt": "0.0000001"})
+        req = TaskRequirements(security_sensitive=True)
+        self.assertEqual(score_model(entry, req), 8.0)
+
+    def test_standard_tasks_still_prefer_cheap_models(self):
+        cheap = _entry("cheap-model", pricing={"prompt": "0.0000001"})
+        pricey = _entry("pricey-model", pricing={"prompt": "0.000005"})
+        req = TaskRequirements()
+        self.assertGreater(score_model(cheap, req), score_model(pricey, req))
 
     def test_security_bonus_not_applied_to_non_claude(self):
         entry = _entry("openai/gpt-4o")
