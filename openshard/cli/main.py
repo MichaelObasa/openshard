@@ -990,6 +990,69 @@ def explain(task: str):
 
 
 @cli.command()
+@click.option(
+    "--provider",
+    type=click.Choice(["openrouter", "anthropic", "openai"], case_sensitive=False),
+    default=None,
+    help="Filter by provider. Omit to show all.",
+)
+@click.option("--refresh", is_flag=True, default=False, help="Fetch models from provider API and update cache.")
+def models(provider: str | None, refresh: bool):
+    """List cached models and their capabilities."""
+    from openshard.providers.cache import (
+        CACHE_TTL_HOURS,
+        build_cache_entry,
+        is_stale,
+        load_cache,
+        save_cache,
+    )
+
+    _all_providers = ["openrouter", "anthropic", "openai"]
+    targets = [provider.lower()] if provider else _all_providers
+
+    if refresh:
+        cache = load_cache() or {"cached_at": 0.0, "models": {}}
+        for pname in targets:
+            try:
+                if pname == "openrouter":
+                    from openshard.providers.openrouter import OpenRouterClient
+                    client = OpenRouterClient(get_api_key())
+                elif pname == "anthropic":
+                    from openshard.providers.anthropic import AnthropicProvider
+                    client = AnthropicProvider(get_anthropic_api_key())
+                else:
+                    from openshard.providers.openai import OpenAIProvider
+                    client = OpenAIProvider(get_openai_api_key())
+                model_list = client.list_models()
+                cache["models"].update(build_cache_entry(pname, model_list))
+                click.echo(f"  {pname}: {len(model_list)} models cached")
+            except (ValueError, ProviderAuthError, ProviderError) as exc:
+                click.echo(f"  {pname}: skipped ({exc})")
+        cache["cached_at"] = time.time()
+        save_cache(cache)
+        return
+
+    cache = load_cache()
+    if cache is None:
+        click.echo("No model cache found. Run 'openshard models --refresh' to populate it.")
+        return
+    if is_stale(cache.get("cached_at", 0.0)):
+        click.echo(f"Cache is older than {CACHE_TTL_HOURS}h. Run 'openshard models --refresh' to update.")
+        return
+
+    header = f"{'Provider':<12}  {'Model ID':<50}  {'Context':>9}  {'MaxOut':>7}  {'Vision':<6}  {'Tools':<5}"
+    click.echo(header)
+    click.echo("-" * len(header))
+    for pname in targets:
+        for m in cache.get("models", {}).get(pname, []):
+            ctx = str(m.get("context_window") or "-")
+            out = str(m.get("max_output_tokens") or "-")
+            vis = "yes" if m.get("supports_vision") else "no"
+            tls = "yes" if m.get("supports_tools") else "no"
+            click.echo(f"{pname:<12}  {m['id']:<50}  {ctx:>9}  {out:>7}  {vis:<6}  {tls:<5}")
+
+
+@cli.command()
 def report():
     """Display a summary report of recent executions."""
     log_path = Path.cwd() / _LOG_PATH

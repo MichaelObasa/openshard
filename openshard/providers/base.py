@@ -29,6 +29,10 @@ class ModelInfo:
     id: str
     name: str
     pricing: dict  # {"prompt": str, "completion": str, ...} — varies by provider/model
+    context_window: int | None = None
+    max_output_tokens: int | None = None
+    supports_vision: bool = False
+    supports_tools: bool = False
 
 
 @dataclass

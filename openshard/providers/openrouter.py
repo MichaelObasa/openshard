@@ -119,6 +119,15 @@ class OpenRouterClient(BaseProvider):
                 id=m.get("id", ""),
                 name=m.get("name", m.get("id", "")),
                 pricing=m.get("pricing", {}),
+                context_window=m.get("context_length"),
+                max_output_tokens=(m.get("top_provider") or {}).get("max_completion_tokens"),
+                supports_vision="image" in (
+                    (m.get("architecture") or {}).get("modality") or ""
+                ),
+                supports_tools=bool(
+                    m.get("supported_parameters")
+                    and "tools" in m["supported_parameters"]
+                ),
             )
             for m in data.get("data", [])
         ]
