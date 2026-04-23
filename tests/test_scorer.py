@@ -66,12 +66,14 @@ class TestScoreModel(unittest.TestCase):
         self.assertEqual(score_model(entry, req), 12.0)
 
     def test_cheap_cost_bonus(self):
-        entry = _entry("cheap", pricing={"prompt": "0.20"})
+        # $0.10/M = 0.0000001 per token; qualifies for both <=1.0 (+2) and <=0.25 (+1) bonuses
+        entry = _entry("cheap", pricing={"prompt": "0.0000001"})
         req = TaskRequirements()
-        self.assertEqual(score_model(entry, req), 13.0)  # <= 1.0 (+2) and <= 0.25 (+1)
+        self.assertEqual(score_model(entry, req), 13.0)
 
     def test_expensive_model_no_cost_bonus(self):
-        entry = _entry("pricey", pricing={"prompt": "5.00"})
+        # $5.00/M = 0.000005 per token; no bonus
+        entry = _entry("pricey", pricing={"prompt": "0.000005"})
         req = TaskRequirements()
         self.assertEqual(score_model(entry, req), 10.0)
 
@@ -100,8 +102,9 @@ class TestSelectCandidate(unittest.TestCase):
         self.assertIsNone(select_candidate([], req))
 
     def test_returns_top_scorer(self):
-        cheap = _entry("cheap", pricing={"prompt": "0.10"})
-        pricey = _entry("pricey", pricing={"prompt": "5.00"})
+        # $0.10/M cheap model beats $5.00/M expensive model via scoring bonuses
+        cheap = _entry("cheap", pricing={"prompt": "0.0000001"})
+        pricey = _entry("pricey", pricing={"prompt": "0.000005"})
         req = TaskRequirements()
         result = select_candidate([cheap, pricey], req)
         self.assertEqual(result.model.id, "cheap")

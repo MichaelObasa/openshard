@@ -35,9 +35,13 @@ def _parse_cost(pricing: dict) -> float | None:
     if not raw:
         return None
     try:
-        return float(str(raw).lstrip("$"))
+        val = float(str(raw).lstrip("$"))
     except (ValueError, TypeError):
         return None
+    if val <= 0:
+        return None
+    # Provider APIs return per-token prices; convert to per-million-token.
+    return val * 1_000_000
 
 
 def filter_inventory(

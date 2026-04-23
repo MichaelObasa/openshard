@@ -70,9 +70,10 @@ class TestFilterInventory(unittest.TestCase):
         self.assertEqual(len(result), 2)
 
     def test_cost_filter_excludes_expensive(self):
+        # $0.50/M cheap (5e-7 per token) vs $5.00/M expensive (5e-6 per token); cap $1.0/M
         entries = [
-            _entry("cheap", pricing={"prompt": "0.20"}),
-            _entry("expensive", pricing={"prompt": "5.00"}),
+            _entry("cheap", pricing={"prompt": "0.0000005"}),
+            _entry("expensive", pricing={"prompt": "0.000005"}),
         ]
         req = TaskRequirements(preferred_max_cost_per_m=1.0)
         result = filter_inventory(entries, req)
@@ -80,7 +81,7 @@ class TestFilterInventory(unittest.TestCase):
         self.assertEqual(result[0].model.id, "cheap")
 
     def test_cost_filter_keeps_missing_pricing(self):
-        entries = [_entry("no-price"), _entry("expensive", pricing={"prompt": "5.00"})]
+        entries = [_entry("no-price"), _entry("expensive", pricing={"prompt": "0.000005"})]
         req = TaskRequirements(preferred_max_cost_per_m=1.0)
         result = filter_inventory(entries, req)
         self.assertEqual(len(result), 1)

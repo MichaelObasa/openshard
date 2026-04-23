@@ -124,7 +124,8 @@ class TestModelLineAlignment(unittest.TestCase):
 class TestWinnerCost(unittest.TestCase):
 
     def test_select_with_info_returns_cost_when_present(self):
-        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.10"})
+        # $0.10/M = 0.0000001 per token; expect per-million value back
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000001"})
         reqs = TaskRequirements()
         result = select_with_info([entry], reqs, "standard")
         self.assertAlmostEqual(result.selected_cost_per_m, 0.10)
