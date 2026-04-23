@@ -37,7 +37,7 @@ class TestRequirementsFromCategory(unittest.TestCase):
     def test_standard(self):
         req = requirements_from_category("standard")
         self.assertEqual(req.complexity, "standard")
-        self.assertEqual(req.preferred_max_cost_per_m, 10.0)
+        self.assertEqual(req.preferred_max_cost_per_m, 1.0)
         self.assertIsNone(req.min_context_window)
         self.assertFalse(req.security_sensitive)
 
