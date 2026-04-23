@@ -24,7 +24,7 @@ def requirements_from_category(category: str) -> TaskRequirements:
         return TaskRequirements(needs_vision=True)
     if category == "boilerplate":
         return TaskRequirements(complexity="simple", preferred_max_cost_per_m=2.0)
-    return TaskRequirements(preferred_max_cost_per_m=1.0)
+    return TaskRequirements(preferred_max_cost_per_m=1.5)
 
 
 def requirements_from_stage(stage: Stage) -> TaskRequirements:
