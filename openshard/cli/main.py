@@ -1232,6 +1232,16 @@ def _render_log_entry(entry: dict, detail: str) -> None:
             cost_s = f"${sr['cost']:.4f}" if sr.get("cost") is not None else "-"
             click.echo(f"  {sr['stage_type'].capitalize()} ({_model_label(sr['model'])}): {sr['duration']:.1f}s, {cost_s}")
 
+    # Routing (--more / --full)
+    if detail != "default" and "routing_category" in entry:
+        click.echo(f"\n  [routing] category: {entry['routing_category']}")
+        if entry.get("routing_used_fallback"):
+            click.echo(f"  [routing] candidates: {entry.get('routing_candidate_count')} → fallback (keyword routing)")
+        elif entry.get("routing_selected_model"):
+            _prov = entry.get("routing_selected_provider")
+            _prov_suffix = f" ({_prov})" if _prov else ""
+            click.echo(f"  [routing] candidates: {entry.get('routing_candidate_count')} → {_model_label(entry['routing_selected_model'])}{_prov_suffix}")
+
     # Files
     fc = entry.get("files_created", 0)
     fu = entry.get("files_updated", 0)
