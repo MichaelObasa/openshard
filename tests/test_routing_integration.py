@@ -65,7 +65,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
     def test_scored_selection_used(self):
         """When inventory has a matching entry, its model ID reaches generate()."""
         task = "implement a feature"
-        entry = _make_entry("openrouter/fast-model")
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
         manager = _make_manager_mock([entry], ["openrouter"])
         generator = _make_generator_mock()
 
@@ -105,10 +105,11 @@ class TestScoredRoutingIntegration(unittest.TestCase):
         win without filtering, proving the filter is applied when it matters.
         """
         task = "implement a feature"
-        openrouter_entry = _make_entry("openrouter/basic")
+        openrouter_entry = _make_entry("openrouter/basic", pricing={"prompt": "0.0000005"})
         # anthropic entry scores higher (200K context → +2 bonus) but must be excluded
         anthropic_entry = _make_entry(
-            "anthropic/claude-large", provider="anthropic", context_window=200_000
+            "anthropic/claude-large", provider="anthropic", context_window=200_000,
+            pricing={"prompt": "0.0000005"},
         )
         manager = _make_manager_mock([openrouter_entry, anthropic_entry], ["openrouter", "anthropic"])
         generator = _make_generator_mock()
@@ -120,7 +121,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
     def test_scored_routing_logged(self):
         """_log_run is called with a ScoredRoutingResult that reflects the winning candidate."""
         task = "implement a feature"
-        entry = _make_entry("openrouter/fast-model")
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
         manager = _make_manager_mock([entry], ["openrouter"])
         generator = _make_generator_mock()
 

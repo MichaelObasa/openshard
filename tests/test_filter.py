@@ -80,15 +80,42 @@ class TestFilterInventory(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].model.id, "cheap")
 
-    def test_cost_filter_keeps_missing_pricing(self):
-        entries = [_entry("no-price"), _entry("expensive", pricing={"prompt": "0.000005"})]
+    def test_cost_filter_excludes_missing_pricing(self):
+        entries = [_entry("no-price"), _entry("cheap", pricing={"prompt": "0.0000005"})]
         req = TaskRequirements(preferred_max_cost_per_m=1.0)
         result = filter_inventory(entries, req)
         self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].model.id, "no-price")
+        self.assertEqual(result[0].model.id, "cheap")
 
-    def test_cost_filter_keeps_unparseable_pricing(self):
+    def test_cost_filter_excludes_unparseable_pricing(self):
         entries = [_entry("weird", pricing={"prompt": "n/a"})]
+        req = TaskRequirements(preferred_max_cost_per_m=1.0)
+        result = filter_inventory(entries, req)
+        self.assertEqual(len(result), 0)
+
+    def test_cost_filter_excludes_zero_pricing(self):
+        entries = [_entry("free", pricing={"prompt": "0"}), _entry("cheap", pricing={"prompt": "0.0000005"})]
+        req = TaskRequirements(preferred_max_cost_per_m=1.0)
+        result = filter_inventory(entries, req)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].model.id, "cheap")
+
+    def test_cost_filter_not_applied_without_cap(self):
+        entries = [_entry("no-price"), _entry("expensive", pricing={"prompt": "0.000005"})]
+        req = TaskRequirements()  # no cap
+        result = filter_inventory(entries, req)
+        self.assertEqual(len(result), 2)
+
+    def test_real_provider_pricing_shape_parses_correctly(self):
+        # OpenRouter returns per-token prices; $5.00/M Opus-class model
+        entries = [_entry("opus", pricing={"prompt": "0.000005"})]
+        req = TaskRequirements(preferred_max_cost_per_m=1.0)
+        result = filter_inventory(entries, req)
+        self.assertEqual(len(result), 0)  # $5.00/M exceeds $1.00/M cap
+
+    def test_cheap_real_model_passes_cap(self):
+        # $0.30/M MiniMax-class model
+        entries = [_entry("minimax", pricing={"prompt": "0.0000003"})]
         req = TaskRequirements(preferred_max_cost_per_m=1.0)
         result = filter_inventory(entries, req)
         self.assertEqual(len(result), 1)

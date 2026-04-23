@@ -65,7 +65,7 @@ def filter_inventory(
             continue
         if requirements.preferred_max_cost_per_m is not None:
             cost = _parse_cost(m.pricing)
-            if cost is not None and cost > requirements.preferred_max_cost_per_m:
+            if cost is None or cost > requirements.preferred_max_cost_per_m:
                 continue
 
         result.append(entry)
