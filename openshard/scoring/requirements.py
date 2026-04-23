@@ -17,14 +17,14 @@ class TaskRequirements:
 
 def requirements_from_category(category: str) -> TaskRequirements:
     if category == "security":
-        return TaskRequirements(security_sensitive=True, complexity="complex")
+        return TaskRequirements(security_sensitive=True, complexity="complex", min_context_window=100_000)
     if category == "complex":
         return TaskRequirements(complexity="complex", min_context_window=100_000)
     if category == "visual":
         return TaskRequirements(needs_vision=True)
     if category == "boilerplate":
-        return TaskRequirements(complexity="simple")
-    return TaskRequirements()
+        return TaskRequirements(complexity="simple", preferred_max_cost_per_m=2.0)
+    return TaskRequirements(preferred_max_cost_per_m=10.0)
 
 
 def requirements_from_stage(stage: Stage) -> TaskRequirements:
