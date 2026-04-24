@@ -166,12 +166,6 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     click.echo("")
     if detail != "default" and _policy_reason:
         click.echo(f"  [executor] {effective_executor} - {_policy_reason}")
-    if routing_decision is not None:
-        if detail != "default":
-            click.echo(f"  [routing] {_model_label(routing_decision.model)} - {routing_decision.rationale}")
-        hint = _pre_run_cost_hint(routing_decision.model, task)
-        if hint:
-            click.echo(f"  Cost estimate: {hint}")
     _routed_model = routing_decision.model if routing_decision else None
     _scored: ScoredRoutingResult | None = None
 
@@ -199,6 +193,14 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 )
         except Exception:
             pass
+
+    # Routing line is printed after scoring so the model label reflects the actual selection.
+    if routing_decision is not None:
+        if detail != "default":
+            click.echo(f"  [routing] {_model_label(_routed_model)} - {routing_decision.rationale}")
+        hint = _pre_run_cost_hint(routing_decision.model, task)
+        if hint:
+            click.echo(f"  Cost estimate: {hint}")
 
     if detail != "default" and _scored is not None:
         _req = _scored.requirements

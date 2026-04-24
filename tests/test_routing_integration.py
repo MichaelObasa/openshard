@@ -139,3 +139,59 @@ class TestScoredRoutingIntegration(unittest.TestCase):
         self.assertEqual(_scored.selected_model, "openrouter/fast-model")
         self.assertEqual(_scored.selected_provider, "openrouter")
         self.assertFalse(_scored.used_fallback)
+
+
+class TestRoutingDisplayConsistency(unittest.TestCase):
+    """Verify that the early [routing] line in --more output matches the final selected model."""
+
+    def _run(self, args: list[str], manager_mock, generator_mock):
+        with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
+             patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
+             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+             patch("openshard.cli.main._log_run"):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run"] + args)
+        return result
+
+    def test_routing_line_shows_scored_model_not_keyword_model(self):
+        """With --more, the [routing] line shows the scored model, not the keyword-routed one.
+
+        Keyword routing for 'implement a feature' picks GLM-5.1, but the inventory
+        has fast-model which scoring selects instead.  The display line must agree.
+        """
+        task = "implement a feature"
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
+        manager = _make_manager_mock([entry], ["openrouter"])
+        generator = _make_generator_mock()
+
+        result = self._run([task, "--more"], manager, generator)
+
+        # Find the single early routing summary line (contains " - " rationale separator)
+        routing_lines = [
+            ln for ln in result.output.splitlines()
+            if "[routing]" in ln and " - " in ln
+        ]
+        self.assertEqual(len(routing_lines), 1, result.output)
+        # _model_label("openrouter/fast-model") → "Fast Model"
+        self.assertIn("Fast Model", routing_lines[0])
+        # Keyword-routed model (GLM-5.1) must NOT appear in this line
+        self.assertNotIn("GLM", routing_lines[0])
+
+    def test_routing_line_uses_fallback_model_when_scoring_finds_no_candidate(self):
+        """When no inventory entry passes the hard filter, the fallback (keyword) model is shown."""
+        task = "add a ui component"  # routes to visual category → needs_vision=True
+        # Entry lacks vision support → hard-filtered out → fallback
+        entry = _make_entry("openrouter/no-vision", supports_vision=False)
+        manager = _make_manager_mock([entry], ["openrouter"])
+        generator = _make_generator_mock()
+
+        result = self._run([task, "--more"], manager, generator)
+
+        routing_lines = [
+            ln for ln in result.output.splitlines()
+            if "[routing]" in ln and " - " in ln
+        ]
+        self.assertEqual(len(routing_lines), 1, result.output)
+        # Fallback for visual category is kimi-k2.5; the label should NOT say fast-model
+        self.assertNotIn("fast-model", routing_lines[0])
+        self.assertNotIn("no-vision", routing_lines[0])
