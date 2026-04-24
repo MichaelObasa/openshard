@@ -24,6 +24,7 @@ from openshard.scoring.scorer import ScoredRoutingResult, select_with_info
 from openshard.execution.stages import (
     Stage, StageRun, split_task, route_stage, should_use_stages, run_planning_stage,
 )
+from openshard.analysis.repo import analyze_repo, RepoFacts
 
 
 @click.group()
@@ -356,6 +357,12 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             for note in _notes:
                 click.echo(f"  {note}")
 
+    if detail != "default":
+        try:
+            _render_repo_summary(analyze_repo(Path.cwd()))
+        except Exception:
+            click.echo("\n  [repo] Repo summary unavailable")
+
     if dry_run:
         if _should_shrink(result.files, no_shrink):
             _print_shrunk(result.files, result.summary)
@@ -586,6 +593,28 @@ def _print_summary(
             )
             click.echo(f"Retry cost: {retry_cost_str}")
     click.echo(f"\nTime: {elapsed:.1f}s   Cost: {cost_str}")
+
+
+def _render_repo_summary(facts: RepoFacts) -> None:
+    click.echo("\nRepo")
+    if facts.languages:
+        click.echo(f"  Languages: {', '.join(facts.languages)}")
+    if facts.package_files:
+        click.echo(f"  Packages: {', '.join(facts.package_files)}")
+    if facts.framework:
+        click.echo(f"  Framework: {facts.framework}")
+    if facts.test_command:
+        click.echo(f"  Tests: {facts.test_command}")
+    if facts.risky_paths:
+        n = len(facts.risky_paths)
+        sample = ", ".join(facts.risky_paths[:3])
+        suffix = f" + {n - 3} more" if n > 3 else ""
+        click.echo(f"  Risky: {n} paths  ({sample}{suffix})")
+    if facts.changed_files:
+        n = len(facts.changed_files)
+        sample = ", ".join(facts.changed_files[:3])
+        suffix = f" + {n - 3} more" if n > 3 else ""
+        click.echo(f"  Changed: {n} files  ({sample}{suffix})")
 
 
 # ---------------------------------------------------------------------------
