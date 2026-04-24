@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from openshard.providers.manager import InventoryEntry
 from openshard.scoring.filter import _parse_cost, filter_inventory, prefilter_coding
@@ -18,6 +18,8 @@ class ScoredRoutingResult:
     selected_provider: str | None
     used_fallback: bool
     selected_cost_per_m: float | None = None
+    candidates: list[str] = field(default_factory=list)
+    scores: dict[str, float] = field(default_factory=dict)
 
 
 def score_model(
@@ -98,7 +100,8 @@ def select_with_info(
             selected_provider=None,
             used_fallback=True,
         )
-    winner = max(candidates, key=lambda e: score_model(e, requirements, category))
+    scored = [(e, score_model(e, requirements, category)) for e in candidates]
+    winner = max(scored, key=lambda x: x[1])[0]
     return ScoredRoutingResult(
         category=category,
         requirements=requirements,
@@ -107,4 +110,6 @@ def select_with_info(
         selected_provider=winner.provider,
         used_fallback=False,
         selected_cost_per_m=_parse_cost(winner.model.pricing),
+        candidates=[e.model.id for e, _ in scored],
+        scores={e.model.id: round(s, 3) for e, s in scored},
     )

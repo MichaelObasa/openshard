@@ -194,6 +194,12 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         except Exception:
             pass
 
+    _repo_facts: RepoFacts | None = None
+    try:
+        _repo_facts = analyze_repo(Path.cwd())
+    except Exception:
+        pass
+
     # Routing line is printed after scoring so the model label reflects the actual selection.
     if routing_decision is not None:
         if detail != "default":
@@ -377,7 +383,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                      workspace=None, usage=usage, model=_routed_model,
                      summary=result.summary, notes=result.notes,
                      stage_runs=stage_runs, routing_decision=routing_decision,
-                     _scored=_scored)
+                     _scored=_scored, repo_facts=_repo_facts)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
         return
@@ -448,7 +454,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                          workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
                          summary=result.summary, notes=result.notes,
                          stage_runs=stage_runs, routing_decision=routing_decision,
-                         _scored=_scored)
+                         _scored=_scored, repo_facts=_repo_facts)
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
             sys.exit(code)
@@ -462,7 +468,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                  workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
                  summary=result.summary, notes=result.notes,
                  stage_runs=stage_runs, routing_decision=routing_decision,
-                 _scored=_scored)
+                 _scored=_scored, repo_facts=_repo_facts)
     except Exception as exc:
         click.echo(f"  [log] warning: {exc}")
 
@@ -487,6 +493,7 @@ def _log_run(
     stage_runs=None,
     routing_decision=None,
     _scored: ScoredRoutingResult | None = None,
+    repo_facts: RepoFacts | None = None,
 ) -> None:
     entry: dict = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -527,6 +534,10 @@ def _log_run(
         entry["routing_selected_model"] = _scored.selected_model
         entry["routing_selected_provider"] = _scored.selected_provider
         entry["routing_used_fallback"] = _scored.used_fallback
+        if _scored.candidates:
+            entry["routing_candidates"] = _scored.candidates
+        if _scored.scores:
+            entry["routing_scores"] = _scored.scores
     if retry_triggered:
         entry["fixer_model"] = generator.fixer_model
     if usage is not None:
@@ -539,6 +550,17 @@ def _log_run(
         entry["retry_completion_tokens"] = retry_usage.completion_tokens
         entry["retry_total_tokens"] = retry_usage.total_tokens
         entry["retry_estimated_cost"] = retry_usage.estimated_cost
+    if repo_facts is not None:
+        entry["repo_facts"] = {
+            "languages": repo_facts.languages,
+            "package_files": repo_facts.package_files,
+            "framework": repo_facts.framework,
+            "test_command": repo_facts.test_command,
+            "risky_paths_count": len(repo_facts.risky_paths),
+            "risky_paths_sample": repo_facts.risky_paths[:3],
+            "changed_files_count": len(repo_facts.changed_files),
+            "changed_files_sample": repo_facts.changed_files[:3],
+        }
 
     log_path = Path.cwd() / _LOG_PATH
     log_path.parent.mkdir(parents=True, exist_ok=True)
