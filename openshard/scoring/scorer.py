@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from openshard.providers.manager import InventoryEntry
 from openshard.scoring.filter import _parse_cost, filter_inventory, prefilter_coding
+from openshard.scoring.policy import policy_bonus
 from openshard.scoring.requirements import TaskRequirements
 from openshard.scoring.shortlist import build_shortlist
 
@@ -19,7 +20,11 @@ class ScoredRoutingResult:
     selected_cost_per_m: float | None = None
 
 
-def score_model(entry: InventoryEntry, requirements: TaskRequirements) -> float:
+def score_model(
+    entry: InventoryEntry,
+    requirements: TaskRequirements,
+    category: str = "",
+) -> float:
     """Return a score for a candidate model. Higher is better."""
     score = 10.0
     m = entry.model
@@ -56,12 +61,15 @@ def score_model(entry: InventoryEntry, requirements: TaskRequirements) -> float:
     if m.id.startswith("~"):
         score -= 1.0
 
+    score += policy_bonus(m.id, category)
+
     return score
 
 
 def select_candidate(
     entries: list[InventoryEntry],
     requirements: TaskRequirements,
+    category: str = "",
 ) -> InventoryEntry | None:
     """Filter entries by requirements, score survivors, return top scorer."""
     candidates = prefilter_coding(entries)
@@ -69,7 +77,7 @@ def select_candidate(
     candidates = filter_inventory(candidates, requirements)
     if not candidates:
         return None
-    return max(candidates, key=lambda e: score_model(e, requirements))
+    return max(candidates, key=lambda e: score_model(e, requirements, category))
 
 
 def select_with_info(
@@ -90,7 +98,7 @@ def select_with_info(
             selected_provider=None,
             used_fallback=True,
         )
-    winner = max(candidates, key=lambda e: score_model(e, requirements))
+    winner = max(candidates, key=lambda e: score_model(e, requirements, category))
     return ScoredRoutingResult(
         category=category,
         requirements=requirements,
