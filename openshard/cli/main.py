@@ -1104,7 +1104,8 @@ def explain(task: str):
         click.echo("  Straightforward task - default fixer model should be sufficient.")
 
 
-@cli.command()
+@cli.group(invoke_without_command=True)
+@click.pass_context
 @click.option(
     "--provider",
     type=click.Choice(["openrouter", "anthropic", "openai"], case_sensitive=False),
@@ -1112,8 +1113,10 @@ def explain(task: str):
     help="Filter by provider. Omit to show all.",
 )
 @click.option("--refresh", is_flag=True, default=False, help="Fetch models from provider API and update cache.")
-def models(provider: str | None, refresh: bool):
-    """List cached models and their capabilities."""
+def models(ctx: click.Context, provider: str | None, refresh: bool):
+    """List cached models and capabilities, or run a subcommand."""
+    if ctx.invoked_subcommand is not None:
+        return
     if provider is None:
         from openshard.providers.manager import ProviderManager
         manager = ProviderManager()
@@ -1132,11 +1135,11 @@ def models(provider: str | None, refresh: bool):
         click.echo("-" * len(header))
         for entry in inventory.models:
             m = entry.model
-            ctx = str(m.context_window or "-")
+            ctx2 = str(m.context_window or "-")
             out = str(m.max_output_tokens or "-")
             vis = "yes" if m.supports_vision else "no"
             tls = "yes" if m.supports_tools else "no"
-            click.echo(f"{entry.provider:<12}  {m.id:<50}  {ctx:>9}  {out:>7}  {vis:<6}  {tls:<5}")
+            click.echo(f"{entry.provider:<12}  {m.id:<50}  {ctx2:>9}  {out:>7}  {vis:<6}  {tls:<5}")
         return
 
     from openshard.providers.cache import (
@@ -1185,11 +1188,51 @@ def models(provider: str | None, refresh: bool):
     click.echo("-" * len(header))
     for pname in targets:
         for m in cache.get("models", {}).get(pname, []):
-            ctx = str(m.get("context_window") or "-")
+            ctx2 = str(m.get("context_window") or "-")
             out = str(m.get("max_output_tokens") or "-")
             vis = "yes" if m.get("supports_vision") else "no"
             tls = "yes" if m.get("supports_tools") else "no"
-            click.echo(f"{pname:<12}  {m['id']:<50}  {ctx:>9}  {out:>7}  {vis:<6}  {tls:<5}")
+            click.echo(f"{pname:<12}  {m['id']:<50}  {ctx2:>9}  {out:>7}  {vis:<6}  {tls:<5}")
+
+
+@models.command("stats")
+def models_stats():
+    """Show per-model performance stats from run history."""
+    from openshard.history.metrics import compute_model_stats, load_runs
+
+    runs = load_runs()
+    if not runs:
+        log_path = Path.cwd() / _LOG_PATH
+        if not log_path.exists():
+            click.echo("No run history found. Run 'openshard run' to get started.")
+        else:
+            click.echo("No runs recorded yet.")
+        return
+
+    stats = compute_model_stats(runs)
+    if not stats:
+        click.echo("No model data in run history.")
+        return
+
+    total_runs = len(runs)
+    model_count = len(stats)
+    click.echo(f"[model stats]  {model_count} model{'s' if model_count != 1 else ''}  (from {total_runs} run{'s' if total_runs != 1 else ''})\n")
+
+    col_model = 48
+    header = (
+        f"  {'model':<{col_model}}  {'runs':>5}  {'avg cost':>9}  {'avg dur':>8}  {'pass rate':>9}  {'retry':>6}"
+    )
+    click.echo(header)
+    click.echo("  " + "-" * (len(header) - 2))
+
+    for model_id, s in list(stats.items())[:10]:
+        runs_n = s["runs_count"]
+        avg_cost = f"${s['avg_cost']:.4f}" if s["avg_cost"] is not None else "-"
+        avg_dur = f"{s['avg_duration']:.1f}s" if s["avg_duration"] is not None else "-"
+        pass_rate = f"{s['verification_pass_rate']:.0%}" if s["verification_pass_rate"] is not None else "-"
+        retry = f"{s['retry_rate']:.0%}"
+        mid = model_id if len(model_id) <= col_model else model_id[: col_model - 1] + "…"
+        click.echo(f"  {mid:<{col_model}}  {runs_n:>5}  {avg_cost:>9}  {avg_dur:>8}  {pass_rate:>9}  {retry:>6}")
 
 
 @cli.command()
