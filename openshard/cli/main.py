@@ -991,15 +991,12 @@ def _run_verification(
     """
     cmd = _detect_command(cwd)
     if cmd is None:
-        if not capture and detail == "full":
+        if not capture:
             click.echo(f"  {label} no test command detected")
         return (0, "") if capture else 0
 
     if not capture:
-        if detail == "full":
-            click.echo(f"  {label} running: {' '.join(cmd)}")
-        else:
-            click.echo("  Verifying...")
+        click.echo(f"  {label} running: {' '.join(cmd)}")
     proc = subprocess.run(
         cmd,
         cwd=cwd,
@@ -1011,16 +1008,10 @@ def _run_verification(
     if capture:
         return proc.returncode, proc.stdout or ""
 
-    if detail == "full":
-        if proc.returncode == 0:
-            click.echo(f"  {label} passed")
-        else:
-            click.echo(f"  {label} failed (exit code {proc.returncode})")
+    if proc.returncode == 0:
+        click.echo(f"  {label} passed")
     else:
-        if proc.returncode == 0:
-            click.echo("  Verified")
-        else:
-            click.echo(f"  Verification failed (exit {proc.returncode})")
+        click.echo(f"  {label} failed (exit code {proc.returncode})")
     return proc.returncode
 
 
