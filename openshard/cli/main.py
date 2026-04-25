@@ -12,7 +12,7 @@ from pathlib import Path
 import click
 
 from openshard.config.settings import get_api_key, get_anthropic_api_key, get_openai_api_key, load_config
-from openshard.execution.generator import ChangedFile, ExecutionGenerator, ExecutionResult
+from openshard.execution.generator import ChangedFile, ExecutionGenerator, ExecutionResult, check_stack_mismatch
 from openshard.execution.opencode_executor import OpenCodeExecutor
 from openshard.planning.generator import PlanGenerator
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
@@ -272,7 +272,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                     routing_decision.rationale if routing_decision else "",
                 ))
                 try:
-                    result = generator.generate(_impl_task, model=_stage_model)
+                    result = generator.generate(_impl_task, model=_stage_model, repo_facts=_repo_facts)
                 except RuntimeError as exc:
                     raise click.ClickException(str(exc))
                 except ProviderAuthError:
@@ -305,7 +305,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             if opencode_mode:
                 result = generator.generate(task, workspace=workspace)
             else:
-                result = generator.generate(task, model=_routed_model)
+                result = generator.generate(task, model=_routed_model, repo_facts=_repo_facts)
         except RuntimeError as exc:
             raise click.ClickException(str(exc))
         except ProviderAuthError:
@@ -328,6 +328,16 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         else:
             usage.estimated_cost = total_stage_cost or None
     final_files = result.files
+
+    if not opencode_mode and _repo_facts is not None:
+        _mismatches = check_stack_mismatch(final_files, _repo_facts)
+        if _mismatches:
+            _lang_str = ", ".join(_repo_facts.languages) if _repo_facts.languages else "unknown"
+            _mismatch_str = ", ".join(_mismatches[:3])
+            raise click.ClickException(
+                f"Stack mismatch: generated files don't match the repo stack ({_lang_str}).\n"
+                f"  Mismatched: {_mismatch_str}"
+            )
 
     click.echo("\nDone")
     click.echo(result.summary)

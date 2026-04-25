@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import ANY, MagicMock, call, patch
 
 from click.testing import CliRunner
 
@@ -57,6 +57,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
         with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+             patch("openshard.cli.main.analyze_repo"), \
              patch("openshard.cli.main._log_run"):
             runner = CliRunner()
             result = runner.invoke(cli, ["run"] + args)
@@ -71,7 +72,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
 
         self._run([task], manager, generator)
 
-        generator.generate.assert_called_once_with(task, model="openrouter/fast-model")
+        generator.generate.assert_called_once_with(task, model="openrouter/fast-model", repo_facts=ANY)
 
     def test_fallback_when_no_candidate(self):
         """When the only inventory entry fails hard filter, routing decision model is used."""
@@ -84,7 +85,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
         self._run([task], manager, generator)
 
         # routing_decision.model for "visual" category is moonshotai/kimi-k2.5
-        generator.generate.assert_called_once_with(task, model="moonshotai/kimi-k2.5")
+        generator.generate.assert_called_once_with(task, model="moonshotai/kimi-k2.5", repo_facts=ANY)
 
     def test_provider_manager_failure_uses_fallback(self):
         """When ProviderManager.get_inventory raises, routing decision model is used."""
@@ -96,7 +97,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
         self._run([task], manager, generator)
 
         # standard task → MODEL_MAIN
-        generator.generate.assert_called_once_with(task, model="z-ai/glm-5.1")
+        generator.generate.assert_called_once_with(task, model="z-ai/glm-5.1", repo_facts=ANY)
 
     def test_provider_flag_restricts_candidates(self):
         """With --provider openrouter, only openrouter entries are considered.
@@ -116,7 +117,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
 
         self._run([task, "--provider", "openrouter"], manager, generator)
 
-        generator.generate.assert_called_once_with(task, model="openrouter/basic")
+        generator.generate.assert_called_once_with(task, model="openrouter/basic", repo_facts=ANY)
 
     def test_scored_routing_logged(self):
         """_log_run is called with a ScoredRoutingResult that reflects the winning candidate."""
@@ -148,6 +149,7 @@ class TestRoutingDisplayConsistency(unittest.TestCase):
         with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+             patch("openshard.cli.main.analyze_repo"), \
              patch("openshard.cli.main._log_run"):
             runner = CliRunner()
             result = runner.invoke(cli, ["run"] + args)

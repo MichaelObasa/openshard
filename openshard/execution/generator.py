@@ -3,10 +3,15 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 from openshard.config.settings import get_api_key, load_config
 from openshard.providers.base import BaseProvider, ProviderError, UsageStats
 from openshard.providers.openrouter import OpenRouterClient
+
+if TYPE_CHECKING:
+    from openshard.analysis.repo import RepoFacts
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -40,6 +45,71 @@ Rules:
 - notes: important follow-up actions or caveats; omit if none
 - change_type must be exactly one of: create, update, delete\
 """
+
+# ---------------------------------------------------------------------------
+# Stack guard
+# ---------------------------------------------------------------------------
+
+# Extensions that are always allowed regardless of repo language.
+_DOC_EXTS: frozenset[str] = frozenset({
+    ".md", ".rst", ".txt", ".json", ".yml", ".yaml", ".toml", ".cfg",
+    ".ini", ".lock", ".gitignore", ".env", ".sh", ".bat", ".html",
+    ".css", ".scss", ".svg", ".xml", ".dockerfile",
+})
+
+# Extensions whose presence implies a specific language.
+_EXT_TO_LANG: dict[str, str] = {
+    ".py": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".rs": "rust",
+    ".go": "go",
+    ".java": "java",
+    ".rb": "ruby",
+    ".php": "php",
+    ".cs": "csharp",
+    ".cpp": "cpp",
+    ".c": "c",
+    ".swift": "swift",
+    ".kt": "kotlin",
+}
+
+
+def check_stack_mismatch(files: list[ChangedFile], repo_facts: RepoFacts) -> list[str]:
+    """Return paths of generated files whose language is absent from the repo stack."""
+    if not repo_facts.languages:
+        return []
+    repo_langs = set(repo_facts.languages)
+    mismatches: list[str] = []
+    for f in files:
+        ext = Path(f.path).suffix.lower()
+        if not ext or ext in _DOC_EXTS:
+            continue
+        lang = _EXT_TO_LANG.get(ext)
+        if lang and lang not in repo_langs:
+            mismatches.append(f.path)
+    return mismatches
+
+
+def _build_repo_context(repo_facts: RepoFacts) -> str:
+    """Format repo facts into a short context block for the task prompt."""
+    parts: list[str] = []
+    if repo_facts.languages:
+        parts.append(f"Languages: {', '.join(repo_facts.languages)}")
+    if repo_facts.test_command:
+        parts.append(f"Test command: {repo_facts.test_command}")
+    if repo_facts.framework:
+        parts.append(f"Framework: {repo_facts.framework}")
+    if repo_facts.package_files:
+        parts.append(f"Package files: {', '.join(repo_facts.package_files)}")
+    if not parts:
+        return ""
+    lines = ["Repo context:"] + [f"  {p}" for p in parts]
+    lines.append("Generate files that match this repo's stack and language(s).")
+    return "\n".join(lines)
+
 
 # ---------------------------------------------------------------------------
 # Return types
@@ -116,14 +186,26 @@ class ExecutionGenerator:
             provider if provider is not None else OpenRouterClient(get_api_key())
         )
 
-    def generate(self, task: str, model: str | None = None) -> ExecutionResult:
+    def generate(
+        self,
+        task: str,
+        model: str | None = None,
+        repo_facts: RepoFacts | None = None,
+    ) -> ExecutionResult:
         """Call the model and return a parsed :class:`ExecutionResult`.
 
         *model* overrides the default execution model when provided.
+        *repo_facts* appends repo stack context to the prompt so the model
+        generates files that match the detected language and test tooling.
         """
+        prompt = task
+        if repo_facts is not None:
+            ctx = _build_repo_context(repo_facts)
+            if ctx:
+                prompt = f"{ctx}\n\n{task}"
         response = self.client.execute(
             model=model or self.model,
-            prompt=task,
+            prompt=prompt,
             system=_SYSTEM_PROMPT,
         )
         result = self._parse(response.content)
