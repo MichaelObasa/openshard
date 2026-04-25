@@ -1247,6 +1247,93 @@ def report():
         click.echo(f"  {ts}  {task}")
         click.echo(f"    model: {model}  retry: {retry}  verify: {vstr}")
 
+def _compute_metrics(entries: list[dict]) -> dict:
+    from collections import Counter
+
+    costs = [e["estimated_cost"] for e in entries if e.get("estimated_cost") is not None]
+    total_cost = sum(costs) if costs else None
+    avg_cost = total_cost / len(costs) if costs else None
+
+    durations = [e["duration_seconds"] for e in entries if "duration_seconds" in e]
+    avg_duration = sum(durations) / len(durations) if durations else 0.0
+
+    models = Counter(e["execution_model"] for e in entries if e.get("execution_model"))
+    categories = Counter(e["routing_category"] for e in entries if e.get("routing_category"))
+
+    v_passed = sum(1 for e in entries if e.get("verification_passed") is True)
+    v_failed = sum(1 for e in entries if e.get("verification_passed") is False)
+    v_unknown = len(entries) - v_passed - v_failed
+
+    timestamps = [e["timestamp"] for e in entries if e.get("timestamp")]
+    most_recent = max(timestamps) if timestamps else None
+    if most_recent:
+        most_recent = most_recent.rstrip("Z").replace("T", " ").split(".")[0] + " UTC"
+
+    return {
+        "total_runs": len(entries),
+        "total_cost": total_cost,
+        "avg_cost": avg_cost,
+        "avg_duration": avg_duration,
+        "most_recent": most_recent,
+        "models": dict(models.most_common()),
+        "categories": dict(categories.most_common()),
+        "verification": {"passed": v_passed, "failed": v_failed, "unknown": v_unknown},
+    }
+
+
+@cli.command()
+def metrics():
+    """Show aggregated metrics from run history."""
+    log_path = Path.cwd() / _LOG_PATH
+
+    if not log_path.exists():
+        click.echo("No run history found. Run 'openshard run' to get started.")
+        return
+
+    entries = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    if not entries:
+        click.echo("No runs recorded yet.")
+        return
+
+    m = _compute_metrics(entries)
+
+    def _cost(v: float | None) -> str:
+        return f"${v:.4f}" if v is not None else "-"
+
+    click.echo("\n[metrics]")
+    click.echo(f"  runs:             {m['total_runs']}")
+    click.echo(f"  total cost:       {_cost(m['total_cost'])}")
+    click.echo(f"  avg cost/run:     {_cost(m['avg_cost'])}")
+    click.echo(f"  avg duration:     {m['avg_duration']:.1f}s")
+    click.echo(f"  most recent:      {m['most_recent'] or '-'}")
+
+    if m["models"]:
+        click.echo("\n  models")
+        for model_id, count in m["models"].items():
+            label = _model_label(model_id)
+            click.echo(f"    {label:<26} {count}")
+
+    if m["categories"]:
+        click.echo("\n  categories")
+        for cat, count in m["categories"].items():
+            click.echo(f"    {cat:<26} {count}")
+
+    v = m["verification"]
+    click.echo("\n  verification")
+    click.echo(f"    passed           {v['passed']}")
+    click.echo(f"    failed           {v['failed']}")
+    click.echo(f"    not attempted    {v['unknown']}")
+
+
 def _render_log_entry(entry: dict, detail: str) -> None:
     """Render a stored run log entry at the requested detail level."""
     ts = entry.get("timestamp", "").rstrip("Z").replace("T", " ").split(".")[0]
