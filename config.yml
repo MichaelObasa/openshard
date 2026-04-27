@@ -21,14 +21,22 @@ planning_model: anthropic/claude-sonnet-4.6
 execution_model: anthropic/claude-sonnet-4.6
 fixer_model: anthropic/claude-sonnet-4.6
 
-# Execution backend: direct (default, calls OpenRouter API) or opencode (calls opencode CLI)
-executor: direct
+# Workflow shape: auto (default) | direct | staged | opencode
+# auto   — policy-driven: routes task to the best shape automatically
+# direct — single-pass API call, no planning stage
+# staged — planning stage then implementation stage
+# opencode — delegate to OpenCode CLI subprocess
+workflow: auto
 
-# Execution mode: auto | ask | smart (default)
-# auto  — always proceed without asking
-# ask   — always prompt before writing
-# smart — prompt only for higher-risk tasks (auth, payments, secrets, etc.)
-mode: smart
+# Approval mode: auto (default) | smart | ask
+# Controls when OpenShard prompts before writing, running shell commands, etc.
+# auto  — never prompts (gates are silent)
+# smart — prompts for security/complex tasks and risky paths
+# ask   — prompts before every task
+approval_mode: auto
+
+# DEPRECATED: use `workflow` instead. Kept for backward compatibility.
+executor: direct
 
 # Optional: override auto-detected verification command.
 # If set, this is used instead of npm test / pytest detection.

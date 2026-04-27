@@ -69,18 +69,32 @@ def plan(task: str):
 @click.option("--full", is_flag=True, default=False, help="Show all details: workspace, verification command, retry prompt, raw output.")
 @click.option("--no-shrink", is_flag=True, default=False, help="Disable output shrinking for long results.")
 @click.option(
+    "--workflow",
+    type=click.Choice(
+        ["auto", "direct", "staged", "native", "opencode", "claude-code", "codex"],
+        case_sensitive=False,
+    ),
+    default=None,
+    help=(
+        "Execution workflow: auto (default, policy-driven), direct (single-pass API call), "
+        "staged (planning then implementation), native (native agent — not yet available), "
+        "opencode (OpenCode CLI), claude-code (not yet available), codex (not yet available)."
+    ),
+)
+@click.option(
     "--executor",
     type=click.Choice(["direct", "opencode"], case_sensitive=False),
     default=None,
-    help="Execution backend: direct (default, calls OpenRouter API) or opencode (calls opencode CLI).",
+    help="[DEPRECATED] Use --workflow instead. Execution backend: direct or opencode.",
 )
+@click.option("--plan", "plan_flag", is_flag=True, default=False, help="Show execution plan and prompt for approval before running.")
 @click.option(
     "--provider",
     type=click.Choice(["openrouter", "anthropic", "openai"], case_sensitive=False),
     default=None,
     help="API provider: openrouter (default), anthropic (requires ANTHROPIC_API_KEY), or openai (requires OPENAI_API_KEY).",
 )
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, executor: str | None, provider: str | None):
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, executor: str | None, plan_flag: bool, provider: str | None):
     """Execute TASK and return a structured result."""
     detail = "full" if full else ("more" if more else "default")
     start = time.time()
@@ -92,19 +106,64 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
 
     try:
         _cfg = load_config()
-        _cfg_executor = _cfg.get("executor", "direct").lower()
+        _cfg_workflow = _cfg.get("workflow", "").strip().lower()
+        _cfg_executor_legacy = _cfg.get("executor", "direct").strip().lower()
         _policy_executor, _policy_reason = _suggest_executor(task)
-        if executor:
-            # CLI flag is absolute; policy note is suppressed
-            effective_executor = executor.lower()
+
+        # --workflow > --executor (deprecated) > config.workflow > config.executor > auto
+        _show_executor_deprecation = False
+        if workflow is not None:
+            _wf = workflow.lower()
+            if _wf in ("native", "claude-code", "codex"):
+                raise click.ClickException(
+                    f"--workflow {_wf!r} is not yet available. "
+                    "Use: auto, direct, staged, or opencode."
+                )
+            effective_workflow = _wf
             _policy_reason = ""
-        elif _cfg_executor != "direct":
-            # Config explicitly overrides default
-            effective_executor = _cfg_executor
+        elif executor is not None:
+            _show_executor_deprecation = True
+            effective_workflow = executor.lower()
+            _policy_reason = ""
+        elif _cfg_workflow:
+            if _cfg_workflow in ("native", "claude-code", "codex"):
+                raise click.ClickException(
+                    f"config.workflow: {_cfg_workflow!r} is not yet available. "
+                    "Use: auto, direct, staged, or opencode."
+                )
+            effective_workflow = _cfg_workflow
+            _policy_reason = ""
+        elif _cfg_executor_legacy != "direct":
+            effective_workflow = _cfg_executor_legacy
             _policy_reason = ""
         else:
-            # Auto-route by policy; direct remains the default
+            effective_workflow = "auto"
+
+        if _show_executor_deprecation:
+            click.echo(
+                "  [deprecation] --executor is deprecated; use --workflow instead.",
+                err=True,
+            )
+
+        # Map workflow to effective_executor and stage-forcing behaviour.
+        # _force_stages=True → always stage; False → never stage; None → auto (routing-driven).
+        _force_stages: bool | None = None
+        if effective_workflow == "auto":
             effective_executor = _policy_executor
+        elif effective_workflow == "direct":
+            effective_executor = "direct"
+            _force_stages = False
+        elif effective_workflow == "staged":
+            effective_executor = "direct"
+            _force_stages = True
+            _policy_reason = ""
+        elif effective_workflow == "opencode":
+            effective_executor = "opencode"
+            _force_stages = False
+            _policy_reason = ""
+        else:
+            # Fallback (shouldn't reach here after earlier validation)
+            effective_executor = "direct"
 
         # Resolve provider (only applies to direct executor)
         _provider_instance = None
@@ -149,11 +208,16 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             category=routing_decision.category,
             rationale=routing_decision.rationale,
         )
-    _use_stages = (
-        not opencode_mode
-        and routing_decision is not None
-        and should_use_stages(routing_decision.category)
-    )
+    if _force_stages is True:
+        _use_stages = not opencode_mode
+    elif _force_stages is False:
+        _use_stages = False
+    else:
+        _use_stages = (
+            not opencode_mode
+            and routing_decision is not None
+            and should_use_stages(routing_decision.category)
+        )
     stage_runs: list[StageRun] = []
 
     if opencode_mode:
@@ -234,8 +298,41 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         if _routing_msg:
             click.echo(_routing_msg)
 
-    # --- Stage-based execution (direct mode, security/complex tasks) ----------
+    # --- --plan gate: show plan and prompt for approval before executing --------
     _impl_task = task          # may be augmented with a plan
+    _plan_already_done = False
+
+    if plan_flag:
+        if effective_workflow == "opencode":
+            _shape_desc = "opencode (delegated to OpenCode CLI)"
+        elif _use_stages:
+            _shape_desc = "staged (planning → implementation)"
+        else:
+            _shape_desc = "direct single-pass"
+        click.echo(f"\n  Workflow:  {_shape_desc}")
+        click.echo(f"  Model:     {_model_label(_routed_model or 'unknown')}")
+        _hint = _pre_run_cost_hint(routing_decision.model if routing_decision else "", task)
+        if _hint:
+            click.echo(f"  Est. cost: {_hint}")
+        if not opencode_mode:
+            spinner.start("Planning - generating implementation plan")
+            try:
+                _plan_text, _ = run_planning_stage(generator.client, task)
+                _impl_task = (
+                    f"Task: {task}\n\nImplementation plan:\n{_plan_text}"
+                    "\n\nExecute the task following the plan above."
+                )
+                _plan_already_done = True
+                spinner.stop()
+                click.echo(f"\n  Plan:\n{_plan_text}")
+            except Exception:
+                spinner.stop()
+                click.echo("  [plan] planning call failed; will proceed without pre-run plan")
+        click.echo("")
+        if not click.confirm("Proceed?", default=False):
+            raise click.Abort()
+
+    # --- Stage-based execution (direct mode, security/complex tasks) ----------
     result = None
 
     if _use_stages:
@@ -244,6 +341,9 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             _stage_t0 = time.time()
 
             if _stage.stage_type == "planning":
+                if _plan_already_done:
+                    # --plan gate already ran the planning call; skip to avoid double billing.
+                    continue
                 spinner.start("Planning - mapping out implementation approach")
                 try:
                     _plan_text, _plan_usage = run_planning_stage(generator.client, task)
