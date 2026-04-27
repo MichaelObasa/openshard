@@ -12,6 +12,7 @@ from pathlib import Path
 import click
 
 from openshard.config.settings import get_api_key, get_anthropic_api_key, get_openai_api_key, load_config
+from openshard.execution.gates import GateEvaluator, VALID_APPROVAL_MODES
 from openshard.execution.generator import ChangedFile, ExecutionGenerator, ExecutionResult, check_stack_mismatch
 from openshard.execution.opencode_executor import OpenCodeExecutor
 from openshard.planning.generator import PlanGenerator
@@ -264,6 +265,19 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     except Exception:
         pass
 
+    _approval_mode = _cfg.get("approval_mode", "auto").strip().lower()
+    if _approval_mode not in VALID_APPROVAL_MODES:
+        raise click.ClickException(
+            f"Invalid approval_mode {_approval_mode!r} in config. "
+            f"Valid values: {', '.join(sorted(VALID_APPROVAL_MODES))}"
+        )
+    _cost_threshold = float(_cfg.get("cost_gate_threshold", 0.10))
+    gate = GateEvaluator(
+        approval_mode=_approval_mode,
+        risky_paths=_repo_facts.risky_paths if _repo_facts is not None else [],
+        cost_threshold=_cost_threshold,
+    )
+
     # Routing line is printed after scoring so the model label reflects the actual selection.
     if routing_decision is not None:
         if detail != "default":
@@ -271,6 +285,11 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         hint = _pre_run_cost_hint(routing_decision.model, task)
         if hint:
             click.echo(f"  Cost estimate: {hint}")
+            _cost_val = _parse_cost_hint(hint)
+            if _cost_val is not None:
+                _cost_dec = gate.check_high_cost(_cost_val)
+                if _cost_dec.required:
+                    confirm_or_abort(_cost_dec.reason)
 
     if detail != "default" and _scored is not None:
         _req = _scored.requirements
@@ -431,13 +450,10 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
 
     if not opencode_mode and _repo_facts is not None:
         _mismatches = check_stack_mismatch(final_files, _repo_facts)
-        if _mismatches:
+        _sm_dec = gate.check_stack_mismatch(_mismatches)
+        if _sm_dec.required:
             _lang_str = ", ".join(_repo_facts.languages) if _repo_facts.languages else "unknown"
-            _mismatch_str = ", ".join(_mismatches[:3])
-            raise click.ClickException(
-                f"Stack mismatch: generated files don't match the repo stack ({_lang_str}).\n"
-                f"  Mismatched: {_mismatch_str}"
-            )
+            confirm_or_abort(f"{_sm_dec.reason} (repo stack: {_lang_str})")
 
     click.echo("\nDone")
     click.echo(result.summary)
@@ -506,11 +522,23 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             workspace = Path(tempfile.mkdtemp())
             if detail == "full":
                 click.echo(f"\n  [workspace] {workspace}")
+            _file_paths = [f.path for f in result.files if f.path]
+            _fw_dec = gate.check_file_write(_file_paths)
+            _rp_dec = gate.check_risky_paths(_file_paths)
+            if _fw_dec.required:
+                confirm_or_abort(_fw_dec.reason)
+            elif _rp_dec.required:
+                confirm_or_abort(_rp_dec.reason)
             _write_files(result.files, workspace)
         # OpenCode: workspace already created and populated before generate().
 
     if write and verify:
         click.echo("")
+        _vcmd = _detect_command(workspace)
+        if _vcmd:
+            _sc_dec = gate.check_shell_command(" ".join(_vcmd))
+            if _sc_dec.required:
+                confirm_or_abort(_sc_dec.reason)
         code = _run_verification(workspace, detail=detail)
         # Escalation loop: try each model in chain until verification passes.
         # Direct mode uses ESCALATION_CHAIN (sonnet → opus).
@@ -798,6 +826,14 @@ def _pre_run_cost_hint(model: str, task: str) -> str | None:
         return None
     return f"~${cost_low:.4f}-${cost_high:.4f}"
 
+
+def _parse_cost_hint(hint: str | None) -> float | None:
+    # Temporary: parses dollar amount from formatted hint string.
+    # TODO: replace with structured cost metadata from the routing layer.
+    if not hint:
+        return None
+    m = re.search(r'\$([\d.]+)', hint)
+    return float(m.group(1)) if m else None
 
 
 _MODEL_SHORT: dict[str, str] = {
@@ -1113,6 +1149,13 @@ def _run_verification(
     else:
         click.echo(f"  {label} failed (exit code {proc.returncode})")
     return proc.returncode
+
+
+def confirm_or_abort(reason: str) -> None:
+    click.echo(f"\n[gate] {reason}")
+    if not click.confirm("Proceed?", default=False):
+        click.echo("Aborted!")
+        raise SystemExit(0)
 
 
 def _build_retry_prompt(task: str, result: ExecutionResult, verify_output: str) -> str:

@@ -34,6 +34,7 @@ workflow: auto
 # smart — prompts for security/complex tasks and risky paths
 # ask   — prompts before every task
 approval_mode: auto
+cost_gate_threshold: 0.10
 
 # DEPRECATED: use `workflow` instead. Kept for backward compatibility.
 executor: direct
