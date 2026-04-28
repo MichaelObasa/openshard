@@ -394,3 +394,57 @@ class TestExecutionProfileDisplay(unittest.TestCase):
     def test_profile_line_absent_without_more(self):
         result = self._run(["implement a feature"])
         self.assertNotIn("[profile]", result.output, result.output)
+
+
+class TestHistoryScoringProfileSelection(unittest.TestCase):
+    """Verify --history-scoring wires profile history into select_profile()."""
+
+    _POOR_PASS_RUNS = [
+        {"execution_profile": "native_light", "verification_passed": False}
+        for _ in range(5)
+    ]
+    _HIGH_RETRY_RUNS = [
+        {"execution_profile": "native_light", "verification_passed": True, "retry_triggered": True}
+        for _ in range(5)
+    ]
+
+    def _run(self, args: list[str], runs: list[dict] | None = None):
+        manager = _make_manager_mock([], ["openrouter"])
+        generator = _make_generator_mock()
+        with patch("openshard.cli.main.ProviderManager", return_value=manager), \
+             patch("openshard.cli.main.ExecutionGenerator", return_value=generator), \
+             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+             patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
+             patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.cli.main._log_run"), \
+             patch("openshard.cli.main.load_runs", return_value=runs or []):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run"] + args)
+        return result
+
+    def test_without_history_scoring_poor_history_does_not_escalate(self):
+        result = self._run(["fix typo in README", "--more"], runs=self._POOR_PASS_RUNS)
+        self.assertIn("native_light", result.output, result.output)
+        self.assertNotIn("native_deep", result.output, result.output)
+
+    def test_history_scoring_poor_pass_rate_escalates_to_native_deep(self):
+        result = self._run(["fix typo in README", "--more", "--history-scoring"], runs=self._POOR_PASS_RUNS)
+        self.assertIn("native_deep", result.output, result.output)
+
+    def test_history_scoring_high_retry_rate_escalates_to_native_deep(self):
+        result = self._run(["fix typo in README", "--more", "--history-scoring"], runs=self._HIGH_RETRY_RUNS)
+        self.assertIn("native_deep", result.output, result.output)
+
+    def test_profile_override_wins_even_with_poor_history(self):
+        result = self._run(
+            ["fix typo in README", "--more", "--history-scoring", "--profile", "native_light"],
+            runs=self._POOR_PASS_RUNS,
+        )
+        self.assertIn("native_light", result.output, result.output)
+        self.assertIn("explicit override", result.output, result.output)
+
+    def test_native_swarm_never_auto_selected_with_history_scoring(self):
+        result = self._run(["fix typo in README", "--more", "--history-scoring"], runs=self._POOR_PASS_RUNS)
+        lines = [l for l in result.output.splitlines() if "[profile]" in l]
+        for line in lines:
+            self.assertNotIn("native_swarm", line, result.output)

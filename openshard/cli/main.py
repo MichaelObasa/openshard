@@ -29,7 +29,7 @@ from openshard.analysis.repo import analyze_repo, RepoFacts
 from openshard.history.metrics import load_runs
 from openshard.history.adjustments import compute_history_adjustments, compute_history_adjustment_reasons
 from openshard.routing.workflow_selector import WorkflowHistorySummary, build_workflow_history_summary, select_workflow
-from openshard.routing.profiles import ProfileDecision, select_profile
+from openshard.routing.profiles import ProfileDecision, ProfileHistorySummary, build_profile_history_summary, select_profile
 from openshard.skills.discovery import discover_skills
 from openshard.skills.matcher import MatchedSkill, match_skills
 from openshard.skills.context import build_skills_context
@@ -307,11 +307,15 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         _wf_reason = _wf_decision.reason
         _use_stages = not opencode_mode and (_wf_choice == "staged")
 
+    _profile_history_summary: dict[str, ProfileHistorySummary] | None = None
+    if _use_history_scoring and _runs:
+        _profile_history_summary = build_profile_history_summary(_runs)
     _profile_decision: ProfileDecision = select_profile(
         category=routing_decision.category if routing_decision else "standard",
         repo_facts=_repo_facts,
         task=task,
         override=profile,
+        history_summary=_profile_history_summary,
     )
 
     _cfg_approval = _cfg.get("approval_mode", "auto").strip().lower()
