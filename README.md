@@ -279,6 +279,47 @@ See the [examples/](examples/) folder for detailed breakdowns:
 
 ---
 
+## Local Skills
+
+Skills let you inject domain-specific guidance into planning and generation prompts — without writing code.
+
+**Where they live:**
+```
+.openshard/skills/<slug>/SKILL.md
+```
+Create one per domain concern. The slug is the folder name used to identify the skill in CLI output and prompt context.
+
+**Frontmatter fields:**
+
+| Field | Required | Description |
+|---|---|---|
+| `name` | yes | Human-readable skill name shown in logs |
+| `description` | no | One-line summary |
+| `category` | no | Broad category (e.g. `security`, `infrastructure`, `performance`) |
+| `keywords` | no | Comma-separated or `[bracketed]` list matched against the task text |
+| `languages` | no | Programming languages (e.g. `[python, typescript]`) |
+| `framework` | no | Framework matched against the detected repo stack (e.g. `django`, `terraform`) |
+
+**How matching works:**
+
+A skill matches a task when any of these are true:
+- Its `category` matches the inferred task category
+- Any of its `keywords` appear in the task description
+- Its `framework` matches what OpenShard detects in the repo
+- Its `languages` and `category` both match together
+
+Up to 5 matched skills are included per run.
+
+**How they affect prompts:**
+
+Matched skills are surfaced as context hints in the planning and generation prompts. OpenShard injects the matched skill name, category, description, and match reasons. The body is stored for future use but is not injected or executed in v1.1.
+
+> Scripts inside SKILL.md are never executed. OpenShard reads only the Markdown.
+
+See [`examples/skills/`](examples/skills/) for copy-paste starters.
+
+---
+
 ## Configuration
 
 > Model references below are accurate at time of release. The AI landscape 
