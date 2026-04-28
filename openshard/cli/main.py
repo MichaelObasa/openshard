@@ -1495,6 +1495,47 @@ def models_stats():
         click.echo(f"  {mid:<{col_model}}  {runs_n:>5}  {avg_cost:>9}  {avg_dur:>8}  {pass_rate:>9}  {retry:>6}")
 
 
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def profiles(ctx: click.Context):
+    """Profile management commands."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@profiles.command("stats")
+def profiles_stats():
+    """Show per-profile performance stats from run history."""
+    from openshard.history.metrics import compute_profile_stats, load_runs
+
+    runs = load_runs()
+    if not runs:
+        log_path = Path.cwd() / _LOG_PATH
+        if not log_path.exists():
+            click.echo("No run history found. Run 'openshard run' to get started.")
+        else:
+            click.echo("No runs recorded yet.")
+        return
+
+    stats = compute_profile_stats(runs)
+    profiled_runs = sum(s["runs_count"] for s in stats.values())
+
+    click.echo(f"[profile stats]  {profiled_runs} run{'s' if profiled_runs != 1 else ''} with profile data\n")
+
+    col = 16
+    header = f"  {'profile':<{col}}  {'runs':>5}  {'avg cost':>9}  {'avg dur':>8}  {'pass rate':>9}  {'retry':>6}"
+    click.echo(header)
+    click.echo("  " + "-" * (len(header) - 2))
+
+    for profile, s in stats.items():
+        n = s["runs_count"]
+        avg_cost = f"${s['avg_cost']:.4f}" if s["avg_cost"] is not None else "-"
+        avg_dur = f"{s['avg_duration']:.1f}s" if s["avg_duration"] is not None else "-"
+        pass_rate = f"{s['verification_pass_rate']:.0%}" if s["verification_pass_rate"] is not None else "-"
+        retry = f"{s['retry_rate']:.0%}" if s["retry_rate"] is not None else "-"
+        click.echo(f"  {profile:<{col}}  {n:>5}  {avg_cost:>9}  {avg_dur:>8}  {pass_rate:>9}  {retry:>6}")
+
+
 @cli.command()
 def report():
     """Display a summary report of recent executions."""
