@@ -229,5 +229,104 @@ class TestMetricsCLI(unittest.TestCase):
         self.assertIn("1", out)
 
 
+class TestReportCLI(unittest.TestCase):
+
+    def _run(self, entries: list[dict] | None) -> str:
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            if entries is not None:
+                Path(".openshard").mkdir()
+                with open(".openshard/runs.jsonl", "w") as f:
+                    for e in entries:
+                        f.write(json.dumps(e) + "\n")
+            result = runner.invoke(cli, ["report"])
+        return result.output
+
+    def test_no_file_message(self):
+        out = self._run(None)
+        self.assertIn("No run history", out)
+
+    def test_empty_file_message(self):
+        out = self._run([])
+        self.assertIn("No runs recorded", out)
+
+    def test_basic_report_sections(self):
+        out = self._run([_entry()])
+        self.assertIn("[report]", out)
+        self.assertIn("total runs:", out)
+        self.assertIn("recent runs:", out)
+
+    def test_profile_section_shown_when_profile_data_present(self):
+        e = _entry(execution_profile="native_light", retry_triggered=False, verification_passed=True)
+        out = self._run([e])
+        self.assertIn("profiles:", out)
+        self.assertIn("native_light", out)
+
+    def test_profile_section_hidden_when_no_profile_data(self):
+        out = self._run([_entry()])
+        self.assertNotIn("profiles:", out)
+
+    def test_profile_shows_all_three_profiles_when_active(self):
+        entries = [
+            _entry(execution_profile="native_light"),
+            _entry(execution_profile="native_deep"),
+            _entry(execution_profile="native_swarm"),
+        ]
+        out = self._run(entries)
+        self.assertIn("native_light", out)
+        self.assertIn("native_deep", out)
+        self.assertIn("native_swarm", out)
+
+    def test_zero_run_profile_shows_zero(self):
+        out = self._run([_entry(execution_profile="native_light")])
+        lines = [ln for ln in out.splitlines() if "native_swarm" in ln]
+        self.assertEqual(len(lines), 1)
+        self.assertIn("0 runs", lines[0])
+
+    def test_profile_shows_pass_rate(self):
+        e = _entry(execution_profile="native_deep", verification_passed=True)
+        out = self._run([e])
+        self.assertIn("pass:", out)
+        self.assertIn("100%", out)
+
+    def test_profile_shows_retry_rate(self):
+        e = _entry(execution_profile="native_light", retry_triggered=True)
+        out = self._run([e])
+        self.assertIn("retry:", out)
+
+    def test_profile_shows_cost(self):
+        e = _entry(execution_profile="native_light", estimated_cost=0.0123)
+        out = self._run([e])
+        self.assertIn("$", out)
+
+    def test_profile_dash_when_no_cost(self):
+        e = _entry(execution_profile="native_light")
+        del e["estimated_cost"]
+        out = self._run([e])
+        lines = [ln for ln in out.splitlines() if "native_light" in ln and "run" in ln]
+        self.assertTrue(any("-" in ln for ln in lines))
+
+    def test_profile_singular_run_label(self):
+        e = _entry(execution_profile="native_deep")
+        out = self._run([e])
+        lines = [ln for ln in out.splitlines() if "native_deep" in ln]
+        self.assertTrue(any("1 run " in ln for ln in lines))
+
+    def test_profile_plural_runs_label(self):
+        entries = [_entry(execution_profile="native_light")] * 3
+        out = self._run(entries)
+        lines = [ln for ln in out.splitlines() if "native_light" in ln]
+        self.assertTrue(any("3 runs" in ln for ln in lines))
+
+    def test_recent_runs_still_shown(self):
+        out = self._run([_entry(execution_profile="native_light")])
+        self.assertIn("recent runs:", out)
+
+    def test_old_entries_without_profile_field_no_section(self):
+        old_entry = {"task": "old task", "timestamp": "2025-01-01T00:00:00Z"}
+        out = self._run([old_entry])
+        self.assertNotIn("profiles:", out)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1579,6 +1579,23 @@ def report():
     click.echo(f"  total cost:             {'$' + f'{total_cost:.4f}' if total_cost is not None else '-'}")
     click.echo(f"  average cost per run:   {'$' + f'{avg_cost:.4f}' if avg_cost is not None else '-'}")
 
+    from openshard.history.metrics import compute_profile_stats
+    _profile_stats = compute_profile_stats(entries)
+    _profiled = sum(s["runs_count"] for s in _profile_stats.values())
+    if _profiled > 0:
+        click.echo("\n  profiles:")
+        for _pname, _ps in _profile_stats.items():
+            _n = _ps["runs_count"]
+            if _n == 0:
+                click.echo(f"    {_pname:<14}  0 runs")
+            else:
+                _pc = f"${_ps['avg_cost']:.4f}" if _ps["avg_cost"] is not None else "-"
+                _pd = f"{_ps['avg_duration']:.1f}s" if _ps["avg_duration"] is not None else "-"
+                _pp = f"{_ps['verification_pass_rate']:.0%}" if _ps["verification_pass_rate"] is not None else "-"
+                _pr = f"{_ps['retry_rate']:.0%}" if _ps["retry_rate"] is not None else "-"
+                _run_label = "run" if _n == 1 else "runs"
+                click.echo(f"    {_pname:<14}  {_n} {_run_label}  pass: {_pp}  retry: {_pr}  {_pc}  {_pd}")
+
     click.echo("\n  recent runs:")
     for entry in entries[-5:][::-1]:
         ts = entry.get("timestamp", "")
