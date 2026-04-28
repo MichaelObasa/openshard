@@ -13,6 +13,8 @@ from openshard.scoring.requirements import TaskRequirements
 from openshard.scoring.scorer import ScoredRoutingResult, select_with_info
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry
+from openshard.skills.discovery import SkillDef
+from openshard.skills.matcher import MatchedSkill
 
 
 def _make_generator(model="openrouter/fast-model", fixer_model="openrouter/strong-model"):
@@ -212,6 +214,31 @@ class TestLogRunHistory(unittest.TestCase):
         self.assertEqual(len(lines), 2)
         self.assertEqual(json.loads(lines[0])["task"], "first")
         self.assertEqual(json.loads(lines[1])["task"], "second")
+
+    # --- matched_skills ---
+
+    def _make_skill(self, slug: str) -> SkillDef:
+        return SkillDef(
+            slug=slug, name=slug, description="", category="standard",
+            keywords=[], languages=[], framework=None,
+        )
+
+    def test_matched_skills_logged(self):
+        skills = [
+            MatchedSkill(skill=self._make_skill("pytest-helper"), reasons=["keyword:pytest"]),
+            MatchedSkill(skill=self._make_skill("django-views"), reasons=["framework:django", "category:standard"]),
+        ]
+        self._call(matched_skills=skills)
+        entry = self._read_entry()
+        self.assertEqual(entry["matched_skills"], ["pytest-helper", "django-views"])
+        self.assertEqual(entry["matched_skill_reasons"]["pytest-helper"], ["keyword:pytest"])
+        self.assertEqual(entry["matched_skill_reasons"]["django-views"], ["framework:django", "category:standard"])
+
+    def test_no_skills_no_fields(self):
+        self._call(matched_skills=[])
+        entry = self._read_entry()
+        self.assertNotIn("matched_skills", entry)
+        self.assertNotIn("matched_skill_reasons", entry)
 
     # --- select_with_info integration ---
 

@@ -588,7 +588,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                      workspace=None, usage=usage, model=_routed_model,
                      summary=result.summary, notes=result.notes,
                      stage_runs=stage_runs, routing_decision=routing_decision,
-                     _scored=_scored, repo_facts=_repo_facts)
+                     _scored=_scored, repo_facts=_repo_facts,
+                     matched_skills=_matched_skills)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
         return
@@ -671,7 +672,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                          workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
                          summary=result.summary, notes=result.notes,
                          stage_runs=stage_runs, routing_decision=routing_decision,
-                         _scored=_scored, repo_facts=_repo_facts)
+                         _scored=_scored, repo_facts=_repo_facts,
+                         matched_skills=_matched_skills)
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
             sys.exit(code)
@@ -685,7 +687,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                  workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
                  summary=result.summary, notes=result.notes,
                  stage_runs=stage_runs, routing_decision=routing_decision,
-                 _scored=_scored, repo_facts=_repo_facts)
+                 _scored=_scored, repo_facts=_repo_facts,
+                 matched_skills=_matched_skills)
     except Exception as exc:
         click.echo(f"  [log] warning: {exc}")
 
@@ -711,6 +714,7 @@ def _log_run(
     routing_decision=None,
     _scored: ScoredRoutingResult | None = None,
     repo_facts: RepoFacts | None = None,
+    matched_skills: list[MatchedSkill] | None = None,
 ) -> None:
     entry: dict = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -782,6 +786,10 @@ def _log_run(
             "changed_files_count": len(repo_facts.changed_files),
             "changed_files_sample": repo_facts.changed_files[:3],
         }
+
+    if matched_skills:
+        entry["matched_skills"] = [m.skill.slug for m in matched_skills]
+        entry["matched_skill_reasons"] = {m.skill.slug: m.reasons for m in matched_skills}
 
     log_path = Path.cwd() / _LOG_PATH
     log_path.parent.mkdir(parents=True, exist_ok=True)
