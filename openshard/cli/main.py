@@ -27,7 +27,7 @@ from openshard.execution.stages import (
 )
 from openshard.analysis.repo import analyze_repo, RepoFacts
 from openshard.history.metrics import load_runs
-from openshard.history.adjustments import compute_history_adjustments
+from openshard.history.adjustments import compute_history_adjustments, compute_history_adjustment_reasons
 
 
 @click.group()
@@ -252,9 +252,12 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             _reqs = requirements_from_category(routing_decision.category)
             _entries = [e for e in _inv.models if e.provider == _provider_name]
             _hist_adjustments: dict[str, float] | None = None
+            _hist_reasons: dict[str, str] = {}
             if _use_history_scoring:
                 try:
-                    _hist_adjustments = compute_history_adjustments(load_runs())
+                    _runs = load_runs()
+                    _hist_adjustments = compute_history_adjustments(_runs)
+                    _hist_reasons = compute_history_adjustment_reasons(_runs)
                 except Exception:
                     pass
             _scored = select_with_info(_entries, _reqs, routing_decision.category, history_adjustments=_hist_adjustments)
@@ -328,6 +331,18 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         else:
             _cost_str = f"cost: ${_scored.selected_cost_per_m:.2f}/M" if _scored.selected_cost_per_m is not None else "cost: unknown"
             click.echo(f"  [routing] candidates: {_scored.candidate_count} → {_model_label(_scored.selected_model)} ({_cost_str})")
+        if _use_history_scoring:
+            click.echo("  [routing] history scoring: enabled")
+            _nonzero = [
+                (m, adj)
+                for m, adj in _scored.history_adjustments.items()
+                if m in set(_scored.candidates) and adj != 0.0
+            ]
+            for _hm, _hadj in _nonzero:
+                _rsn = _hist_reasons.get(_hm, "")
+                _rsn_str = f" ({_rsn})" if _rsn else ""
+                _marker = " ← selected" if _hm == _scored.selected_model else ""
+                click.echo(f"  [routing] history: {_model_label(_hm)}: {_hadj:+.1f}{_rsn_str}{_marker}")
 
     if detail == "default":
         _routing_msg = _build_routing_line(routing_decision, _use_stages, actual_model=_routed_model)

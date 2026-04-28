@@ -284,6 +284,65 @@ class TestApprovalFlag(unittest.TestCase):
         assert "Invalid value" in result.output or "Error" in result.output
 
 
+class TestHistoryScoringDisplay(unittest.TestCase):
+    """Verify history-scoring lines appear in --more output when the flag is set."""
+
+    def _run(self, args: list[str], manager_mock, generator_mock,
+             adjustments=None, reasons=None):
+        adjustments = adjustments or {}
+        reasons = reasons or {}
+        with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
+             patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
+             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+             patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
+             patch("openshard.cli.main.analyze_repo"), \
+             patch("openshard.cli.main._log_run"), \
+             patch("openshard.cli.main.load_runs", return_value=[]), \
+             patch("openshard.cli.main.compute_history_adjustments", return_value=adjustments), \
+             patch("openshard.cli.main.compute_history_adjustment_reasons", return_value=reasons):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run"] + args)
+        return result
+
+    def test_history_scoring_enabled_line_shown(self):
+        """[routing] history scoring: enabled appears in --more output when flag is set."""
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
+        manager = _make_manager_mock([entry], ["openrouter"])
+        generator = _make_generator_mock()
+
+        result = self._run(["implement a feature", "--more", "--history-scoring"], manager, generator)
+
+        self.assertIn("[routing] history scoring: enabled", result.output, result.output)
+
+    def test_history_nonzero_adjustment_shown(self):
+        """Non-zero adjustment for selected model shows value and reason in --more output."""
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
+        manager = _make_manager_mock([entry], ["openrouter"])
+        generator = _make_generator_mock()
+        adjustments = {"openrouter/fast-model": 1.0}
+        reasons = {"openrouter/fast-model": "high pass rate"}
+
+        result = self._run(
+            ["implement a feature", "--more", "--history-scoring"],
+            manager, generator,
+            adjustments=adjustments, reasons=reasons,
+        )
+
+        self.assertIn("+1.0", result.output, result.output)
+        self.assertIn("high pass rate", result.output, result.output)
+        self.assertIn("← selected", result.output, result.output)
+
+    def test_history_scoring_hidden_without_flag(self):
+        """history scoring lines must NOT appear when --history-scoring is absent."""
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
+        manager = _make_manager_mock([entry], ["openrouter"])
+        generator = _make_generator_mock()
+
+        result = self._run(["implement a feature", "--more"], manager, generator)
+
+        self.assertNotIn("history scoring", result.output, result.output)
+
+
 class TestDeepSeekBoilerplateModel(unittest.TestCase):
     """DeepSeek V4 Flash is the boilerplate model; V3.2 is no longer the default."""
 
