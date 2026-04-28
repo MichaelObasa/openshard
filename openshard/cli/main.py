@@ -90,12 +90,18 @@ def plan(task: str):
 )
 @click.option("--plan", "plan_flag", is_flag=True, default=False, help="Show execution plan and prompt for approval before running.")
 @click.option(
+    "--approval",
+    type=click.Choice(["auto", "smart", "ask"], case_sensitive=False),
+    default=None,
+    help="Override config approval_mode for this run: auto (silent), smart (prompt on risk), ask (always prompt).",
+)
+@click.option(
     "--provider",
     type=click.Choice(["openrouter", "anthropic", "openai"], case_sensitive=False),
     default=None,
     help="API provider: openrouter (default), anthropic (requires ANTHROPIC_API_KEY), or openai (requires OPENAI_API_KEY).",
 )
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, executor: str | None, plan_flag: bool, provider: str | None):
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, executor: str | None, plan_flag: bool, approval: str | None, provider: str | None):
     """Execute TASK and return a structured result."""
     detail = "full" if full else ("more" if more else "default")
     start = time.time()
@@ -265,12 +271,13 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     except Exception:
         pass
 
-    _approval_mode = _cfg.get("approval_mode", "auto").strip().lower()
-    if _approval_mode not in VALID_APPROVAL_MODES:
+    _cfg_approval = _cfg.get("approval_mode", "auto").strip().lower()
+    if _cfg_approval not in VALID_APPROVAL_MODES:
         raise click.ClickException(
-            f"Invalid approval_mode {_approval_mode!r} in config. "
+            f"Invalid approval_mode {_cfg_approval!r} in config. "
             f"Valid values: {', '.join(sorted(VALID_APPROVAL_MODES))}"
         )
+    _approval_mode = approval.lower() if approval else _cfg_approval
     _cost_threshold = float(_cfg.get("cost_gate_threshold", 0.10))
     gate = GateEvaluator(
         approval_mode=_approval_mode,
@@ -313,7 +320,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             click.echo(f"  [routing] candidates: {_scored.candidate_count} → {_model_label(_scored.selected_model)} ({_cost_str})")
 
     if detail == "default":
-        _routing_msg = _build_routing_line(routing_decision, _use_stages)
+        _routing_msg = _build_routing_line(routing_decision, _use_stages, actual_model=_routed_model)
         if _routing_msg:
             click.echo(_routing_msg)
 
@@ -837,7 +844,8 @@ def _parse_cost_hint(hint: str | None) -> float | None:
 
 
 _MODEL_SHORT: dict[str, str] = {
-    "deepseek/deepseek-v3.2":          "DeepSeek V3.2",
+    "deepseek/deepseek-v4-flash":      "DeepSeek V4 Flash",
+    "deepseek/deepseek-v4-pro":        "DeepSeek V4 Pro",
     "z-ai/glm-5.1":                    "GLM-5.1",
     "anthropic/claude-sonnet-4.6":     "Sonnet 4.6",
     "anthropic/claude-opus-4.7":       "Opus 4.7",
@@ -896,11 +904,12 @@ def _model_label(model: str) -> str:
 def _build_routing_line(
     routing_decision: "RoutingDecision | None",
     use_stages: bool,
+    actual_model: str | None = None,
 ) -> str | None:
     """One-line routing summary shown in default output before execution starts."""
     if routing_decision is None:
         return None
-    impl_label = _model_label(routing_decision.model)
+    impl_label = _model_label(actual_model or routing_decision.model)
     reason = _RATIONALE_SHORT.get(routing_decision.rationale, routing_decision.category)
     if use_stages:
         plan_label = _model_label(MODEL_STRONG)

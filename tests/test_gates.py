@@ -71,3 +71,24 @@ def test_smart_high_cost_below_threshold():
 def test_risky_path_backslash_normalization():
     g = make_gate("smart", risky=["auth"])
     assert g.check_file_write(["src\\auth\\login.py"]).required
+
+
+# verify gate: ask mode prompts even when no test command detected (uses "(verify)" sentinel)
+def test_ask_prompts_for_verify_no_command_detected():
+    g = make_gate("ask")
+    assert g.check_shell_command("(verify)").required
+
+def test_smart_prompts_for_verify_no_command_detected():
+    g = make_gate("smart")
+    # "(verify)" is not in the safe whitelist
+    assert g.check_shell_command("(verify)").required
+
+def test_auto_no_prompt_for_verify_no_command_detected():
+    g = make_gate("auto")
+    assert not g.check_shell_command("(verify)").required
+
+# file write gate: ask mode prompts even when files list is empty
+def test_ask_prompts_for_file_write_empty_list():
+    g = make_gate("ask")
+    dec = g.check_file_write([])
+    assert dec.required

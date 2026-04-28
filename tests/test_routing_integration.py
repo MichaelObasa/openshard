@@ -5,9 +5,17 @@ from unittest.mock import ANY, MagicMock, call, patch
 
 from click.testing import CliRunner
 
+from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry
+
+_AUTO_CONFIG = {"approval_mode": "auto"}
+
+_PYTHON_REPO = RepoFacts(
+    languages=["python"], package_files=[], framework=None,
+    test_command=None, risky_paths=[], changed_files=[],
+)
 
 
 def _make_entry(model_id: str, provider: str = "openrouter", **kwargs) -> InventoryEntry:
@@ -57,6 +65,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
         with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+             patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
              patch("openshard.cli.main.analyze_repo"), \
              patch("openshard.cli.main._log_run"):
             runner = CliRunner()
@@ -129,6 +138,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
         with patch("openshard.cli.main.ProviderManager", return_value=manager), \
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+             patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
              patch("openshard.cli.main._log_run") as mock_log:
             runner = CliRunner()
             runner.invoke(cli, ["run", task])
@@ -149,6 +159,7 @@ class TestRoutingDisplayConsistency(unittest.TestCase):
         with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+             patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
              patch("openshard.cli.main.analyze_repo"), \
              patch("openshard.cli.main._log_run"):
             runner = CliRunner()
@@ -197,3 +208,92 @@ class TestRoutingDisplayConsistency(unittest.TestCase):
         # Fallback for visual category is kimi-k2.5; the label should NOT say fast-model
         self.assertNotIn("fast-model", routing_lines[0])
         self.assertNotIn("no-vision", routing_lines[0])
+
+    def test_default_routing_line_shows_scored_model(self):
+        """Default (no --more) routing line shows the scored model, not the keyword-routed one."""
+        task = "implement a feature"
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
+        manager = _make_manager_mock([entry], ["openrouter"])
+        generator = _make_generator_mock()
+
+        result = self._run([task], manager, generator)
+
+        routing_lines = [
+            ln for ln in result.output.splitlines()
+            if ln.strip().startswith("Routing -")
+        ]
+        self.assertEqual(len(routing_lines), 1, result.output)
+        self.assertIn("Fast Model", routing_lines[0])
+        self.assertNotIn("GLM", routing_lines[0])
+
+
+class TestApprovalFlag(unittest.TestCase):
+    """Verify --approval flag overrides config and triggers gates correctly."""
+
+    def _run_with_write(self, args: list[str], generator_mock, approval_mode="auto"):
+        config = {"approval_mode": approval_mode}
+        with patch("openshard.cli.main.ProviderManager"), \
+             patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
+             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+             patch("openshard.cli.main.load_config", return_value=config), \
+             patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.cli.main._log_run"), \
+             patch("openshard.cli.main._write_files"):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run"] + args, input="n\n")
+        return result
+
+    def test_approval_ask_flag_triggers_gate(self):
+        """--approval ask shows gate prompt before file write without editing config."""
+        generator = _make_generator_mock()
+        generator.generate.return_value.files = [MagicMock(path="helper.py")]
+        result = self._run_with_write(
+            ["add a helper", "--write", "--approval", "ask"],
+            generator,
+            approval_mode="auto",
+        )
+        assert "[gate]" in result.output, result.output
+
+    def test_config_approval_mode_honored_without_flag(self):
+        """When --approval is not passed, config approval_mode is used."""
+        generator = _make_generator_mock()
+        generator.generate.return_value.files = [MagicMock(path="helper.py")]
+        result = self._run_with_write(
+            ["add a helper", "--write"],
+            generator,
+            approval_mode="ask",
+        )
+        assert "[gate]" in result.output, result.output
+
+    def test_auto_config_no_gate_without_flag(self):
+        """With config auto and no --approval flag, no gate prompt appears."""
+        generator = _make_generator_mock()
+        generator.generate.return_value.files = [MagicMock(path="helper.py")]
+        result = self._run_with_write(
+            ["add a helper", "--write"],
+            generator,
+            approval_mode="auto",
+        )
+        assert "[gate]" not in result.output, result.output
+
+    def test_invalid_approval_flag_fails_cleanly(self):
+        """--approval with an invalid value exits with a usage error."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["run", "some task", "--approval", "banana"])
+        assert result.exit_code != 0
+        assert "Invalid value" in result.output or "Error" in result.output
+
+
+class TestDeepSeekBoilerplateModel(unittest.TestCase):
+    """DeepSeek V4 Flash is the boilerplate model; V3.2 is no longer the default."""
+
+    def test_boilerplate_keyword_routes_to_v4_flash(self):
+        from openshard.routing.engine import route, MODEL_CHEAP
+        decision = route("add a simple validation helper")
+        self.assertEqual(decision.category, "boilerplate")
+        self.assertEqual(decision.model, MODEL_CHEAP)
+        self.assertIn("v4-flash", MODEL_CHEAP)
+
+    def test_model_cheap_is_not_v3_2(self):
+        from openshard.routing.engine import MODEL_CHEAP
+        self.assertNotIn("v3.2", MODEL_CHEAP)

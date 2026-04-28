@@ -7,7 +7,7 @@ from dataclasses import dataclass
 # Models
 # ---------------------------------------------------------------------------
 
-MODEL_CHEAP    = "deepseek/deepseek-v3.2"   # low-risk boilerplate
+MODEL_CHEAP    = "deepseek/deepseek-v4-flash"  # low-risk boilerplate
 MODEL_MAIN     = "z-ai/glm-5.1"             # standard coding (default worker)
 MODEL_STRONG   = "anthropic/claude-sonnet-4.6"  # security / careful reasoning
 MODEL_ESCALATE = "anthropic/claude-opus-4.7"    # escalation only
@@ -77,7 +77,7 @@ def route(task: str) -> RoutingDecision:
     1. Security-sensitive  → Sonnet (careful reasoning required)
     2. Visual / frontend   → Kimi K2.5 (multimodal specialist)
     3. Complex / multi-file → MiniMax M2.7 (long-horizon model)
-    4. Boilerplate         → DeepSeek V3.2 (cheapest)
+    4. Boilerplate         → DeepSeek V4 Flash (cheapest)
     5. Default             → GLM-5.1 (main worker)
     """
     lower = task.lower()

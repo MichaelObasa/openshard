@@ -64,7 +64,8 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
     # Main worker
     "z-ai/glm-5.1":                         (0.10,   0.10),   # ~est
     # Cheap coding
-    "deepseek/deepseek-v3.2":              (0.14,   0.28),   # ~est
+    "deepseek/deepseek-v4-flash":          (0.10,   0.28),   # ~est
+    "deepseek/deepseek-v4-pro":            (0.27,   1.10),   # ~est
     # Visual / multimodal
     "moonshotai/kimi-k2.5":                 (0.45,   2.20),
     # Long-horizon
