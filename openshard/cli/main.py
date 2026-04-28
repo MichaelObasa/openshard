@@ -26,6 +26,8 @@ from openshard.execution.stages import (
     Stage, StageRun, split_task, route_stage, should_use_stages, run_planning_stage,
 )
 from openshard.analysis.repo import analyze_repo, RepoFacts
+from openshard.history.metrics import load_runs
+from openshard.history.adjustments import compute_history_adjustments
 
 
 @click.group()
@@ -101,7 +103,8 @@ def plan(task: str):
     default=None,
     help="API provider: openrouter (default), anthropic (requires ANTHROPIC_API_KEY), or openai (requires OPENAI_API_KEY).",
 )
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, executor: str | None, plan_flag: bool, approval: str | None, provider: str | None):
+@click.option("--history-scoring", "history_scoring", is_flag=True, default=False, help="Apply run-history bonuses/penalties to model scoring (opt-in).")
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, executor: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool):
     """Execute TASK and return a structured result."""
     detail = "full" if full else ("more" if more else "default")
     start = time.time()
@@ -115,6 +118,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         _cfg = load_config()
         _cfg_workflow = _cfg.get("workflow", "").strip().lower()
         _cfg_executor_legacy = _cfg.get("executor", "direct").strip().lower()
+        _use_history_scoring = history_scoring or bool(_cfg.get("history_scoring", False))
         _policy_executor, _policy_reason = _suggest_executor(task)
 
         # --workflow > --executor (deprecated) > config.workflow > config.executor > auto
@@ -247,7 +251,13 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             _inv = _mgr.get_inventory()
             _reqs = requirements_from_category(routing_decision.category)
             _entries = [e for e in _inv.models if e.provider == _provider_name]
-            _scored = select_with_info(_entries, _reqs, routing_decision.category)
+            _hist_adjustments: dict[str, float] | None = None
+            if _use_history_scoring:
+                try:
+                    _hist_adjustments = compute_history_adjustments(load_runs())
+                except Exception:
+                    pass
+            _scored = select_with_info(_entries, _reqs, routing_decision.category, history_adjustments=_hist_adjustments)
             if (
                 _scored.selected_model is not None
                 and _mgr.providers.get(_scored.selected_provider) is not None
@@ -683,6 +693,10 @@ def _log_run(
             entry["routing_candidates"] = _scored.candidates
         if _scored.scores:
             entry["routing_scores"] = _scored.scores
+        if _scored.scores_raw:
+            entry["routing_scores_raw"] = _scored.scores_raw
+        if _scored.history_adjustments:
+            entry["routing_adjustments"] = _scored.history_adjustments
     if retry_triggered:
         entry["fixer_model"] = generator.fixer_model
     if usage is not None:

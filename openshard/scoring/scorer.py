@@ -20,6 +20,8 @@ class ScoredRoutingResult:
     selected_cost_per_m: float | None = None
     candidates: list[str] = field(default_factory=list)
     scores: dict[str, float] = field(default_factory=dict)
+    scores_raw: dict[str, float] = field(default_factory=dict)
+    history_adjustments: dict[str, float] = field(default_factory=dict)
 
 
 def score_model(
@@ -86,6 +88,7 @@ def select_with_info(
     entries: list[InventoryEntry],
     requirements: TaskRequirements,
     category: str,
+    history_adjustments: dict[str, float] | None = None,
 ) -> ScoredRoutingResult:
     """Filter and score entries; return a full record of the decision."""
     candidates = prefilter_coding(entries)
@@ -100,8 +103,24 @@ def select_with_info(
             selected_provider=None,
             used_fallback=True,
         )
-    scored = [(e, score_model(e, requirements, category)) for e in candidates]
-    winner = max(scored, key=lambda x: x[1])[0]
+    raw_scored = [(e, score_model(e, requirements, category)) for e in candidates]
+    raw_scores = {e.model.id: round(s, 3) for e, s in raw_scored}
+
+    applied_adjustments: dict[str, float] = {}
+    if history_adjustments:
+        applied_adjustments = {
+            mid: round(history_adjustments.get(mid, 0.0), 3)
+            for mid in raw_scores
+        }
+
+    final_scores = {
+        mid: round(raw + applied_adjustments.get(mid, 0.0), 3)
+        for mid, raw in raw_scores.items()
+    }
+
+    winner_id = max(final_scores, key=final_scores.__getitem__)
+    winner = next(e for e, _ in raw_scored if e.model.id == winner_id)
+
     return ScoredRoutingResult(
         category=category,
         requirements=requirements,
@@ -110,6 +129,8 @@ def select_with_info(
         selected_provider=winner.provider,
         used_fallback=False,
         selected_cost_per_m=_parse_cost(winner.model.pricing),
-        candidates=[e.model.id for e, _ in scored],
-        scores={e.model.id: round(s, 3) for e, s in scored},
+        candidates=[e.model.id for e, _ in raw_scored],
+        scores=final_scores,
+        scores_raw=raw_scores if applied_adjustments else {},
+        history_adjustments=applied_adjustments,
     )
