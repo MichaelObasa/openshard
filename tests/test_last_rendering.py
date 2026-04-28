@@ -52,5 +52,53 @@ class TestLastRoutingDisplay(unittest.TestCase):
         self.assertNotIn("[routing]", out)
 
 
+class TestLastProfileDisplay(unittest.TestCase):
+
+    def test_more_shows_profile_when_present(self):
+        entry = {
+            "task": "do a thing",
+            "execution_profile": "native_deep",
+            "execution_profile_reason": "security category",
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("[profile] native_deep - security category", out)
+
+    def test_full_shows_profile_when_present(self):
+        entry = {
+            "task": "do a thing",
+            "execution_profile": "native_light",
+            "execution_profile_reason": "simple/safe task",
+        }
+        out = _render(entry, detail="full")
+        self.assertIn("[profile] native_light - simple/safe task", out)
+
+    def test_profile_without_reason(self):
+        entry = {
+            "task": "do a thing",
+            "execution_profile": "native_swarm",
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("[profile] native_swarm", out)
+
+    def test_no_crash_on_entry_without_profile_fields(self):
+        entry = {"task": "do a thing"}
+        out = _render(entry, detail="more")
+        self.assertNotIn("[profile]", out)
+
+    def test_no_crash_on_entry_without_profile_fields_full(self):
+        entry = {"task": "do a thing"}
+        out = _render(entry, detail="full")
+        self.assertNotIn("[profile]", out)
+
+    def test_default_detail_does_not_show_profile(self):
+        entry = {
+            "task": "do a thing",
+            "execution_profile": "native_deep",
+            "execution_profile_reason": "security category",
+        }
+        out = _render(entry, detail="default")
+        self.assertNotIn("[profile]", out)
+
+
 if __name__ == "__main__":
     unittest.main()

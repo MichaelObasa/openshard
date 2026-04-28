@@ -1728,6 +1728,15 @@ def _render_log_entry(entry: dict, detail: str) -> None:
             _prov_suffix = f" ({_prov})" if _prov else ""
             click.echo(f"  [routing] candidates: {entry.get('routing_candidate_count')} → {_model_label(entry['routing_selected_model'])}{_prov_suffix}")
 
+    # Execution profile (--more / --full)
+    if detail != "default" and entry.get("execution_profile"):
+        _profile = entry["execution_profile"]
+        _reason = entry.get("execution_profile_reason", "")
+        _profile_line = f"[profile] {_profile}"
+        if _reason:
+            _profile_line += f" - {_reason}"
+        click.echo(f"  {_profile_line}")
+
     # Files
     fc = entry.get("files_created", 0)
     fu = entry.get("files_updated", 0)
