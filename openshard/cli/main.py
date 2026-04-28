@@ -29,6 +29,8 @@ from openshard.analysis.repo import analyze_repo, RepoFacts
 from openshard.history.metrics import load_runs
 from openshard.history.adjustments import compute_history_adjustments, compute_history_adjustment_reasons
 from openshard.routing.workflow_selector import WorkflowHistorySummary, build_workflow_history_summary, select_workflow
+from openshard.skills.discovery import discover_skills
+from openshard.skills.matcher import MatchedSkill, match_skills
 
 
 @click.group()
@@ -357,6 +359,17 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 _marker = " ← selected" if _hm == _scored.selected_model else ""
                 click.echo(f"  [routing] history: {_model_label(_hm)}: {_hadj:+.1f}{_rsn_str}{_marker}")
 
+    _matched_skills: list[MatchedSkill] = []
+    if detail != "default" and _repo_facts is not None and routing_decision is not None:
+        try:
+            _local_skills = discover_skills(Path.cwd())
+            if _local_skills:
+                _matched_skills = match_skills(
+                    _local_skills, task, routing_decision.category, _repo_facts
+                )
+        except Exception:
+            pass
+
     if detail != "default":
         if _force_stages is None:
             _wf_display = _wf_choice
@@ -369,6 +382,12 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             _wf_display_reason = "forced by workflow setting"
         click.echo(f"  [routing] workflow: {_wf_display}")
         click.echo(f"  [routing] reason: {_wf_display_reason}")
+
+    if detail != "default" and _matched_skills:
+        click.echo("\nSkills")
+        for _ms in _matched_skills:
+            _rsn = ", ".join(_ms.reasons)
+            click.echo(f"  {_ms.skill.slug}: {_ms.skill.name} ({_rsn})")
 
     if detail == "default":
         _routing_msg = _build_routing_line(routing_decision, _use_stages, actual_model=_routed_model)
