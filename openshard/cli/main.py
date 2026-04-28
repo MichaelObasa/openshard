@@ -28,6 +28,7 @@ from openshard.execution.stages import (
 from openshard.analysis.repo import analyze_repo, RepoFacts
 from openshard.history.metrics import load_runs
 from openshard.history.adjustments import compute_history_adjustments, compute_history_adjustment_reasons
+from openshard.routing.workflow_selector import WorkflowHistorySummary, build_workflow_history_summary, select_workflow
 
 
 @click.group()
@@ -224,11 +225,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     elif _force_stages is False:
         _use_stages = False
     else:
-        _use_stages = (
-            not opencode_mode
-            and routing_decision is not None
-            and should_use_stages(routing_decision.category)
-        )
+        _use_stages = None  # resolved below after history + repo_facts
     stage_runs: list[StageRun] = []
 
     if opencode_mode:
@@ -243,6 +240,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         click.echo(f"  [executor] {effective_executor} - {_policy_reason}")
     _routed_model = routing_decision.model if routing_decision else None
     _scored: ScoredRoutingResult | None = None
+    _runs: list[dict] = []
 
     # Attempt scored model selection; fall back silently to keyword routing.
     if not opencode_mode and routing_decision is not None:
@@ -259,7 +257,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                     _hist_adjustments = compute_history_adjustments(_runs)
                     _hist_reasons = compute_history_adjustment_reasons(_runs)
                 except Exception:
-                    pass
+                    _runs = []
             _scored = select_with_info(_entries, _reqs, routing_decision.category, history_adjustments=_hist_adjustments)
             if (
                 _scored.selected_model is not None
@@ -283,6 +281,19 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         _repo_facts = analyze_repo(Path.cwd())
     except Exception:
         pass
+
+    if _use_stages is None:
+        _category = routing_decision.category if routing_decision else "standard"
+        _workflow_history_summary: WorkflowHistorySummary | None = None
+        if _use_history_scoring and _runs:
+            _workflow_history_summary = build_workflow_history_summary(_runs, _category)
+        _wf_choice = select_workflow(
+            category=_category,
+            repo_facts=_repo_facts,
+            history_summary=_workflow_history_summary,
+            verify_enabled=verify,
+        )
+        _use_stages = not opencode_mode and (_wf_choice == "staged")
 
     _cfg_approval = _cfg.get("approval_mode", "auto").strip().lower()
     if _cfg_approval not in VALID_APPROVAL_MODES:

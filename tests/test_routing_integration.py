@@ -66,7 +66,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
              patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
-             patch("openshard.cli.main.analyze_repo"), \
+             patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
              patch("openshard.cli.main._log_run"):
             runner = CliRunner()
             result = runner.invoke(cli, ["run"] + args)
@@ -160,7 +160,7 @@ class TestRoutingDisplayConsistency(unittest.TestCase):
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
              patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
-             patch("openshard.cli.main.analyze_repo"), \
+             patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
              patch("openshard.cli.main._log_run"):
             runner = CliRunner()
             result = runner.invoke(cli, ["run"] + args)
@@ -295,7 +295,7 @@ class TestHistoryScoringDisplay(unittest.TestCase):
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
              patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
-             patch("openshard.cli.main.analyze_repo"), \
+             patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
              patch("openshard.cli.main._log_run"), \
              patch("openshard.cli.main.load_runs", return_value=[]), \
              patch("openshard.cli.main.compute_history_adjustments", return_value=adjustments), \
