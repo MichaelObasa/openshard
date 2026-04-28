@@ -270,6 +270,37 @@ class TestLogRunHistory(unittest.TestCase):
         for score in result.scores.values():
             self.assertEqual(round(score, 3), score)
 
+    # --- execution_profile ---
+
+    def test_execution_profile_logged(self):
+        from openshard.routing.profiles import ProfileDecision
+        pd = ProfileDecision(profile="native_deep", reason="security category")
+        self._call(profile_decision=pd)
+        entry = self._read_entry()
+        self.assertEqual(entry["execution_profile"], "native_deep")
+        self.assertEqual(entry["execution_profile_reason"], "security category")
+
+    def test_execution_profile_absent_when_none(self):
+        self._call()
+        entry = self._read_entry()
+        self.assertNotIn("execution_profile", entry)
+        self.assertNotIn("execution_profile_reason", entry)
+
+    def test_execution_profile_light_logged(self):
+        from openshard.routing.profiles import ProfileDecision
+        pd = ProfileDecision(profile="native_light", reason="simple/safe task")
+        self._call(profile_decision=pd)
+        entry = self._read_entry()
+        self.assertEqual(entry["execution_profile"], "native_light")
+
+    def test_execution_profile_swarm_logged(self):
+        from openshard.routing.profiles import ProfileDecision
+        pd = ProfileDecision(profile="native_swarm", reason="explicit override")
+        self._call(profile_decision=pd)
+        entry = self._read_entry()
+        self.assertEqual(entry["execution_profile"], "native_swarm")
+        self.assertEqual(entry["execution_profile_reason"], "explicit override")
+
 
 if __name__ == "__main__":
     unittest.main()

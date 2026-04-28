@@ -29,6 +29,7 @@ from openshard.analysis.repo import analyze_repo, RepoFacts
 from openshard.history.metrics import load_runs
 from openshard.history.adjustments import compute_history_adjustments, compute_history_adjustment_reasons
 from openshard.routing.workflow_selector import WorkflowHistorySummary, build_workflow_history_summary, select_workflow
+from openshard.routing.profiles import ProfileDecision, select_profile
 from openshard.skills.discovery import discover_skills
 from openshard.skills.matcher import MatchedSkill, match_skills
 from openshard.skills.context import build_skills_context
@@ -89,6 +90,12 @@ def plan(task: str):
     ),
 )
 @click.option(
+    "--profile",
+    type=click.Choice(["native_light", "native_deep", "native_swarm"], case_sensitive=False),
+    default=None,
+    help="Execution profile: native_light (fast/simple), native_deep (thorough/complex), native_swarm (experimental, never auto-selected).",
+)
+@click.option(
     "--executor",
     type=click.Choice(["direct", "opencode"], case_sensitive=False),
     default=None,
@@ -108,7 +115,7 @@ def plan(task: str):
     help="API provider: openrouter (default), anthropic (requires ANTHROPIC_API_KEY), or openai (requires OPENAI_API_KEY).",
 )
 @click.option("--history-scoring", "history_scoring", is_flag=True, default=False, help="Apply run-history bonuses/penalties to model scoring (opt-in).")
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, executor: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool):
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool):
     """Execute TASK and return a structured result."""
     detail = "full" if full else ("more" if more else "default")
     start = time.time()
@@ -300,6 +307,13 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         _wf_reason = _wf_decision.reason
         _use_stages = not opencode_mode and (_wf_choice == "staged")
 
+    _profile_decision: ProfileDecision = select_profile(
+        category=routing_decision.category if routing_decision else "standard",
+        repo_facts=_repo_facts,
+        task=task,
+        override=profile,
+    )
+
     _cfg_approval = _cfg.get("approval_mode", "auto").strip().lower()
     if _cfg_approval not in VALID_APPROVAL_MODES:
         raise click.ClickException(
@@ -384,6 +398,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             _wf_display_reason = "forced by workflow setting"
         click.echo(f"  [routing] workflow: {_wf_display}")
         click.echo(f"  [routing] reason: {_wf_display_reason}")
+        click.echo(f"  [profile] {_profile_decision.profile} - {_profile_decision.reason}")
 
     if detail != "default" and _matched_skills:
         click.echo("\nSkills")
@@ -589,7 +604,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                      summary=result.summary, notes=result.notes,
                      stage_runs=stage_runs, routing_decision=routing_decision,
                      _scored=_scored, repo_facts=_repo_facts,
-                     matched_skills=_matched_skills)
+                     matched_skills=_matched_skills,
+                     profile_decision=_profile_decision)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
         return
@@ -673,7 +689,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                          summary=result.summary, notes=result.notes,
                          stage_runs=stage_runs, routing_decision=routing_decision,
                          _scored=_scored, repo_facts=_repo_facts,
-                         matched_skills=_matched_skills)
+                         matched_skills=_matched_skills,
+                         profile_decision=_profile_decision)
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
             sys.exit(code)
@@ -688,7 +705,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                  summary=result.summary, notes=result.notes,
                  stage_runs=stage_runs, routing_decision=routing_decision,
                  _scored=_scored, repo_facts=_repo_facts,
-                 matched_skills=_matched_skills)
+                 matched_skills=_matched_skills,
+                 profile_decision=_profile_decision)
     except Exception as exc:
         click.echo(f"  [log] warning: {exc}")
 
@@ -715,6 +733,7 @@ def _log_run(
     _scored: ScoredRoutingResult | None = None,
     repo_facts: RepoFacts | None = None,
     matched_skills: list[MatchedSkill] | None = None,
+    profile_decision: ProfileDecision | None = None,
 ) -> None:
     entry: dict = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -790,6 +809,10 @@ def _log_run(
     if matched_skills:
         entry["matched_skills"] = [m.skill.slug for m in matched_skills]
         entry["matched_skill_reasons"] = {m.skill.slug: m.reasons for m in matched_skills}
+
+    if profile_decision is not None:
+        entry["execution_profile"] = profile_decision.profile
+        entry["execution_profile_reason"] = profile_decision.reason
 
     log_path = Path.cwd() / _LOG_PATH
     log_path.parent.mkdir(parents=True, exist_ok=True)

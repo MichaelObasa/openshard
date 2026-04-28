@@ -356,3 +356,41 @@ class TestDeepSeekBoilerplateModel(unittest.TestCase):
     def test_model_cheap_is_not_v3_2(self):
         from openshard.routing.engine import MODEL_CHEAP
         self.assertNotIn("v3.2", MODEL_CHEAP)
+
+
+class TestExecutionProfileDisplay(unittest.TestCase):
+    """Verify [profile] line appears in --more output and --profile override is respected."""
+
+    def _run(self, args: list[str]):
+        manager = _make_manager_mock([], ["openrouter"])
+        generator = _make_generator_mock()
+        with patch("openshard.cli.main.ProviderManager", return_value=manager), \
+             patch("openshard.cli.main.ExecutionGenerator", return_value=generator), \
+             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+             patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
+             patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.cli.main._log_run"):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run"] + args)
+        return result
+
+    def test_more_shows_profile_line(self):
+        result = self._run(["implement a feature", "--more"])
+        self.assertIn("[profile]", result.output, result.output)
+
+    def test_security_task_shows_native_deep(self):
+        result = self._run(["add login endpoint with jwt auth", "--more"])
+        self.assertIn("native_deep", result.output, result.output)
+
+    def test_simple_task_shows_native_light(self):
+        result = self._run(["fix typo in README", "--more"])
+        self.assertIn("native_light", result.output, result.output)
+
+    def test_profile_override_native_swarm(self):
+        result = self._run(["fix typo in README", "--more", "--profile", "native_swarm"])
+        self.assertIn("native_swarm", result.output, result.output)
+        self.assertIn("explicit override", result.output, result.output)
+
+    def test_profile_line_absent_without_more(self):
+        result = self._run(["implement a feature"])
+        self.assertNotIn("[profile]", result.output, result.output)
