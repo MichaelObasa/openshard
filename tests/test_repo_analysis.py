@@ -235,6 +235,14 @@ class TestDetectRiskyPaths(unittest.TestCase):
             risky = _detect_risky_paths(Path(d))
         self.assertFalse(any("venv" in r for r in risky))
 
+    def test_openshard_dir_not_flagged(self):
+        with tempfile.TemporaryDirectory() as d:
+            skill_dir = Path(d, ".openshard", "skills", "auth-hardening")
+            skill_dir.mkdir(parents=True)
+            Path(skill_dir, "SKILL.md").touch()
+            risky = _detect_risky_paths(Path(d))
+        self.assertFalse(any(".openshard" in r for r in risky))
+
 
 class TestDetectChangedFiles(unittest.TestCase):
 
@@ -266,6 +274,14 @@ class TestDetectChangedFiles(unittest.TestCase):
         with patch("openshard.analysis.repo.subprocess.run", return_value=mock_result):
             files = _detect_changed_files(Path("."))
         self.assertEqual(files, ["foo.py", "bar.py"])
+
+    def test_openshard_files_excluded(self):
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ".openshard/state.json\nREADME.md\n"
+        with patch("openshard.analysis.repo.subprocess.run", return_value=mock_result):
+            files = _detect_changed_files(Path("."))
+        self.assertEqual(files, ["README.md"])
 
 
 class TestAnalyzeRepo(unittest.TestCase):

@@ -55,7 +55,7 @@ _RISKY_KEYWORDS: tuple[str, ...] = (
 _SKIP_DIRS: frozenset[str] = frozenset({
     ".git", "node_modules", "__pycache__", ".venv", "venv",
     ".mypy_cache", ".pytest_cache", ".tox", "dist", "build",
-    ".next", ".nuxt",
+    ".next", ".nuxt", ".openshard",
 })
 
 
@@ -161,7 +161,7 @@ def _detect_changed_files(path: Path) -> list[str]:
             timeout=5,
         )
         if result.returncode == 0:
-            return [f for f in result.stdout.splitlines() if f]
+            return [f for f in result.stdout.splitlines() if f and not f.startswith(".openshard/")]
     except Exception:
         pass
     return []
