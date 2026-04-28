@@ -467,5 +467,91 @@ class TestBuildProfileHistorySummary(unittest.TestCase):
             self.assertEqual(s.profile, key)
 
 
+# ---------------------------------------------------------------------------
+# History-aware escalation
+# ---------------------------------------------------------------------------
+
+def _light_summary(
+    runs: int = 5,
+    verification_pass_rate: float | None = None,
+    retry_rate: float | None = None,
+) -> dict:
+    return {
+        "native_light": ProfileHistorySummary(
+            profile="native_light",
+            runs=runs,
+            verification_pass_rate=verification_pass_rate,
+            retry_rate=retry_rate,
+            avg_cost=None,
+            avg_duration=None,
+        )
+    }
+
+
+def test_no_history_keeps_native_light():
+    result = select_profile("standard", _facts(), _short_task(), None, history_summary=None)
+    assert result.profile == "native_light"
+
+
+def test_fewer_than_5_runs_does_not_escalate():
+    summary = _light_summary(runs=4, verification_pass_rate=0.50, retry_rate=0.50)
+    result = select_profile("standard", _facts(), _short_task(), None, history_summary=summary)
+    assert result.profile == "native_light"
+
+
+def test_poor_pass_rate_escalates():
+    summary = _light_summary(runs=5, verification_pass_rate=0.69)
+    result = select_profile("standard", _facts(), _short_task(), None, history_summary=summary)
+    assert result.profile == "native_deep"
+    assert "pass rate" in result.reason
+
+
+def test_pass_rate_exactly_at_threshold_does_not_escalate():
+    summary = _light_summary(runs=5, verification_pass_rate=0.70)
+    result = select_profile("standard", _facts(), _short_task(), None, history_summary=summary)
+    assert result.profile == "native_light"
+
+
+def test_high_retry_rate_escalates():
+    summary = _light_summary(runs=5, retry_rate=0.31)
+    result = select_profile("standard", _facts(), _short_task(), None, history_summary=summary)
+    assert result.profile == "native_deep"
+    assert "retry rate" in result.reason
+
+
+def test_retry_rate_exactly_at_threshold_does_not_escalate():
+    summary = _light_summary(runs=5, retry_rate=0.30)
+    result = select_profile("standard", _facts(), _short_task(), None, history_summary=summary)
+    assert result.profile == "native_light"
+
+
+def test_both_poor_rates_produce_combined_reason():
+    summary = _light_summary(runs=5, verification_pass_rate=0.60, retry_rate=0.40)
+    result = select_profile("standard", _facts(), _short_task(), None, history_summary=summary)
+    assert result.profile == "native_deep"
+    assert "pass rate" in result.reason
+    assert "retry rate" in result.reason
+
+
+def test_override_wins_even_with_poor_history():
+    summary = _light_summary(runs=10, verification_pass_rate=0.10, retry_rate=0.90)
+    result = select_profile("standard", _facts(), _short_task(), "native_light", history_summary=summary)
+    assert result.profile == "native_light"
+    assert result.reason == "explicit override"
+
+
+def test_security_category_deep_independent_of_history():
+    summary = _light_summary(runs=5, verification_pass_rate=0.99, retry_rate=0.01)
+    result = select_profile("security", _facts(), _short_task(), None, history_summary=summary)
+    assert result.profile == "native_deep"
+    assert "security category" in result.reason
+
+
+def test_history_escalation_never_selects_swarm():
+    summary = _light_summary(runs=5, verification_pass_rate=0.10, retry_rate=0.90)
+    result = select_profile("standard", _facts(), _short_task(), None, history_summary=summary)
+    assert result.profile != "native_swarm"
+
+
 if __name__ == "__main__":
     unittest.main()

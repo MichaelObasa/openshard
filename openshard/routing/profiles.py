@@ -19,11 +19,17 @@ class ProfileDecision:
     reason: str
 
 
+_ESCALATION_MIN_RUNS = 5
+_ESCALATION_PASS_RATE_THRESHOLD = 0.70
+_ESCALATION_RETRY_RATE_THRESHOLD = 0.30
+
+
 def select_profile(
     category: str,
     repo_facts: RepoFacts | None,
     task: str,
     override: str | None,
+    history_summary: dict[ProfileName, ProfileHistorySummary] | None = None,
 ) -> ProfileDecision:
     """Select an execution profile for the given task signals.
 
@@ -31,7 +37,9 @@ def select_profile(
     1. Explicit override always wins (raises ValueError if invalid).
     2. native_swarm is never auto-selected.
     3. security/complex category, risky paths, or long task → native_deep.
-    4. Otherwise → native_light.
+    4. History-aware escalation: native_light → native_deep when past
+       native_light performance is poor (low pass rate or high retry rate).
+    5. Otherwise → native_light.
     """
     if override is not None:
         normalized = override.lower()
@@ -54,6 +62,17 @@ def select_profile(
 
     if signals:
         return ProfileDecision(profile="native_deep", reason="; ".join(signals))
+
+    if history_summary is not None:
+        light = history_summary.get("native_light")
+        if light is not None and light.runs >= _ESCALATION_MIN_RUNS:
+            escalation_reasons: list[str] = []
+            if light.verification_pass_rate is not None and light.verification_pass_rate < _ESCALATION_PASS_RATE_THRESHOLD:
+                escalation_reasons.append("native_light history pass rate below threshold")
+            if light.retry_rate is not None and light.retry_rate > _ESCALATION_RETRY_RATE_THRESHOLD:
+                escalation_reasons.append("native_light history retry rate above threshold")
+            if escalation_reasons:
+                return ProfileDecision(profile="native_deep", reason="; ".join(escalation_reasons))
 
     return ProfileDecision(profile="native_light", reason="simple/safe task")
 
