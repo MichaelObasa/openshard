@@ -11,6 +11,7 @@ class SkillDef:
     keywords: list[str]
     languages: list[str]
     framework: str | None
+    body_preview: str = ""
 
 
 def _parse_list(value: str) -> list[str]:
@@ -34,6 +35,26 @@ def _parse_frontmatter(text: str) -> dict[str, str]:
     return result
 
 
+def _parse_body_preview(text: str, max_lines: int = 3) -> str:
+    """Return the first *max_lines* non-blank lines after the closing frontmatter ``---``."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return ""
+    past_open = False
+    body_lines: list[str] = []
+    for line in lines[1:]:
+        if not past_open:
+            if line.strip() == "---":
+                past_open = True
+            continue
+        stripped = line.strip()
+        if stripped:
+            body_lines.append(stripped)
+            if len(body_lines) >= max_lines:
+                break
+    return " ".join(body_lines)
+
+
 def discover_skills(root: Path) -> list[SkillDef]:
     """Scan <root>/.openshard/skills/*/SKILL.md and return parsed skill defs."""
     skills_dir = root / ".openshard" / "skills"
@@ -54,6 +75,7 @@ def discover_skills(root: Path) -> list[SkillDef]:
                 keywords=_parse_list(fm.get("keywords", "")),
                 languages=_parse_list(fm.get("languages", "")),
                 framework=fm.get("framework") or None,
+                body_preview=_parse_body_preview(text),
             ))
         except Exception:
             continue

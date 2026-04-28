@@ -191,18 +191,22 @@ class ExecutionGenerator:
         task: str,
         model: str | None = None,
         repo_facts: RepoFacts | None = None,
+        skills_context: str = "",
     ) -> ExecutionResult:
         """Call the model and return a parsed :class:`ExecutionResult`.
 
         *model* overrides the default execution model when provided.
         *repo_facts* appends repo stack context to the prompt so the model
         generates files that match the detected language and test tooling.
+        *skills_context* prepends matched skill hints before repo context.
         """
         prompt = task
         if repo_facts is not None:
             ctx = _build_repo_context(repo_facts)
             if ctx:
                 prompt = f"{ctx}\n\n{task}"
+        if skills_context:
+            prompt = f"{skills_context}\n\n{prompt}"
         response = self.client.execute(
             model=model or self.model,
             prompt=prompt,

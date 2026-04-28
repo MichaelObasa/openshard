@@ -106,15 +106,16 @@ def should_use_stages(category: str) -> bool:
 # Planning call helper
 # ---------------------------------------------------------------------------
 
-def run_planning_stage(client, task: str) -> tuple[str, object]:
+def run_planning_stage(client, task: str, skills_context: str = "") -> tuple[str, object]:
     """Send a planning request and return ``(plan_text, usage)``.
 
     Uses MODEL_STRONG (Sonnet) unconditionally — planning is cheap in tokens
     and benefits from careful reasoning.
     """
+    prompt = f"{skills_context}\n\nTask: {task}" if skills_context else f"Task: {task}"
     response = client.execute(
         model=MODEL_STRONG,
-        prompt=f"Task: {task}",
+        prompt=prompt,
         system=PLANNING_SYSTEM,
     )
     return response.content, response.usage

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from openshard.skills.discovery import SkillDef, discover_skills, _parse_frontmatter, _parse_list
+from openshard.skills.discovery import SkillDef, discover_skills, _parse_frontmatter, _parse_list, _parse_body_preview
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +122,40 @@ def test_discover_skills_multiple_skills(tmp_path):
     assert len(skills) == 2
     slugs = {s.slug for s in skills}
     assert slugs == {"skill-a", "skill-b"}
+
+
+# ---------------------------------------------------------------------------
+# _parse_body_preview
+# ---------------------------------------------------------------------------
+
+def test_parse_body_preview_basic():
+    text = "---\nname: X\n---\nFirst line.\nSecond line.\nThird line.\nFourth line."
+    assert _parse_body_preview(text) == "First line. Second line. Third line."
+
+
+def test_parse_body_preview_skips_blank_lines():
+    text = "---\nname: X\n---\n\nLine one.\n\nLine two."
+    assert _parse_body_preview(text) == "Line one. Line two."
+
+
+def test_parse_body_preview_no_body():
+    text = "---\nname: X\n---\n"
+    assert _parse_body_preview(text) == ""
+
+
+def test_parse_body_preview_no_frontmatter():
+    assert _parse_body_preview("just plain text") == ""
+
+
+def test_discover_skills_body_preview_populated(tmp_path):
+    skill_dir = tmp_path / ".openshard" / "skills" / "preview-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: Preview Skill\n---\nDo this first.\nThen do that.\n",
+        encoding="utf-8",
+    )
+    skills = discover_skills(tmp_path)
+    assert skills[0].body_preview == "Do this first. Then do that."
 
 
 def test_discover_skills_unreadable_file_skipped(tmp_path):

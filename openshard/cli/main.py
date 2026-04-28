@@ -31,6 +31,7 @@ from openshard.history.adjustments import compute_history_adjustments, compute_h
 from openshard.routing.workflow_selector import WorkflowHistorySummary, build_workflow_history_summary, select_workflow
 from openshard.skills.discovery import discover_skills
 from openshard.skills.matcher import MatchedSkill, match_skills
+from openshard.skills.context import build_skills_context
 
 
 @click.group()
@@ -360,7 +361,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 click.echo(f"  [routing] history: {_model_label(_hm)}: {_hadj:+.1f}{_rsn_str}{_marker}")
 
     _matched_skills: list[MatchedSkill] = []
-    if detail != "default" and _repo_facts is not None and routing_decision is not None:
+    if _repo_facts is not None and routing_decision is not None:
         try:
             _local_skills = discover_skills(Path.cwd())
             if _local_skills:
@@ -369,6 +370,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 )
         except Exception:
             pass
+    _skills_ctx = build_skills_context(_matched_skills)
 
     if detail != "default":
         if _force_stages is None:
@@ -413,7 +415,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         if not opencode_mode:
             spinner.start("Planning - generating implementation plan")
             try:
-                _plan_text, _ = run_planning_stage(generator.client, task)
+                _plan_text, _ = run_planning_stage(generator.client, task, skills_context=_skills_ctx)
                 _impl_task = (
                     f"Task: {task}\n\nImplementation plan:\n{_plan_text}"
                     "\n\nExecute the task following the plan above."
@@ -442,7 +444,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                     continue
                 spinner.start("Planning - mapping out implementation approach")
                 try:
-                    _plan_text, _plan_usage = run_planning_stage(generator.client, task)
+                    _plan_text, _plan_usage = run_planning_stage(generator.client, task, skills_context=_skills_ctx)
                     _impl_task = (
                         f"Task: {task}\n\nImplementation plan:\n{_plan_text}"
                         "\n\nExecute the task following the plan above."
@@ -468,7 +470,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                     routing_decision.rationale if routing_decision else "",
                 ))
                 try:
-                    result = generator.generate(_impl_task, model=_stage_model, repo_facts=_repo_facts)
+                    result = generator.generate(_impl_task, model=_stage_model, repo_facts=_repo_facts, skills_context=_skills_ctx)
                 except RuntimeError as exc:
                     raise click.ClickException(str(exc))
                 except ProviderAuthError:
@@ -501,7 +503,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             if opencode_mode:
                 result = generator.generate(task, workspace=workspace)
             else:
-                result = generator.generate(task, model=_routed_model, repo_facts=_repo_facts)
+                result = generator.generate(task, model=_routed_model, repo_facts=_repo_facts, skills_context=_skills_ctx)
         except RuntimeError as exc:
             raise click.ClickException(str(exc))
         except ProviderAuthError:
