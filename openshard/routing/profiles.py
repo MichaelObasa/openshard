@@ -56,3 +56,37 @@ def select_profile(
         return ProfileDecision(profile="native_deep", reason="; ".join(signals))
 
     return ProfileDecision(profile="native_light", reason="simple/safe task")
+
+
+@dataclass
+class ProfileHistorySummary:
+    profile: ProfileName
+    runs: int
+    verification_pass_rate: float | None
+    retry_rate: float | None
+    avg_cost: float | None
+    avg_duration: float | None
+
+
+def build_profile_history_summary(
+    runs: list[dict],
+) -> dict[ProfileName, ProfileHistorySummary]:
+    """Summarise past run history by execution profile.
+
+    Always returns entries for all three profiles. Runs without an
+    execution_profile field are ignored.
+    """
+    from openshard.history.metrics import compute_profile_stats
+
+    stats = compute_profile_stats(runs)
+    return {
+        cast(ProfileName, profile): ProfileHistorySummary(
+            profile=cast(ProfileName, profile),
+            runs=data["runs_count"],
+            verification_pass_rate=data["verification_pass_rate"],
+            retry_rate=data["retry_rate"],
+            avg_cost=data["avg_cost"],
+            avg_duration=data["avg_duration"],
+        )
+        for profile, data in stats.items()
+    }

@@ -10,7 +10,12 @@ from click.testing import CliRunner
 from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
 from openshard.history.metrics import ALL_PROFILES, compute_profile_stats
-from openshard.routing.profiles import ProfileDecision, select_profile
+from openshard.routing.profiles import (
+    ProfileDecision,
+    ProfileHistorySummary,
+    build_profile_history_summary,
+    select_profile,
+)
 
 
 def _facts(risky_paths: list[str] | None = None) -> RepoFacts:
@@ -373,6 +378,93 @@ class TestProfilesStatsCLI(unittest.TestCase):
                 f.write(json.dumps(_prun()) + "\n")
             result = runner.invoke(cli, ["profiles", "stats"])
         self.assertIn("[profile stats]", result.output)
+
+
+# ---------------------------------------------------------------------------
+# build_profile_history_summary
+# ---------------------------------------------------------------------------
+
+class TestBuildProfileHistorySummary(unittest.TestCase):
+
+    def test_all_profiles_returned(self):
+        summary = build_profile_history_summary([])
+        self.assertIn("native_light", summary)
+        self.assertIn("native_deep", summary)
+        self.assertIn("native_swarm", summary)
+
+    def test_returns_profile_history_summary_instances(self):
+        summary = build_profile_history_summary([])
+        for s in summary.values():
+            self.assertIsInstance(s, ProfileHistorySummary)
+
+    def test_empty_history_zero_runs(self):
+        summary = build_profile_history_summary([])
+        for s in summary.values():
+            self.assertEqual(s.runs, 0)
+
+    def test_empty_history_none_rates(self):
+        summary = build_profile_history_summary([])
+        for s in summary.values():
+            self.assertIsNone(s.verification_pass_rate)
+            self.assertIsNone(s.retry_rate)
+            self.assertIsNone(s.avg_cost)
+            self.assertIsNone(s.avg_duration)
+
+    def test_runs_counted_correctly(self):
+        runs = [
+            _prun(execution_profile="native_light"),
+            _prun(execution_profile="native_light"),
+            _prun(execution_profile="native_deep"),
+        ]
+        summary = build_profile_history_summary(runs)
+        self.assertEqual(summary["native_light"].runs, 2)
+        self.assertEqual(summary["native_deep"].runs, 1)
+        self.assertEqual(summary["native_swarm"].runs, 0)
+
+    def test_pass_rate_copied_correctly(self):
+        runs = [
+            _prun(execution_profile="native_deep", verification_passed=True),
+            _prun(execution_profile="native_deep", verification_passed=True),
+            _prun(execution_profile="native_deep", verification_passed=False),
+        ]
+        summary = build_profile_history_summary(runs)
+        self.assertAlmostEqual(summary["native_deep"].verification_pass_rate, 2 / 3)
+
+    def test_retry_rate_copied_correctly(self):
+        runs = [
+            _prun(execution_profile="native_light", retry_triggered=True),
+            _prun(execution_profile="native_light", retry_triggered=False),
+        ]
+        summary = build_profile_history_summary(runs)
+        self.assertAlmostEqual(summary["native_light"].retry_rate, 0.5)
+
+    def test_avg_cost_copied_correctly(self):
+        runs = [
+            _prun(execution_profile="native_swarm", estimated_cost=0.10),
+            _prun(execution_profile="native_swarm", estimated_cost=0.20),
+        ]
+        summary = build_profile_history_summary(runs)
+        self.assertAlmostEqual(summary["native_swarm"].avg_cost, 0.15)
+
+    def test_avg_duration_copied_correctly(self):
+        runs = [
+            _prun(execution_profile="native_light", duration_seconds=4.0),
+            _prun(execution_profile="native_light", duration_seconds=8.0),
+        ]
+        summary = build_profile_history_summary(runs)
+        self.assertAlmostEqual(summary["native_light"].avg_duration, 6.0)
+
+    def test_runs_without_profile_ignored(self):
+        entry = _prun()
+        del entry["execution_profile"]
+        summary = build_profile_history_summary([entry])
+        for s in summary.values():
+            self.assertEqual(s.runs, 0)
+
+    def test_profile_field_matches_key(self):
+        summary = build_profile_history_summary([_prun(execution_profile="native_deep")])
+        for key, s in summary.items():
+            self.assertEqual(s.profile, key)
 
 
 if __name__ == "__main__":
