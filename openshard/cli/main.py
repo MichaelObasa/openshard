@@ -1540,6 +1540,51 @@ def profiles_stats():
         click.echo(f"  {profile:<{col}}  {n:>5}  {avg_cost:>9}  {avg_dur:>8}  {pass_rate:>9}  {retry:>6}")
 
 
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def skills(ctx: click.Context):
+    """Skills management commands."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@skills.command("stats")
+def skills_stats():
+    """Show per-skill performance stats from run history."""
+    from openshard.history.metrics import compute_skill_stats, load_runs
+
+    runs = load_runs()
+    if not runs:
+        log_path = Path.cwd() / _LOG_PATH
+        if not log_path.exists():
+            click.echo("No run history found. Run 'openshard run' to get started.")
+        else:
+            click.echo("No runs recorded yet.")
+        return
+
+    stats = compute_skill_stats(runs)
+    if not stats:
+        click.echo("No skill data in run history.")
+        return
+
+    skill_runs = sum(s["runs_count"] for s in stats.values())
+    click.echo(f"[skill stats]  {len(stats)} skill{'s' if len(stats) != 1 else ''}  (from {skill_runs} skill-matched run{'s' if skill_runs != 1 else ''})\n")
+
+    col = 28
+    header = f"  {'skill':<{col}}  {'runs':>5}  {'avg cost':>9}  {'avg dur':>8}  {'pass rate':>9}  {'retry':>6}"
+    click.echo(header)
+    click.echo("  " + "-" * (len(header) - 2))
+
+    for slug, s in stats.items():
+        n = s["runs_count"]
+        avg_cost = f"${s['avg_cost']:.4f}" if s["avg_cost"] is not None else "-"
+        avg_dur = f"{s['avg_duration']:.1f}s" if s["avg_duration"] is not None else "-"
+        pass_rate = f"{s['verification_pass_rate']:.0%}" if s["verification_pass_rate"] is not None else "-"
+        retry = f"{s['retry_rate']:.0%}" if s["retry_rate"] is not None else "-"
+        label = slug if len(slug) <= col else slug[: col - 1] + "…"
+        click.echo(f"  {label:<{col}}  {n:>5}  {avg_cost:>9}  {avg_dur:>8}  {pass_rate:>9}  {retry:>6}")
+
+
 @cli.command()
 def report():
     """Display a summary report of recent executions."""

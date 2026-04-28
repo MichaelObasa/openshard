@@ -93,6 +93,61 @@ def compute_model_stats(runs: list[dict]) -> dict[str, dict]:
     return result
 
 
+def compute_skill_stats(runs: list[dict]) -> dict[str, dict]:
+    """Return per-skill performance stats from run history.
+
+    Runs without matched_skills are ignored. A run contributes to every skill
+    slug it was matched against.  Results are sorted by runs_count descending.
+    """
+    accum: dict[str, dict] = defaultdict(lambda: {
+        "runs_count": 0,
+        "total_cost": 0.0, "cost_count": 0,
+        "total_duration": 0.0, "duration_count": 0,
+        "verif_passed": 0, "verif_failed": 0,
+        "retry_count": 0,
+    })
+
+    for run in runs:
+        slugs = run.get("matched_skills")
+        if not slugs:
+            continue
+        for slug in slugs:
+            s = accum[slug]
+            s["runs_count"] += 1
+
+            cost = run.get("estimated_cost")
+            if cost is not None:
+                s["total_cost"] += cost
+                s["cost_count"] += 1
+
+            duration = run.get("duration_seconds")
+            if duration is not None:
+                s["total_duration"] += duration
+                s["duration_count"] += 1
+
+            vp = run.get("verification_passed")
+            if vp is True:
+                s["verif_passed"] += 1
+            elif vp is False:
+                s["verif_failed"] += 1
+
+            if run.get("retry_triggered"):
+                s["retry_count"] += 1
+
+    result: dict[str, dict] = {}
+    for slug, s in sorted(accum.items(), key=lambda x: x[1]["runs_count"], reverse=True):
+        n = s["runs_count"]
+        verif_total = s["verif_passed"] + s["verif_failed"]
+        result[slug] = {
+            "runs_count": n,
+            "avg_cost": s["total_cost"] / s["cost_count"] if s["cost_count"] else None,
+            "avg_duration": s["total_duration"] / s["duration_count"] if s["duration_count"] else None,
+            "verification_pass_rate": s["verif_passed"] / verif_total if verif_total else None,
+            "retry_rate": s["retry_count"] / n if n else None,
+        }
+    return result
+
+
 def compute_profile_stats(runs: list[dict]) -> dict[str, dict]:
     """Return per-profile performance stats. All three profiles are always present."""
     accum = {p: {
