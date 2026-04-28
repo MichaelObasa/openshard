@@ -60,6 +60,12 @@ class TestExtractVersion(unittest.TestCase):
     def test_version_with_prefix(self):
         self.assertEqual(extract_version("anthropic/claude-haiku-4.5"), (4, 5))
 
+    def test_v4_flash_alias_returns_version(self):
+        self.assertEqual(extract_version("deepseek/deepseek-v4-flash"), (4, 0))
+
+    def test_v4_pro_alias_returns_version(self):
+        self.assertEqual(extract_version("deepseek/deepseek-v4-pro"), (4, 0))
+
 
 class TestBuildShortlist(unittest.TestCase):
 
@@ -114,3 +120,12 @@ class TestBuildShortlist(unittest.TestCase):
         ]
         result = build_shortlist(entries)
         self.assertEqual(result[0].model.id, "anthropic/claude-sonnet-4.6")
+
+    def test_v4_flash_beats_v3_2_in_deepseek_family(self):
+        entries = [
+            _entry("deepseek/deepseek-v3.2"),
+            _entry("deepseek/deepseek-v4-flash"),
+        ]
+        result = build_shortlist(entries)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].model.id, "deepseek/deepseek-v4-flash")

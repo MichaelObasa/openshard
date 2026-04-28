@@ -4,7 +4,7 @@ import unittest
 
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry
-from openshard.scoring.requirements import TaskRequirements
+from openshard.scoring.requirements import TaskRequirements, requirements_from_category
 from openshard.scoring.scorer import score_model, select_candidate
 
 
@@ -130,3 +130,35 @@ class TestSelectCandidate(unittest.TestCase):
         entry = _entry("no-vision", supports_vision=False)
         req = TaskRequirements(needs_vision=True)
         self.assertIsNone(select_candidate([entry], req))
+
+
+class TestBoilerplateScoring(unittest.TestCase):
+
+    def _make(self, model_id: str, prompt_per_token: str, ctx: int) -> InventoryEntry:
+        return InventoryEntry(
+            provider="openrouter",
+            model=ModelInfo(
+                id=model_id,
+                name=model_id,
+                pricing={"prompt": prompt_per_token},
+                context_window=ctx,
+                supports_vision=False,
+                supports_tools=False,
+            ),
+        )
+
+    def test_v4_flash_beats_minimax_for_boilerplate(self):
+        v4_flash = self._make("deepseek/deepseek-v4-flash", "0.00000014", 1_048_576)
+        minimax = self._make("minimax/minimax-m2.7", "0.0000003", 196_608)
+        req = requirements_from_category("boilerplate")
+        winner = select_candidate([v4_flash, minimax], req, category="boilerplate")
+        self.assertIsNotNone(winner)
+        self.assertEqual(winner.model.id, "deepseek/deepseek-v4-flash")
+
+    def test_v4_flash_beats_v3_2_for_boilerplate(self):
+        v4_flash = self._make("deepseek/deepseek-v4-flash", "0.00000014", 1_048_576)
+        v3_2 = self._make("deepseek/deepseek-v3.2", "0.000000252", 131_072)
+        req = requirements_from_category("boilerplate")
+        winner = select_candidate([v4_flash, v3_2], req, category="boilerplate")
+        self.assertIsNotNone(winner)
+        self.assertEqual(winner.model.id, "deepseek/deepseek-v4-flash")

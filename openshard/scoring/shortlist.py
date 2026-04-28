@@ -22,6 +22,13 @@ TRUSTED_FAMILIES = [
 
 _VERSION_RE = re.compile(r"(\d+)\.(\d+)")
 
+# Non-decimal version slugs that _VERSION_RE cannot match.
+# Maps a substring of the model ID to its (major, minor) version.
+_VERSION_ALIAS: dict[str, tuple[int, int]] = {
+    "v4-flash": (4, 0),
+    "v4-pro":   (4, 0),
+}
+
 
 def is_trusted_model(model_id: str) -> bool:
     mid = model_id.lower().lstrip("~")
@@ -36,6 +43,9 @@ def is_alias(model_id: str) -> bool:
 
 
 def extract_version(model_id: str) -> tuple[int, ...] | None:
+    for slug, ver in _VERSION_ALIAS.items():
+        if slug in model_id:
+            return ver
     m = _VERSION_RE.search(model_id)
     if m is None:
         return None
