@@ -287,12 +287,14 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         _workflow_history_summary: WorkflowHistorySummary | None = None
         if _use_history_scoring and _runs:
             _workflow_history_summary = build_workflow_history_summary(_runs, _category)
-        _wf_choice = select_workflow(
+        _wf_decision = select_workflow(
             category=_category,
             repo_facts=_repo_facts,
             history_summary=_workflow_history_summary,
             verify_enabled=verify,
         )
+        _wf_choice = _wf_decision.workflow
+        _wf_reason = _wf_decision.reason
         _use_stages = not opencode_mode and (_wf_choice == "staged")
 
     _cfg_approval = _cfg.get("approval_mode", "auto").strip().lower()
@@ -354,6 +356,19 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 _rsn_str = f" ({_rsn})" if _rsn else ""
                 _marker = " ← selected" if _hm == _scored.selected_model else ""
                 click.echo(f"  [routing] history: {_model_label(_hm)}: {_hadj:+.1f}{_rsn_str}{_marker}")
+
+    if detail != "default":
+        if _force_stages is None:
+            _wf_display = _wf_choice
+            _wf_display_reason = _wf_reason
+        elif _force_stages:
+            _wf_display = "staged"
+            _wf_display_reason = "forced by workflow setting"
+        else:
+            _wf_display = "direct"
+            _wf_display_reason = "forced by workflow setting"
+        click.echo(f"  [routing] workflow: {_wf_display}")
+        click.echo(f"  [routing] reason: {_wf_display_reason}")
 
     if detail == "default":
         _routing_msg = _build_routing_line(routing_decision, _use_stages, actual_model=_routed_model)

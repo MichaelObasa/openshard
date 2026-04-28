@@ -22,6 +22,12 @@ class WorkflowHistorySummary:
     sample_count: int
 
 
+@dataclass
+class WorkflowDecision:
+    workflow: Literal["direct", "staged"]
+    reason: str
+
+
 def build_workflow_history_summary(
     runs: list[dict], category: str
 ) -> WorkflowHistorySummary | None:
@@ -46,7 +52,7 @@ def select_workflow(
     repo_facts: RepoFacts | None,
     history_summary: WorkflowHistorySummary | None,
     verify_enabled: bool,  # noqa: ARG001 — reserved for future compound rules
-) -> Literal["direct", "staged"]:
+) -> WorkflowDecision:
     """Choose between direct and staged workflow based on task signals.
 
     Deterministic rules only. History signals require MIN_CATEGORY_RUNS samples
@@ -65,14 +71,14 @@ def select_workflow(
             and history_summary.retry_rate < RETRY_DEESCALATE  # type: ignore[union-attr]
             and not risky
         ):
-            return "direct"
-        return "staged"
+            return WorkflowDecision("direct", "history cleared gates for staged category")
+        return WorkflowDecision("staged", "category defaults to staged")
 
     # Base is direct — check escalation signals
     if risky:
-        return "staged"
+        return WorkflowDecision("staged", "risky paths detected")
     if has_history and history_summary.retry_rate >= RETRY_ESCALATE:  # type: ignore[union-attr]
-        return "staged"
+        return WorkflowDecision("staged", "high retry rate in this category")
     if has_history and history_summary.verification_pass_rate <= PASS_RATE_ESCALATE:  # type: ignore[union-attr]
-        return "staged"
-    return "direct"
+        return WorkflowDecision("staged", "low verification pass rate")
+    return WorkflowDecision("direct", "category defaults to direct")

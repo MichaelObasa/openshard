@@ -7,6 +7,7 @@ from openshard.routing.workflow_selector import (
     WorkflowHistorySummary,
     build_workflow_history_summary,
     select_workflow,
+    WorkflowDecision,
 )
 
 
@@ -35,12 +36,16 @@ def _summary(retry_rate: float, pass_rate: float, n: int = MIN_CATEGORY_RUNS) ->
 
 @pytest.mark.parametrize("category", ["security", "complex"])
 def test_base_staged_categories(category):
-    assert select_workflow(category, _facts(), None, False) == "staged"
+    result = select_workflow(category, _facts(), None, False)
+    assert result.workflow == "staged"
+    assert result.reason == "category defaults to staged"
 
 
 @pytest.mark.parametrize("category", ["visual", "boilerplate", "standard"])
 def test_base_direct_categories(category):
-    assert select_workflow(category, _facts(), None, False) == "direct"
+    result = select_workflow(category, _facts(), None, False)
+    assert result.workflow == "direct"
+    assert result.reason == "category defaults to direct"
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +54,9 @@ def test_base_direct_categories(category):
 
 @pytest.mark.parametrize("category", ["visual", "boilerplate", "standard"])
 def test_risky_paths_escalates_direct_category(category):
-    assert select_workflow(category, _facts(["auth/login.py"]), None, False) == "staged"
+    result = select_workflow(category, _facts(["auth/login.py"]), None, False)
+    assert result.workflow == "staged"
+    assert result.reason == "risky paths detected"
 
 
 # ---------------------------------------------------------------------------
@@ -58,11 +65,13 @@ def test_risky_paths_escalates_direct_category(category):
 
 @pytest.mark.parametrize("category", ["visual", "boilerplate", "standard"])
 def test_high_retry_rate_escalates(category):
-    assert select_workflow(category, _facts(), _summary(0.4, 0.9), False) == "staged"
+    result = select_workflow(category, _facts(), _summary(0.4, 0.9), False)
+    assert result.workflow == "staged"
+    assert result.reason == "high retry rate in this category"
 
 
 def test_retry_rate_below_threshold_does_not_escalate():
-    assert select_workflow("standard", _facts(), _summary(0.39, 0.9), False) == "direct"
+    assert select_workflow("standard", _facts(), _summary(0.39, 0.9), False).workflow == "direct"
 
 
 # ---------------------------------------------------------------------------
@@ -71,11 +80,13 @@ def test_retry_rate_below_threshold_does_not_escalate():
 
 @pytest.mark.parametrize("category", ["visual", "boilerplate", "standard"])
 def test_low_pass_rate_escalates(category):
-    assert select_workflow(category, _facts(), _summary(0.1, 0.3), False) == "staged"
+    result = select_workflow(category, _facts(), _summary(0.1, 0.3), False)
+    assert result.workflow == "staged"
+    assert result.reason == "low verification pass rate"
 
 
 def test_pass_rate_above_threshold_does_not_escalate():
-    assert select_workflow("standard", _facts(), _summary(0.1, 0.31), False) == "direct"
+    assert select_workflow("standard", _facts(), _summary(0.1, 0.31), False).workflow == "direct"
 
 
 # ---------------------------------------------------------------------------
@@ -85,27 +96,29 @@ def test_pass_rate_above_threshold_does_not_escalate():
 def test_deescalation_all_gates_pass():
     """security base → direct when history is excellent and no risky paths."""
     good = _summary(retry_rate=0.1, pass_rate=0.8)
-    assert select_workflow("security", _facts(), good, False) == "direct"
+    result = select_workflow("security", _facts(), good, False)
+    assert result.workflow == "direct"
+    assert result.reason == "history cleared gates for staged category"
 
 
 def test_deescalation_complex_base():
     good = _summary(retry_rate=0.05, pass_rate=0.95)
-    assert select_workflow("complex", _facts(), good, False) == "direct"
+    assert select_workflow("complex", _facts(), good, False).workflow == "direct"
 
 
 def test_deescalation_blocked_by_risky_paths():
     good = _summary(retry_rate=0.1, pass_rate=0.9)
-    assert select_workflow("security", _facts(["payment/stripe.py"]), good, False) == "staged"
+    assert select_workflow("security", _facts(["payment/stripe.py"]), good, False).workflow == "staged"
 
 
 def test_deescalation_blocked_by_high_retry():
     borderline = _summary(retry_rate=0.2, pass_rate=0.9)
-    assert select_workflow("security", _facts(), borderline, False) == "staged"
+    assert select_workflow("security", _facts(), borderline, False).workflow == "staged"
 
 
 def test_deescalation_blocked_by_low_pass_rate():
     borderline = _summary(retry_rate=0.05, pass_rate=0.79)
-    assert select_workflow("security", _facts(), borderline, False) == "staged"
+    assert select_workflow("security", _facts(), borderline, False).workflow == "staged"
 
 
 # ---------------------------------------------------------------------------
@@ -113,20 +126,20 @@ def test_deescalation_blocked_by_low_pass_rate():
 # ---------------------------------------------------------------------------
 
 def test_no_history_uses_base_rules():
-    assert select_workflow("standard", _facts(), None, False) == "direct"
-    assert select_workflow("security", _facts(), None, False) == "staged"
+    assert select_workflow("standard", _facts(), None, False).workflow == "direct"
+    assert select_workflow("security", _facts(), None, False).workflow == "staged"
 
 
 def test_insufficient_samples_skips_history_signals():
     low_sample = _summary(retry_rate=0.9, pass_rate=0.0, n=MIN_CATEGORY_RUNS - 1)
     # poor signals but too few samples → base rule wins (direct for standard)
-    assert select_workflow("standard", _facts(), low_sample, False) == "direct"
+    assert select_workflow("standard", _facts(), low_sample, False).workflow == "direct"
 
 
 def test_insufficient_samples_skips_deescalation():
     low_sample = _summary(retry_rate=0.0, pass_rate=1.0, n=MIN_CATEGORY_RUNS - 1)
     # good signals but too few samples → base rule wins (staged for security)
-    assert select_workflow("security", _facts(), low_sample, False) == "staged"
+    assert select_workflow("security", _facts(), low_sample, False).workflow == "staged"
 
 
 # ---------------------------------------------------------------------------
@@ -134,11 +147,11 @@ def test_insufficient_samples_skips_deescalation():
 # ---------------------------------------------------------------------------
 
 def test_verify_alone_does_not_escalate_standard():
-    assert select_workflow("standard", _facts(), None, True) == "direct"
+    assert select_workflow("standard", _facts(), None, True).workflow == "direct"
 
 
 def test_verify_alone_does_not_escalate_boilerplate():
-    assert select_workflow("boilerplate", _facts(), None, True) == "direct"
+    assert select_workflow("boilerplate", _facts(), None, True).workflow == "direct"
 
 
 # ---------------------------------------------------------------------------
