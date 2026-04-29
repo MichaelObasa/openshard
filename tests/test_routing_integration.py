@@ -478,3 +478,62 @@ class TestHistoryScoringProfileSelection(unittest.TestCase):
         lines = [ln for ln in result.output.splitlines() if "[profile]" in ln]
         for line in lines:
             self.assertNotIn("native_swarm", line, result.output)
+
+
+class TestVerificationPlanDisplay(unittest.TestCase):
+
+    def _run(self, args: list[str], repo_facts=None, config=None):
+        manager_mock = _make_manager_mock(
+            [_make_entry("openrouter/fast-model", pricing={"prompt": 1.0, "completion": 1.0})],
+            ["openrouter"],
+        )
+        generator_mock = _make_generator_mock()
+        cfg = config if config is not None else _DEFAULT_CONFIG
+        facts = repo_facts if repo_facts is not None else _PYTHON_REPO
+        with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
+             patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
+             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+             patch("openshard.cli.main.load_config", return_value=cfg), \
+             patch("openshard.cli.main.analyze_repo", return_value=facts), \
+             patch("openshard.cli.main._log_run"):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run"] + args)
+        return result
+
+    def test_detected_pytest_shown_in_more(self):
+        repo = RepoFacts(
+            languages=["python"], package_files=[], framework=None,
+            test_command="pytest", risky_paths=[], changed_files=[],
+        )
+        result = self._run(["fix a bug", "--more"], repo_facts=repo)
+        self.assertIn("[verification]", result.output, result.output)
+        self.assertIn("safe", result.output, result.output)
+        self.assertIn("detected", result.output, result.output)
+
+    def test_config_command_shown_in_more(self):
+        cfg = {"approval_mode": "smart", "verification_command": ["pytest"]}
+        result = self._run(["fix a bug", "--more"], config=cfg)
+        self.assertIn("[verification]", result.output, result.output)
+        self.assertIn("config", result.output, result.output)
+
+    def test_config_takes_priority_over_detected(self):
+        repo = RepoFacts(
+            languages=["python"], package_files=[], framework=None,
+            test_command="npm test", risky_paths=[], changed_files=[],
+        )
+        cfg = {"approval_mode": "smart", "verification_command": ["pytest"]}
+        result = self._run(["fix a bug", "--more"], repo_facts=repo, config=cfg)
+        self.assertIn("config", result.output, result.output)
+        self.assertNotIn("detected", result.output, result.output)
+
+    def test_no_command_shows_not_detected(self):
+        result = self._run(["fix a bug", "--more"])
+        self.assertIn("no verification command detected", result.output, result.output)
+
+    def test_not_shown_in_default_detail(self):
+        repo = RepoFacts(
+            languages=["python"], package_files=[], framework=None,
+            test_command="pytest", risky_paths=[], changed_files=[],
+        )
+        result = self._run(["fix a bug"], repo_facts=repo)
+        self.assertNotIn("[verification]", result.output, result.output)

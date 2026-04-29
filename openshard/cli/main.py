@@ -34,6 +34,7 @@ from openshard.routing.profiles import ProfileDecision, ProfileHistorySummary, b
 from openshard.skills.discovery import discover_skills
 from openshard.skills.matcher import MatchedSkill, match_skills
 from openshard.skills.context import build_skills_context
+from openshard.verification.plan import VerificationPlan, build_verification_plan
 
 
 @click.group()
@@ -293,6 +294,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     except Exception:
         pass
 
+    _verification_plan = build_verification_plan(_cfg, _repo_facts)
+
     if _use_stages is None:
         _category = routing_decision.category if routing_decision else "standard"
         _workflow_history_summary: WorkflowHistorySummary | None = None
@@ -404,6 +407,12 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         click.echo(f"  [routing] workflow: {_wf_display}")
         click.echo(f"  [routing] reason: {_wf_display_reason}")
         click.echo(f"  [profile] {_profile_decision.profile} - {_profile_decision.reason}")
+        if _verification_plan.has_commands:
+            for _vcmd in _verification_plan.commands:
+                _argv_str = " ".join(_vcmd.argv)
+                click.echo(f"  [verification] {_vcmd.name} {_vcmd.safety.value} {_vcmd.source.value} {_argv_str}")
+        else:
+            click.echo("  [verification] no verification command detected")
 
     if detail != "default" and _matched_skills:
         click.echo("\nSkills")
@@ -610,7 +619,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                      stage_runs=stage_runs, routing_decision=routing_decision,
                      _scored=_scored, repo_facts=_repo_facts,
                      matched_skills=_matched_skills,
-                     profile_decision=_profile_decision)
+                     profile_decision=_profile_decision,
+                     verification_plan=_verification_plan)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
         return
@@ -695,7 +705,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                          stage_runs=stage_runs, routing_decision=routing_decision,
                          _scored=_scored, repo_facts=_repo_facts,
                          matched_skills=_matched_skills,
-                         profile_decision=_profile_decision)
+                         profile_decision=_profile_decision,
+                         verification_plan=_verification_plan)
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
             sys.exit(code)
@@ -711,12 +722,27 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                  stage_runs=stage_runs, routing_decision=routing_decision,
                  _scored=_scored, repo_facts=_repo_facts,
                  matched_skills=_matched_skills,
-                 profile_decision=_profile_decision)
+                 profile_decision=_profile_decision,
+                 verification_plan=_verification_plan)
     except Exception as exc:
         click.echo(f"  [log] warning: {exc}")
 
 
 _LOG_PATH = Path(".openshard") / "runs.jsonl"
+
+
+def _serialize_verification_plan(plan: VerificationPlan) -> list[dict]:
+    return [
+        {
+            "name": cmd.name,
+            "argv": cmd.argv,
+            "kind": cmd.kind.value,
+            "source": cmd.source.value,
+            "safety": cmd.safety.value,
+            "reason": cmd.reason,
+        }
+        for cmd in plan.commands
+    ]
 
 
 def _log_run(
@@ -739,6 +765,7 @@ def _log_run(
     repo_facts: RepoFacts | None = None,
     matched_skills: list[MatchedSkill] | None = None,
     profile_decision: ProfileDecision | None = None,
+    verification_plan: VerificationPlan | None = None,
 ) -> None:
     entry: dict = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -818,6 +845,9 @@ def _log_run(
     if profile_decision is not None:
         entry["execution_profile"] = profile_decision.profile
         entry["execution_profile_reason"] = profile_decision.reason
+
+    if verification_plan is not None and verification_plan.has_commands:
+        entry["verification_plan"] = _serialize_verification_plan(verification_plan)
 
     log_path = Path.cwd() / _LOG_PATH
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1809,6 +1839,12 @@ def _render_log_entry(entry: dict, detail: str) -> None:
         if _reason:
             _profile_line += f" - {_reason}"
         click.echo(f"  {_profile_line}")
+
+    # Verification plan (--more / --full)
+    if detail != "default" and "verification_plan" in entry:
+        for _vc in entry["verification_plan"]:
+            _argv_str = " ".join(_vc["argv"])
+            click.echo(f"  [verification] {_vc['name']} {_vc['safety']} {_vc['source']} {_argv_str}")
 
     # Files
     fc = entry.get("files_created", 0)

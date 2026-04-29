@@ -302,5 +302,85 @@ class TestLogRunHistory(unittest.TestCase):
         self.assertEqual(entry["execution_profile_reason"], "explicit override")
 
 
+class TestVerificationPlanLogging(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._tmpdir = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _call(self, **kwargs):
+        defaults = dict(
+            start=time.time(),
+            task="test task",
+            generator=_make_generator(),
+            retry_triggered=False,
+            files=[],
+            verification_attempted=False,
+            verification_passed=None,
+            workspace=None,
+        )
+        defaults.update(kwargs)
+        with patch("openshard.cli.main.Path.cwd", return_value=self._tmpdir):
+            _log_run(**defaults)
+
+    def _read_entry(self) -> dict:
+        log_path = self._tmpdir / ".openshard" / "runs.jsonl"
+        lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        return json.loads(lines[-1])
+
+    def _make_plan(self):
+        from openshard.verification.plan import (
+            CommandSafety, VerificationCommand, VerificationKind,
+            VerificationPlan, VerificationSource,
+        )
+        cmd = VerificationCommand(
+            name="tests",
+            argv=["python", "-m", "pytest"],
+            kind=VerificationKind.test,
+            source=VerificationSource.detected,
+            safety=CommandSafety.safe,
+            reason="matches safe prefix: python -m pytest",
+        )
+        return VerificationPlan(commands=[cmd])
+
+    def test_plan_with_commands_stored(self):
+        self._call(verification_plan=self._make_plan())
+        entry = self._read_entry()
+        self.assertIn("verification_plan", entry)
+        self.assertEqual(len(entry["verification_plan"]), 1)
+
+    def test_stored_fields_match_command(self):
+        self._call(verification_plan=self._make_plan())
+        entry = self._read_entry()
+        vc = entry["verification_plan"][0]
+        self.assertEqual(vc["name"], "tests")
+        self.assertEqual(vc["argv"], ["python", "-m", "pytest"])
+        self.assertEqual(vc["kind"], "test")
+        self.assertEqual(vc["source"], "detected")
+        self.assertEqual(vc["safety"], "safe")
+        self.assertIn("pytest", vc["reason"])
+
+    def test_empty_plan_not_stored(self):
+        from openshard.verification.plan import VerificationPlan
+        self._call(verification_plan=VerificationPlan())
+        entry = self._read_entry()
+        self.assertNotIn("verification_plan", entry)
+
+    def test_none_plan_not_stored(self):
+        self._call(verification_plan=None)
+        entry = self._read_entry()
+        self.assertNotIn("verification_plan", entry)
+
+    def test_existing_fields_unaffected(self):
+        self._call(task="my task", verification_plan=self._make_plan())
+        entry = self._read_entry()
+        self.assertEqual(entry["task"], "my task")
+        self.assertIn("timestamp", entry)
+        self.assertIn("execution_model", entry)
+
+
 if __name__ == "__main__":
     unittest.main()

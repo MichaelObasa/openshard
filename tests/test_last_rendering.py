@@ -100,5 +100,65 @@ class TestLastProfileDisplay(unittest.TestCase):
         self.assertNotIn("[profile]", out)
 
 
+class TestLastVerificationDisplay(unittest.TestCase):
+
+    _PLAN_ENTRY = {
+        "task": "do a thing",
+        "verification_plan": [
+            {
+                "name": "tests",
+                "argv": ["python", "-m", "pytest"],
+                "kind": "test",
+                "source": "detected",
+                "safety": "safe",
+                "reason": "matches safe prefix: python -m pytest",
+            }
+        ],
+    }
+
+    def test_more_shows_verification_plan(self):
+        out = _render(self._PLAN_ENTRY, detail="more")
+        self.assertIn("[verification]", out)
+        self.assertIn("safe", out)
+        self.assertIn("detected", out)
+
+    def test_full_shows_verification_plan(self):
+        out = _render(self._PLAN_ENTRY, detail="full")
+        self.assertIn("[verification]", out)
+        self.assertIn("safe", out)
+        self.assertIn("detected", out)
+
+    def test_argv_rendered_space_joined(self):
+        out = _render(self._PLAN_ENTRY, detail="more")
+        self.assertIn("python -m pytest", out)
+
+    def test_default_detail_hides_verification_plan(self):
+        out = _render(self._PLAN_ENTRY, detail="default")
+        self.assertNotIn("[verification]", out)
+
+    def test_old_entry_without_plan_no_crash(self):
+        entry = {"task": "old run"}
+        out = _render(entry, detail="more")
+        self.assertNotIn("[verification]", out)
+
+    def test_config_source_shown(self):
+        entry = {
+            "task": "do a thing",
+            "verification_plan": [
+                {
+                    "name": "tests",
+                    "argv": ["pytest"],
+                    "kind": "test",
+                    "source": "config",
+                    "safety": "safe",
+                    "reason": "matches safe prefix: pytest",
+                }
+            ],
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("config", out)
+        self.assertIn("pytest", out)
+
+
 if __name__ == "__main__":
     unittest.main()
