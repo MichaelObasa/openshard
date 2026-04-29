@@ -318,7 +318,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         history_summary=_profile_history_summary,
     )
 
-    _cfg_approval = _cfg.get("approval_mode", "auto").strip().lower()
+    _cfg_approval = _cfg.get("approval_mode", "smart").strip().lower()
     if _cfg_approval not in VALID_APPROVAL_MODES:
         raise click.ClickException(
             f"Invalid approval_mode {_cfg_approval!r} in config. "

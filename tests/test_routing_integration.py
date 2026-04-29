@@ -10,11 +10,16 @@ from openshard.cli.main import cli
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry
 
-_AUTO_CONFIG = {"approval_mode": "auto"}
+_DEFAULT_CONFIG = {"approval_mode": "smart"}
 
 _PYTHON_REPO = RepoFacts(
     languages=["python"], package_files=[], framework=None,
     test_command=None, risky_paths=[], changed_files=[],
+)
+
+_RISKY_PYTHON_REPO = RepoFacts(
+    languages=["python"], package_files=[], framework=None,
+    test_command=None, risky_paths=["auth"], changed_files=[],
 )
 
 
@@ -65,7 +70,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
         with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
-             patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
              patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
              patch("openshard.cli.main._log_run"):
             runner = CliRunner()
@@ -138,7 +143,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
         with patch("openshard.cli.main.ProviderManager", return_value=manager), \
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
-             patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
              patch("openshard.cli.main._log_run") as mock_log:
             runner = CliRunner()
             runner.invoke(cli, ["run", task])
@@ -159,7 +164,7 @@ class TestRoutingDisplayConsistency(unittest.TestCase):
         with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
-             patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
              patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
              patch("openshard.cli.main._log_run"):
             runner = CliRunner()
@@ -230,13 +235,14 @@ class TestRoutingDisplayConsistency(unittest.TestCase):
 class TestApprovalFlag(unittest.TestCase):
     """Verify --approval flag overrides config and triggers gates correctly."""
 
-    def _run_with_write(self, args: list[str], generator_mock, approval_mode="auto"):
-        config = {"approval_mode": approval_mode}
+    def _run_with_write(self, args: list[str], generator_mock, approval_mode="smart",
+                        repo=None, config_override=None):
+        config = config_override if config_override is not None else {"approval_mode": approval_mode}
         with patch("openshard.cli.main.ProviderManager"), \
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
              patch("openshard.cli.main.load_config", return_value=config), \
-             patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.cli.main.analyze_repo", return_value=repo or _PYTHON_REPO), \
              patch("openshard.cli.main._log_run"), \
              patch("openshard.cli.main._write_files"):
             runner = CliRunner()
@@ -283,6 +289,30 @@ class TestApprovalFlag(unittest.TestCase):
         assert result.exit_code != 0
         assert "Invalid value" in result.output or "Error" in result.output
 
+    def test_default_approval_mode_is_smart(self):
+        """Empty config falls back to smart; smart mode prompts on a risky-path write."""
+        generator = _make_generator_mock()
+        generator.generate.return_value.files = [MagicMock(path="src/auth/login.py")]
+        result = self._run_with_write(
+            ["add a helper", "--write"],
+            generator,
+            config_override={},
+            repo=_RISKY_PYTHON_REPO,
+        )
+        assert "[gate]" in result.output, result.output
+
+    def test_approval_auto_flag_overrides_smart_config(self):
+        """--approval auto suppresses gates even when config specifies smart."""
+        generator = _make_generator_mock()
+        generator.generate.return_value.files = [MagicMock(path="src/auth/login.py")]
+        result = self._run_with_write(
+            ["add a helper", "--write", "--approval", "auto"],
+            generator,
+            approval_mode="smart",
+            repo=_RISKY_PYTHON_REPO,
+        )
+        assert "[gate]" not in result.output, result.output
+
 
 class TestHistoryScoringDisplay(unittest.TestCase):
     """Verify history-scoring lines appear in --more output when the flag is set."""
@@ -294,7 +324,7 @@ class TestHistoryScoringDisplay(unittest.TestCase):
         with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
-             patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
              patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
              patch("openshard.cli.main._log_run"), \
              patch("openshard.cli.main.load_runs", return_value=[]), \
@@ -367,7 +397,7 @@ class TestExecutionProfileDisplay(unittest.TestCase):
         with patch("openshard.cli.main.ProviderManager", return_value=manager), \
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
-             patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
              patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
              patch("openshard.cli.main._log_run"):
             runner = CliRunner()
@@ -414,7 +444,7 @@ class TestHistoryScoringProfileSelection(unittest.TestCase):
         with patch("openshard.cli.main.ProviderManager", return_value=manager), \
              patch("openshard.cli.main.ExecutionGenerator", return_value=generator), \
              patch("openshard.cli.main.get_api_key", return_value="test-key"), \
-             patch("openshard.cli.main.load_config", return_value=_AUTO_CONFIG), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
              patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
              patch("openshard.cli.main._log_run"), \
              patch("openshard.cli.main.load_runs", return_value=runs or []):

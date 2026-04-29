@@ -28,12 +28,12 @@ fixer_model: anthropic/claude-sonnet-4.6
 # opencode — delegate to OpenCode CLI subprocess
 workflow: auto
 
-# Approval mode: auto (default) | smart | ask
+# Approval mode: smart (default) | auto | ask
 # Controls when OpenShard prompts before writing, running shell commands, etc.
-# auto  — never prompts (gates are silent)
 # smart — prompts for security/complex tasks and risky paths
+# auto  — never prompts (gates are silent)
 # ask   — prompts before every task
-approval_mode: auto
+approval_mode: smart
 cost_gate_threshold: 0.10
 
 # DEPRECATED: use `workflow` instead. Kept for backward compatibility.
