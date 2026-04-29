@@ -38,8 +38,13 @@ def resolve_safe_repo_path(repo_root: Path, user_path: str) -> Path:
     if ".." in p.parts:
         raise UnsafePathError(f"Path must not contain '..': {user_path!r}")
 
+    # Reject symlinks before resolution (is_symlink() does not follow links)
+    candidate = repo_root / p
+    if candidate.is_symlink():
+        raise UnsafePathError(f"Path is a symlink: {candidate}")
+
     # Resolve against repo root and confirm containment
-    resolved = (repo_root / p).resolve()
+    resolved = candidate.resolve()
     repo_resolved = repo_root.resolve()
     try:
         rel = resolved.relative_to(repo_resolved)
@@ -55,9 +60,5 @@ def resolve_safe_repo_path(repo_root: Path, user_path: str) -> Path:
     # Reject .openshard/runs.jsonl specifically
     if rel == Path(".openshard") / "runs.jsonl":
         raise UnsafePathError("Path must not target .openshard/runs.jsonl.")
-
-    # Reject symlinks at the final resolved path (if it already exists)
-    if resolved.is_symlink():
-        raise UnsafePathError(f"Resolved path is a symlink: {resolved}")
 
     return resolved
