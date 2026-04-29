@@ -41,6 +41,8 @@ from openshard.run.pipeline import (
     _copy_cwd_to_workspace,
     _build_retry_prompt,
 )
+from openshard.evals.registry import load_eval_tasks
+from openshard.evals.runner import append_eval_result, run_eval_task
 
 
 @click.group()
@@ -1784,12 +1786,6 @@ def eval_run(suite: str, model: str):
 @click.option("--models", required=True, help="Comma-separated list of model slugs.")
 def eval_compare(suite: str, models: str):
     """Run an eval suite across multiple models and print a comparison summary."""
-    import tempfile
-
-    from openshard.evals.registry import load_eval_tasks
-    from openshard.evals.runner import append_eval_result, run_eval_task
-    from openshard.run.pipeline import _copy_cwd_to_workspace
-
     model_list = [m.strip() for m in models.split(",") if m.strip()]
     if not model_list:
         raise click.ClickException("--models must contain at least one model slug.")

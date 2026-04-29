@@ -7,7 +7,7 @@ import pytest
 from click.testing import CliRunner
 
 from openshard.evals.registry import EvalTask, load_eval_tasks, validate_eval_task
-from openshard.evals.runner import run_eval_task
+from openshard.evals.runner import EvalResult, run_eval_task
 from openshard.cli.main import cli
 from openshard.execution.generator import ChangedFile, ExecutionResult
 from openshard.providers.base import UsageStats
@@ -505,25 +505,38 @@ def test_eval_compare_summary_table_present(tmp_path, monkeypatch):
     assert "modelB" in result.output
 
 
+def _make_eval_result(passed: bool) -> EvalResult:
+    return EvalResult(
+        timestamp="2026-01-01T00:00:00+00:00",
+        suite="basic",
+        task_id="t1",
+        model="modelA",
+        passed=passed,
+        duration_seconds=0.1,
+        verification_attempted=True,
+        verification_passed=passed,
+        verification_returncode=0 if passed else 1,
+        verification_output="ok" if passed else "fail",
+    )
+
+
 def test_eval_compare_exit_code(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
-    # patch at runner's local binding so verification actually returns 0
     with (
-        patch("openshard.execution.generator.ExecutionGenerator.generate", return_value=_fake_result()),
-        patch("openshard.run.pipeline._copy_cwd_to_workspace"),
-        patch("openshard.evals.runner.run_verification_plan", return_value=(0, "ok")),
+        patch("openshard.cli.main.run_eval_task", return_value=_make_eval_result(True)),
+        patch("openshard.cli.main.append_eval_result"),
+        patch("openshard.cli.main._copy_cwd_to_workspace"),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "modelA"])
-    assert result.exit_code == 0
+    assert result.exit_code == 0, result.output
 
-    # verification fails → exit 1
     with (
-        patch("openshard.execution.generator.ExecutionGenerator.generate", return_value=_fake_result()),
-        patch("openshard.run.pipeline._copy_cwd_to_workspace"),
-        patch("openshard.evals.runner.run_verification_plan", return_value=(1, "fail")),
+        patch("openshard.cli.main.run_eval_task", return_value=_make_eval_result(False)),
+        patch("openshard.cli.main.append_eval_result"),
+        patch("openshard.cli.main._copy_cwd_to_workspace"),
     ):
         runner = CliRunner()
         result = runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "modelA"])
-    assert result.exit_code == 1
+    assert result.exit_code == 1, result.output
