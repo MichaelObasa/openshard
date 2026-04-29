@@ -84,8 +84,9 @@ That's what OpenShard is.
 You give OpenShard one engineering task.
 
 It inspects your repo, breaks the work into stages, picks the right model for 
-each stage based on difficulty, cost, and context - then runs it. You approve 
-before it executes. You review when it's done.
+each stage based on difficulty, cost, and context - then runs it. By default, 
+smart approval gates prompt on risky paths, high cost, stack mismatch, and 
+unsafe actions. Use `--plan` for explicit plan approval before execution.
 
 ```bash
 openshard run "add email/password auth with protected routes and tests"
@@ -135,10 +136,7 @@ with live cost metadata across providers.
 ## Installation
 
 ```bash
-# Install from PyPI (coming soon)
-pip install openshard
-
-# Or install from source
+# Install from source (PyPI coming soon)
 git clone https://github.com/MichaelObasa/openshard.git
 cd openshard
 pip install -e .
@@ -151,7 +149,7 @@ export OPENROUTER_API_KEY=your_key_here
 
 **Verify installation:**
 ```bash
-openshard doctor
+openshard --help
 ```
 
 ---
@@ -179,26 +177,51 @@ That's it. OpenShard handles routing, execution, and cost tracking.
 
 ## Commands
 
+### Works today
+
 ```bash
-openshard run "<task>"       # run the full workflow
-openshard plan "<task>"      # see the plan before executing
-openshard explain "<task>"   # understand the routing decisions
-openshard last               # show last run summary
-openshard last --more        # detailed breakdown of last run
-openshard last --full        # complete run details
-openshard report             # cost, time, and outcome summary
-openshard models             # list available models
-openshard config init        # set up your config
-openshard doctor             # check your setup
+openshard run "<task>"           # run the full workflow
+openshard plan "<task>"          # see the plan before executing
+openshard explain "<task>"       # understand the routing decisions
+openshard last                   # show last run summary
+openshard last --more            # detailed breakdown of last run
+openshard last --full            # complete run details
+openshard report                 # cost, time, and outcome summary
+openshard metrics                # aggregated cost, token, model, and category dashboard
+openshard models                 # list available models
+openshard models stats           # per-model performance from run history
+openshard profiles stats         # per-profile cost and pass-rate metrics
+openshard skills stats           # per-skill performance metrics
 ```
 
-**Flags:**
-- `--write` - Actually write files (required for execution)
-- `--verify` - Run tests/verification after execution
-- `--more` - Show additional details
-- `--full` - Show all available information
-- `--dry-run` - Preview changes without writing
-- `--executor [direct|opencode]` - Choose execution backend
+**Flags for `openshard run`:**
+- `--write` — Write generated files to disk (required for file changes)
+- `--verify` — Run tests/verification after writing; enables retry on failure
+- `--dry-run` — Preview changes without writing
+- `--plan` — Show and approve the execution plan before running
+- `--workflow [auto|direct|staged|opencode]` — Choose execution strategy (default: auto)
+- `--approval [auto|smart|ask]` — Control approval gate behaviour (default: smart)
+- `--provider [openrouter|anthropic|openai]` — Override the provider
+- `--more` — Show file list, model names, and token breakdown
+- `--full` — Show all details including verification output and workspace path
+- `--history-scoring` — Apply run-history bonuses/penalties to model selection (opt-in)
+
+> `--executor` is deprecated. Use `--workflow` instead.
+
+### Experimental
+
+- `--workflow native`, `--workflow claude-code`, `--workflow codex` — defined but not yet available; will raise an error at runtime
+- `--profile native_swarm` — experimental multi-agent profile; behaviour may change
+- `--history-scoring` — early-stage; opt-in only
+
+### Roadmap / not yet available
+
+- `openshard config init` — not implemented
+- `openshard doctor` — not implemented
+- PyPI package (`pip install openshard`) — coming soon
+- Smarter routing that learns from task types and benchmarks
+- Team policies for shared workflows
+- Hosted dashboards for usage analytics
 
 ---
 
@@ -237,7 +260,7 @@ Then it maps to model classes:
 | Tests / docs | Efficient generation |
 | Final review | Strongest available |
 
-The model list is not hardcoded. Routing adapts as new models emerge.
+The model list is not hardcoded. Run `openshard models --refresh` to fetch the latest available models from your provider and update the local cache.
 
 ---
 
@@ -267,15 +290,19 @@ Time: 87.2s | Cost: $0.12
 ```
 This is 70% cheaper than using just Opus 4.6 to run the whole task instead.
 
+> *Savings figures are illustrative examples based on the specific task and model combination shown. Actual savings depend on task complexity, model selection, and provider pricing.*
+
 ---
 
 ## More examples
 
 See the [examples/](examples/) folder for detailed breakdowns:
 
-- **[Simple refactor](examples/simple-refactor.md)** - Shows cheap model handling low-risk work (95% savings)
-- **[Security-sensitive auth](examples/security-sensitive-auth.md)** - Shows automatic retry/escalation on failure
-- **[Complex multi-stage](examples/complex-multi-stage.md)** - Shows multi-model routing across different stages (74% savings)
+- **[Simple refactor](examples/simple-refactor.md)** - Shows cheap model handling low-risk work
+- **[Security-sensitive auth](examples/security-sensitive-auth.md)** - Shows retry/escalation on verification failure (requires `--verify`)
+- **[Complex multi-stage](examples/complex-multi-stage.md)** - Shows multi-model routing across different stages
+
+> *Percentage savings in examples are illustrative, based on the specific task and model combination shown.*
 
 ---
 
@@ -312,7 +339,7 @@ Up to 5 matched skills are included per run.
 
 **How they affect prompts:**
 
-Matched skills are surfaced as context hints in the planning and generation prompts. OpenShard injects the matched skill name, category, description, and match reasons. The body is stored for future use but is not injected or executed in v1.1.
+Matched skills are surfaced as context hints in the planning and generation prompts. OpenShard injects the matched skill name, category, description, and match reasons into the prompt. **In v1.1, skill bodies are read and stored but are not injected into prompts** — skill content does not change model behaviour beyond the name, category, and match metadata.
 
 > Scripts inside SKILL.md are never executed. OpenShard reads only the Markdown.
 
@@ -381,7 +408,7 @@ actually matters.
 A: Yes. OpenShard sits above your existing tools. We handle routing, they can handle execution.
 
 **Q: What models does it support?**  
-A: Currently 100+ models via OpenRouter. Direct OpenAI and Anthropic support coming soon.
+A: 100+ models via OpenRouter. Direct Anthropic and OpenAI providers are also supported — set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` and pass `--provider anthropic` or `--provider openai`.
 
 **Q: Is my code safe?**  
 A: Everything runs locally. Your code never leaves your machine unless you're using a cloud execution backend (which is optional).
@@ -393,7 +420,7 @@ A: Pre-run estimates are ranges based on task complexity. Post-run costs are exa
 A: Yes, if they're accessible via OpenRouter or have a compatible API. Custom provider support is on the roadmap.
 
 **Q: What if a task fails?**  
-A: OpenShard automatically retries with a stronger model. If that fails, you get a clear error message and can inspect what went wrong.
+A: When `--verify` is set and verification fails, OpenShard retries generation with a stronger model. Retry only runs when verification is enabled — general API or generation failures surface as a clear error message with details you can inspect.
 
 ---
 
@@ -401,11 +428,11 @@ A: OpenShard automatically retries with a stronger model. If that fails, you get
 
 **What works now:**
 
-OpenShard is a working CLI. It understands tasks, routes them across models, executes code changes, tracks costs, retries failures with stronger models, and logs everything. You can run tasks with `openshard run`, inspect results with `openshard last --more`, and see full cost breakdowns. OpenRouter integration is live. Direct and agentic execution paths both work.
+OpenShard is a working CLI. It understands tasks, routes them across models, executes code changes, tracks costs, and logs everything. When `--verify` is enabled and tests fail, it retries with a stronger model. You can run tasks with `openshard run`, inspect results with `openshard last --more`, and see full cost breakdowns. OpenRouter, Anthropic, and OpenAI provider integrations are live. Direct and agentic (opencode) execution paths both work.
 
 **What's coming:**
 
-Smarter routing that learns from task types and benchmarks. Team policies for shared workflows. Hosted dashboards for usage analytics. Multi-provider support beyond OpenRouter. Eventually: a full control plane for AI agents with orchestration, IAM, and observability.
+Smarter routing that learns from task types and benchmarks. Team policies for shared workflows. Hosted dashboards for usage analytics. Eventually: a full control plane for AI agents with orchestration, IAM, and observability.
 
 ---
 ## Why open source?
