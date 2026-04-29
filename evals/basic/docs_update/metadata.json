@@ -1,0 +1,7 @@
+{
+  "id": "docs_update",
+  "title": "Document the --dry-run flag in README",
+  "category": "boilerplate",
+  "expected_files": ["README.md"],
+  "verification_command": null
+}

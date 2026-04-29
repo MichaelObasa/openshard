@@ -1,0 +1,7 @@
+{
+  "id": "cli_flag",
+  "title": "Add --json output flag to report command",
+  "category": "standard",
+  "expected_files": ["openshard/cli/main.py"],
+  "verification_command": null
+}

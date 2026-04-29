@@ -1,0 +1,2 @@
+Update the README.md to document the --dry-run flag that was added to the run command.
+Include a usage example and a clear description of what it does.

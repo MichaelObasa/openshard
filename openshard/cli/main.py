@@ -1885,5 +1885,58 @@ def last(more: bool, full: bool):
     _render_log_entry(entries[-1], detail)
 
 
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def eval(ctx: click.Context):
+    """Eval harness commands."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@eval.command("list")
+def eval_list():
+    """List available eval tasks."""
+    from openshard.evals.registry import load_eval_tasks
+
+    try:
+        tasks = load_eval_tasks()
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc))
+
+    col_id = 24
+    col_title = 40
+    header = f"  {'id':<{col_id}}  {'title':<{col_title}}  category"
+    click.echo(header)
+    click.echo("  " + "-" * (len(header) - 2))
+    for task in tasks:
+        tid = task.id if len(task.id) <= col_id else task.id[: col_id - 1] + "…"
+        ttitle = task.title if len(task.title) <= col_title else task.title[: col_title - 1] + "…"
+        click.echo(f"  {tid:<{col_id}}  {ttitle:<{col_title}}  {task.category}")
+
+
+@eval.command("validate")
+def eval_validate():
+    """Validate that all bundled eval tasks load correctly."""
+    from openshard.evals.registry import load_eval_tasks
+
+    try:
+        tasks = load_eval_tasks()
+    except FileNotFoundError as exc:
+        click.echo(f"FAIL  {exc}")
+        raise click.ClickException("Validation failed.")
+
+    errors: list[str] = []
+    for task in tasks:
+        if not task.prompt.strip():
+            errors.append(f"{task.id}: prompt.txt is empty")
+
+    if errors:
+        for err in errors:
+            click.echo(f"FAIL  {err}")
+        raise click.ClickException(f"{len(errors)} task(s) failed validation.")
+
+    click.echo(f"OK  {len(tasks)} task(s) passed validation.")
+
+
 if __name__ == "__main__":
     cli()

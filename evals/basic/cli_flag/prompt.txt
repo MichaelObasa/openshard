@@ -1,0 +1,2 @@
+Add a --json flag to the `openshard report` command that outputs the report data
+as a JSON object instead of human-readable text.

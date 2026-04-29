@@ -1,0 +1,3 @@
+Add a helper function `format_duration(seconds: float) -> str` to openshard/utils.py
+that formats a duration in seconds as a human-readable string (e.g. "1.2s", "3m 4s").
+Include a type annotation and a brief docstring.
