@@ -1779,6 +1779,78 @@ def eval_run(suite: str, model: str):
         raise SystemExit(1)
 
 
+@eval.command("compare")
+@click.option("--suite", default="basic", show_default=True, help="Eval suite to run.")
+@click.option("--models", required=True, help="Comma-separated list of model slugs.")
+def eval_compare(suite: str, models: str):
+    """Run an eval suite across multiple models and print a comparison summary."""
+    import tempfile
+
+    from openshard.evals.registry import load_eval_tasks
+    from openshard.evals.runner import append_eval_result, run_eval_task
+    from openshard.run.pipeline import _copy_cwd_to_workspace
+
+    model_list = [m.strip() for m in models.split(",") if m.strip()]
+    if not model_list:
+        raise click.ClickException("--models must contain at least one model slug.")
+
+    try:
+        tasks = load_eval_tasks(suite)
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc))
+
+    log_path = Path(".openshard") / "eval-runs.jsonl"
+    click.echo(f"\nRunning suite '{suite}' ({len(tasks)} tasks) across {len(model_list)} model(s)...\n")
+
+    results_by_model: dict[str, list] = {}
+
+    for model in model_list:
+        click.echo(f"[{model}]")
+        model_results = []
+        for task in tasks:
+            with tempfile.TemporaryDirectory(prefix=f"openshard-eval-{task.id}-") as tmp:
+                workspace = Path(tmp)
+                _copy_cwd_to_workspace(workspace)
+                result = run_eval_task(task, model=model, suite=suite, workspace_root=workspace)
+            append_eval_result(result, log_path)
+            status = "PASS" if result.passed else "FAIL"
+            extra = f"  ({result.error})" if result.error else ""
+            click.echo(f"  {status}  {task.id:<28}  {result.duration_seconds:.1f}s{extra}")
+            model_results.append(result)
+        results_by_model[model] = model_results
+        click.echo()
+
+    all_results = [r for rs in results_by_model.values() for r in rs]
+    show_tokens = any(r.total_tokens > 0 for r in all_results)
+
+    header = f"{'Model':<44} {'Runs':>4}  {'Pass':>4}  {'Fail':>4}  {'Rate':>7}  {'Avg Dur':>8}"
+    if show_tokens:
+        header += f"  {'Avg Tok':>8}"
+    header += f"  {'Unsafe':>6}"
+    click.echo(header)
+
+    any_failures = False
+    for model, model_results in results_by_model.items():
+        runs = len(model_results)
+        passed_count = sum(1 for r in model_results if r.passed)
+        failed_count = runs - passed_count
+        if failed_count:
+            any_failures = True
+        rate = passed_count / runs * 100 if runs else 0.0
+        avg_dur = sum(r.duration_seconds for r in model_results) / runs if runs else 0.0
+        unsafe = sum(len(r.unsafe_files) for r in model_results)
+        row = f"{model:<44} {runs:>4}  {passed_count:>4}  {failed_count:>4}  {rate:>6.1f}%  {avg_dur:>7.1f}s"
+        if show_tokens:
+            avg_tok = sum(r.total_tokens for r in model_results) / runs if runs else 0.0
+            row += f"  {avg_tok:>8.0f}"
+        row += f"  {unsafe:>6}"
+        click.echo(row)
+
+    click.echo(f"\nResults appended to {log_path}")
+    if any_failures:
+        raise SystemExit(1)
+
+
 @eval.command("report")
 @click.option("--suite", default=None, help="Filter by eval suite name.")
 @click.option("--model", default=None, help="Filter by model slug.")

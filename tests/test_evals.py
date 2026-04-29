@@ -424,3 +424,106 @@ def test_basic_suite_tasks_have_verification_commands():
         assert task.verification_command is not None, (
             f"task {task.id!r} has no verification_command — eval run will always fail"
         )
+
+
+# ---------------------------------------------------------------------------
+# eval compare tests — all mock ExecutionGenerator.generate (no real AI calls)
+# ---------------------------------------------------------------------------
+
+_COMPARE_PATCHES = (
+    patch("openshard.execution.generator.ExecutionGenerator.generate", return_value=_fake_result()),
+    patch("openshard.run.pipeline._copy_cwd_to_workspace"),
+    patch("openshard.verification.executor.run_verification_plan", return_value=(0, "ok")),
+)
+
+
+def test_eval_compare_help_exits_zero():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "compare", "--help"])
+    assert result.exit_code == 0
+    assert "--suite" in result.output
+    assert "--models" in result.output
+
+
+def test_eval_compare_requires_models():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "compare"])
+    assert result.exit_code != 0
+
+
+def test_eval_compare_writes_results_for_each_model(tmp_path, monkeypatch):
+    log_path = tmp_path / ".openshard" / "eval-runs.jsonl"
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        patch("openshard.execution.generator.ExecutionGenerator.generate", return_value=_fake_result()),
+        patch("openshard.run.pipeline._copy_cwd_to_workspace"),
+        patch("openshard.verification.executor.run_verification_plan", return_value=(0, "ok")),
+    ):
+        runner = CliRunner()
+        runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "modelA,modelB"])
+
+    assert log_path.exists()
+    lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+    # 2 models × 3 tasks in basic suite = 6 records
+    assert len(lines) == 6
+    models_seen = {json.loads(line)["model"] for line in lines}
+    assert models_seen == {"modelA", "modelB"}
+
+
+def test_eval_compare_prints_per_model_task_lines(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        patch("openshard.execution.generator.ExecutionGenerator.generate", return_value=_fake_result()),
+        patch("openshard.run.pipeline._copy_cwd_to_workspace"),
+        patch("openshard.verification.executor.run_verification_plan", return_value=(0, "ok")),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "modelA,modelB"])
+
+    assert "[modelA]" in result.output
+    assert "[modelB]" in result.output
+    for task_id in ("cli_flag", "docs_update", "helper_function"):
+        assert result.output.count(task_id) == 2, f"{task_id} should appear once per model"
+
+
+def test_eval_compare_summary_table_present(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        patch("openshard.execution.generator.ExecutionGenerator.generate", return_value=_fake_result()),
+        patch("openshard.run.pipeline._copy_cwd_to_workspace"),
+        patch("openshard.verification.executor.run_verification_plan", return_value=(0, "ok")),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "modelA,modelB"])
+
+    for col in ("Runs", "Pass", "Fail", "Rate"):
+        assert col in result.output
+    assert "modelA" in result.output
+    assert "modelB" in result.output
+
+
+def test_eval_compare_exit_code(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    # patch at runner's local binding so verification actually returns 0
+    with (
+        patch("openshard.execution.generator.ExecutionGenerator.generate", return_value=_fake_result()),
+        patch("openshard.run.pipeline._copy_cwd_to_workspace"),
+        patch("openshard.evals.runner.run_verification_plan", return_value=(0, "ok")),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "modelA"])
+    assert result.exit_code == 0
+
+    # verification fails → exit 1
+    with (
+        patch("openshard.execution.generator.ExecutionGenerator.generate", return_value=_fake_result()),
+        patch("openshard.run.pipeline._copy_cwd_to_workspace"),
+        patch("openshard.evals.runner.run_verification_plan", return_value=(1, "fail")),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "modelA"])
+    assert result.exit_code == 1
