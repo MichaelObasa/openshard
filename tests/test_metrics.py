@@ -327,6 +327,60 @@ class TestReportCLI(unittest.TestCase):
         out = self._run([old_entry])
         self.assertNotIn("profiles:", out)
 
+    # ------------------------------------------------------------------
+    # skills section
+    # ------------------------------------------------------------------
+
+    def test_skills_section_shown_when_skill_data_present(self):
+        e = _entry(matched_skills=["lint-check"])
+        out = self._run([e])
+        self.assertIn("skills", out)
+        self.assertIn("lint-check", out)
+
+    def test_skills_section_hidden_when_no_skill_data(self):
+        out = self._run([_entry()])
+        self.assertNotIn("skills (top 5):", out)
+
+    def test_skills_section_shows_run_count(self):
+        entries = [_entry(matched_skills=["my-skill"])] * 3
+        out = self._run(entries)
+        lines = [ln for ln in out.splitlines() if "my-skill" in ln]
+        self.assertTrue(any("3 runs" in ln for ln in lines), out)
+
+    def test_skills_section_singular_run_label(self):
+        out = self._run([_entry(matched_skills=["my-skill"])])
+        lines = [ln for ln in out.splitlines() if "my-skill" in ln]
+        self.assertTrue(any("1 run " in ln for ln in lines), out)
+
+    def test_skills_section_shows_pass_rate(self):
+        e = _entry(matched_skills=["s"], verification_passed=True)
+        out = self._run([e])
+        lines = [ln for ln in out.splitlines() if "s" in ln and "pass:" in ln]
+        self.assertTrue(any("100%" in ln for ln in lines), out)
+
+    def test_skills_section_shows_retry_rate(self):
+        e = _entry(matched_skills=["s"], retry_triggered=True)
+        out = self._run([e])
+        lines = [ln for ln in out.splitlines() if "retry:" in ln and "s" in ln]
+        self.assertTrue(len(lines) > 0, out)
+
+    def test_skills_section_shows_cost(self):
+        e = _entry(matched_skills=["s"], estimated_cost=0.0123)
+        out = self._run([e])
+        lines = [ln for ln in out.splitlines() if "s" in ln and "$" in ln]
+        self.assertTrue(len(lines) > 0, out)
+
+    def test_skills_section_top_5_only(self):
+        entries = [_entry(matched_skills=[f"skill-{i}"]) for i in range(10)]
+        out = self._run(entries)
+        shown = [ln for ln in out.splitlines() if "skill-" in ln]
+        self.assertLessEqual(len(shown), 5, out)
+
+    def test_recent_runs_still_shown_after_skills(self):
+        e = _entry(matched_skills=["s"])
+        out = self._run([e])
+        self.assertIn("recent runs:", out)
+
 
 if __name__ == "__main__":
     unittest.main()

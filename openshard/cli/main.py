@@ -1628,7 +1628,7 @@ def report():
     click.echo(f"  total cost:             {'$' + f'{total_cost:.4f}' if total_cost is not None else '-'}")
     click.echo(f"  average cost per run:   {'$' + f'{avg_cost:.4f}' if avg_cost is not None else '-'}")
 
-    from openshard.history.metrics import compute_profile_stats
+    from openshard.history.metrics import compute_profile_stats, compute_skill_stats
     _profile_stats = compute_profile_stats(entries)
     _profiled = sum(s["runs_count"] for s in _profile_stats.values())
     if _profiled > 0:
@@ -1641,6 +1641,18 @@ def report():
             _pr = f"{_ps['retry_rate']:.0%}" if _ps["retry_rate"] is not None else "-"
             _run_label = "run" if _n == 1 else "runs"
             click.echo(f"    {_pname:<14}  {_n} {_run_label}  pass: {_pp}  retry: {_pr}  {_pc}  {_pd}")
+
+    _skill_stats = compute_skill_stats(entries)
+    if _skill_stats:
+        click.echo("\n  skills (top 5):")
+        for _slug, _ss in list(_skill_stats.items())[:5]:
+            _sn = _ss["runs_count"]
+            _sc = f"${_ss['avg_cost']:.4f}" if _ss["avg_cost"] is not None else "-"
+            _sd = f"{_ss['avg_duration']:.1f}s" if _ss["avg_duration"] is not None else "-"
+            _sp = f"{_ss['verification_pass_rate']:.0%}" if _ss["verification_pass_rate"] is not None else "-"
+            _sr = f"{_ss['retry_rate']:.0%}" if _ss["retry_rate"] is not None else "-"
+            _run_label = "run" if _sn == 1 else "runs"
+            click.echo(f"    {_slug:<24}  {_sn} {_run_label}  pass: {_sp}  retry: {_sr}  {_sc}  {_sd}")
 
     click.echo("\n  recent runs:")
     for entry in entries[-5:][::-1]:
