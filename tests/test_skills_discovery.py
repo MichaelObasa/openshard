@@ -1,8 +1,6 @@
-from pathlib import Path
 
-import pytest
 
-from openshard.skills.discovery import SkillDef, discover_skills, _parse_frontmatter, _parse_list, _parse_body_preview
+from openshard.skills.discovery import discover_skills, _parse_frontmatter, _parse_list, _parse_body_preview
 
 
 # ---------------------------------------------------------------------------

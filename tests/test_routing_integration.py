@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import ANY, MagicMock, call, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from click.testing import CliRunner
 
@@ -445,6 +445,6 @@ class TestHistoryScoringProfileSelection(unittest.TestCase):
 
     def test_native_swarm_never_auto_selected_with_history_scoring(self):
         result = self._run(["fix typo in README", "--more", "--history-scoring"], runs=self._POOR_PASS_RUNS)
-        lines = [l for l in result.output.splitlines() if "[profile]" in l]
+        lines = [ln for ln in result.output.splitlines() if "[profile]" in ln]
         for line in lines:
             self.assertNotIn("native_swarm", line, result.output)

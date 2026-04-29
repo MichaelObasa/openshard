@@ -7,7 +7,6 @@ from openshard.routing.workflow_selector import (
     WorkflowHistorySummary,
     build_workflow_history_summary,
     select_workflow,
-    WorkflowDecision,
 )
 
 

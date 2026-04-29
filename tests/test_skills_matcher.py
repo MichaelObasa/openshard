@@ -1,4 +1,3 @@
-import pytest
 
 from openshard.analysis.repo import RepoFacts
 from openshard.skills.discovery import SkillDef

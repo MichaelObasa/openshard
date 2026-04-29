@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from openshard.providers.base import ModelInfo, ProviderAuthError, ProviderError
-from openshard.providers.manager import InventoryEntry, ProviderManager, UnifiedInventory
+from openshard.providers.manager import ProviderManager, UnifiedInventory
 
 
 def _fresh_cache(provider: str, rows: list[dict] | None = None) -> dict:

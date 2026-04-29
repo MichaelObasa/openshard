@@ -194,7 +194,7 @@ class TestSelectWithInfoHistoryAdjustments(unittest.TestCase):
         e2 = self._make("m/beta")
         req = TaskRequirements()
         # Without adjustment: same score, stable ordering
-        baseline = select_with_info([e1, e2], req, "standard")
+        _baseline = select_with_info([e1, e2], req, "standard")
         # Give m/beta a +1.0 history bonus → it should win
         adjustments = {"m/alpha": 0.0, "m/beta": 1.0}
         result = select_with_info([e1, e2], req, "standard", history_adjustments=adjustments)

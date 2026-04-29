@@ -23,7 +23,7 @@ from openshard.routing.engine import ESCALATION_CHAIN, MODEL_STRONG, RoutingDeci
 from openshard.scoring.requirements import requirements_from_category
 from openshard.scoring.scorer import ScoredRoutingResult, select_with_info
 from openshard.execution.stages import (
-    Stage, StageRun, split_task, route_stage, should_use_stages, run_planning_stage,
+    StageRun, split_task, route_stage, run_planning_stage,
 )
 from openshard.analysis.repo import analyze_repo, RepoFacts
 from openshard.history.metrics import load_runs
@@ -1201,7 +1201,7 @@ def _write_files(files: list[ChangedFile], root: Path) -> None:
     cwd = root.resolve()
     for f in files:
         if not f.path:
-            click.echo(f"  [skip] empty path")
+            click.echo("  [skip] empty path")
             continue
 
         target = (cwd / f.path).resolve()

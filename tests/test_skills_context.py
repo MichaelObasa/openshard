@@ -1,4 +1,3 @@
-import pytest
 
 from openshard.skills.discovery import SkillDef
 from openshard.skills.matcher import MatchedSkill
