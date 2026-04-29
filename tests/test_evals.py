@@ -232,3 +232,138 @@ def test_generated_unsafe_path_is_not_written(tmp_path, monkeypatch):
 
     passwd_path = tmp_path / "etc" / "passwd"
     assert not passwd_path.exists(), "unsafe path was written to disk"
+
+
+# ---------------------------------------------------------------------------
+# eval report tests — no AI, reads from a JSONL fixture written by the test
+# ---------------------------------------------------------------------------
+
+def _write_jsonl(path: Path, records: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(r) for r in records), encoding="utf-8")
+
+
+def _rec(
+    task_id: str = "t1",
+    model: str = "m1",
+    suite: str = "basic",
+    passed: bool = True,
+    duration: float = 1.0,
+    tokens: int = 100,
+    unsafe: list[str] | None = None,
+) -> dict:
+    return {
+        "timestamp": "2026-01-01T00:00:00Z",
+        "suite": suite,
+        "task_id": task_id,
+        "model": model,
+        "passed": passed,
+        "duration_seconds": duration,
+        "total_tokens": tokens,
+        "unsafe_files": unsafe or [],
+        "error": None,
+        "verification_attempted": True,
+        "verification_passed": passed,
+        "verification_returncode": 0 if passed else 1,
+        "verification_output": "",
+        "files_written": [],
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+    }
+
+
+def test_eval_report_no_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "report"])
+    assert result.exit_code == 0, result.output
+    assert "No eval runs found" in result.output
+
+
+def test_eval_report_shows_summary(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [
+        _rec(task_id="t1", passed=True),
+        _rec(task_id="t2", passed=True),
+        _rec(task_id="t3", passed=False),
+    ])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "report"])
+    assert result.exit_code == 0, result.output
+    assert "Total runs" in result.output
+    assert "3" in result.output
+    assert "Passed" in result.output
+    assert "2" in result.output
+    assert "Failed" in result.output
+    assert "1" in result.output
+    assert "66.7" in result.output
+
+
+def test_eval_report_suite_filter(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [
+        _rec(task_id="t1", suite="basic", passed=True),
+        _rec(task_id="t2", suite="basic", passed=True),
+        _rec(task_id="t3", suite="other", passed=False),
+    ])
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["eval", "report", "--suite", "basic"])
+    assert result.exit_code == 0, result.output
+    assert "2" in result.output
+    assert "t1" in result.output
+    assert "t3" not in result.output
+
+    result2 = runner.invoke(cli, ["eval", "report", "--suite", "other"])
+    assert result2.exit_code == 0, result2.output
+    assert "t3" in result2.output
+    assert "t1" not in result2.output
+
+
+def test_eval_report_model_filter(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [
+        _rec(task_id="t1", model="m1", passed=True),
+        _rec(task_id="t2", model="m2", passed=False),
+    ])
+    runner = CliRunner()
+
+    result = runner.invoke(cli, ["eval", "report", "--model", "m1"])
+    assert result.exit_code == 0, result.output
+    assert "t1" in result.output
+    assert "t2" not in result.output
+
+    result2 = runner.invoke(cli, ["eval", "report", "--model", "m2"])
+    assert result2.exit_code == 0, result2.output
+    assert "t2" in result2.output
+    assert "t1" not in result2.output
+
+
+def test_eval_report_skips_malformed_lines(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    log.write_text(
+        json.dumps(_rec(task_id="good")) + "\n"
+        + "\n"
+        + "not valid json at all\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "report"])
+    assert result.exit_code == 0, result.output
+    assert "good" in result.output
+    assert "Total runs" in result.output
+
+
+def test_eval_report_no_matching_filter(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [_rec(suite="basic")])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "report", "--suite", "nosuchsuite"])
+    assert result.exit_code == 0, result.output
+    assert "No records match" in result.output

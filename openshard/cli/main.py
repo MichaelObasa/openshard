@@ -1779,5 +1779,91 @@ def eval_run(suite: str, model: str):
         raise SystemExit(1)
 
 
+@eval.command("report")
+@click.option("--suite", default=None, help="Filter by eval suite name.")
+@click.option("--model", default=None, help="Filter by model slug.")
+def eval_report(suite: str | None, model: str | None):
+    """Summarize eval run results from .openshard/eval-runs.jsonl."""
+    import collections
+
+    log_path = Path(".openshard") / "eval-runs.jsonl"
+
+    if not log_path.exists():
+        click.echo("No eval runs found. Run `openshard eval run` first.")
+        return
+
+    records: list[dict] = []
+    for raw in log_path.read_text(encoding="utf-8").splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            records.append(json.loads(raw))
+        except json.JSONDecodeError:
+            continue
+
+    if suite:
+        records = [r for r in records if r.get("suite") == suite]
+    if model:
+        records = [r for r in records if r.get("model") == model]
+
+    if not records:
+        click.echo("No records match the given filters.")
+        return
+
+    total = len(records)
+    passed = sum(1 for r in records if r.get("passed"))
+    failed = total - passed
+    pass_rate = passed / total * 100
+    avg_dur = sum(r.get("duration_seconds", 0) for r in records) / total
+
+    tokens = [r.get("total_tokens", 0) for r in records]
+    show_tokens = any(t > 0 for t in tokens)
+    avg_tok = sum(tokens) / total if show_tokens else 0
+
+    unsafe_count = sum(len(r.get("unsafe_files", [])) for r in records)
+
+    parts = []
+    if suite:
+        parts.append(f"suite={suite}")
+    if model:
+        parts.append(f"model={model}")
+    header_suffix = "  " + "  ".join(parts) if parts else ""
+
+    click.echo(f"Eval Report{header_suffix}")
+    click.echo("-" * 42)
+    click.echo(f"  Total runs:    {total}")
+    click.echo(f"  Passed:        {passed}  ({pass_rate:.1f}%)")
+    click.echo(f"  Failed:        {failed}")
+    click.echo(f"  Avg duration:  {avg_dur:.1f}s")
+    if show_tokens:
+        click.echo(f"  Avg tokens:    {avg_tok:.0f}")
+    click.echo(f"  Unsafe files:  {unsafe_count}")
+
+    by_task: dict[str, list[dict]] = collections.defaultdict(list)
+    for r in records:
+        by_task[r.get("task_id", "unknown")].append(r)
+
+    click.echo("\nBy task:")
+    for tid in sorted(by_task):
+        grp = by_task[tid]
+        p = sum(1 for r in grp if r.get("passed"))
+        n = len(grp)
+        pct = p / n * 100
+        click.echo(f"  {tid:<28}  {p}/{n}  ({pct:.1f}%)")
+
+    by_model: dict[str, list[dict]] = collections.defaultdict(list)
+    for r in records:
+        by_model[r.get("model", "unknown")].append(r)
+
+    click.echo("\nBy model:")
+    for mdl in sorted(by_model):
+        grp = by_model[mdl]
+        p = sum(1 for r in grp if r.get("passed"))
+        n = len(grp)
+        pct = p / n * 100
+        click.echo(f"  {mdl:<44}  {p}/{n}  ({pct:.1f}%)")
+
+
 if __name__ == "__main__":
     cli()
