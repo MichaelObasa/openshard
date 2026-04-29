@@ -26,6 +26,7 @@ from openshard.execution.stages import (
     StageRun, split_task, route_stage, run_planning_stage,
 )
 from openshard.analysis.repo import analyze_repo, RepoFacts
+from openshard.security.paths import resolve_safe_repo_path, UnsafePathError
 from openshard.history.metrics import load_runs
 from openshard.history.adjustments import compute_history_adjustments, compute_history_adjustment_reasons
 from openshard.routing.workflow_selector import WorkflowHistorySummary, build_workflow_history_summary, select_workflow
@@ -1200,13 +1201,10 @@ def _copy_cwd_to_workspace(workspace: Path) -> None:
 def _write_files(files: list[ChangedFile], root: Path) -> None:
     cwd = root.resolve()
     for f in files:
-        if not f.path:
-            click.echo("  [skip] empty path")
-            continue
-
-        target = (cwd / f.path).resolve()
-        if not str(target).startswith(str(cwd)):
-            click.echo(f"  [skip] unsafe path rejected: {f.path}")
+        try:
+            target = resolve_safe_repo_path(cwd, f.path)
+        except UnsafePathError:
+            click.echo(f"  [skip] unsafe path rejected: {f.path!r}")
             continue
 
         if f.change_type == "delete":

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from openshard.security.paths import UnsafePathError, resolve_safe_repo_path
+from openshard.cli.main import _write_files
+from openshard.execution.generator import ChangedFile
 
 def _symlink_ok() -> bool:
     import tempfile
@@ -227,3 +230,67 @@ def test_raises_unsafe_path_error_not_generic(tmp_path):
 def test_error_message_is_informative(tmp_path):
     with pytest.raises(UnsafePathError, match="empty"):
         resolve_safe_repo_path(tmp_path, "")
+
+
+# ---------------------------------------------------------------------------
+# Integration: _write_files() wired to resolve_safe_repo_path()
+# ---------------------------------------------------------------------------
+
+def _cf(path: str, content: str = "x", change_type: str = "create") -> ChangedFile:
+    return ChangedFile(path=path, content=content, change_type=change_type, summary="")
+
+
+def _run_write(files: list[ChangedFile], root: Path) -> list[str]:
+    messages: list[str] = []
+    with patch("openshard.cli.main.click.echo", side_effect=messages.append):
+        _write_files(files, root)
+    return messages
+
+
+class TestWriteFilesPathSafety:
+    def test_safe_path_written(self, tmp_path):
+        msgs = _run_write([_cf("src/app.py", "print('hi')")], tmp_path)
+        assert (tmp_path / "src" / "app.py").read_text() == "print('hi')"
+        assert any("[written]" in m for m in msgs)
+
+    def test_dotdot_skipped(self, tmp_path):
+        msgs = _run_write([_cf("../outside.py")], tmp_path)
+        assert not (tmp_path.parent / "outside.py").exists()
+        assert any("[skip]" in m and "unsafe" in m for m in msgs)
+
+    def test_absolute_tmp_skipped(self, tmp_path):
+        msgs = _run_write([_cf("/tmp/evil.py")], tmp_path)
+        assert any("[skip]" in m and "unsafe" in m for m in msgs)
+
+    def test_git_config_skipped(self, tmp_path):
+        msgs = _run_write([_cf(".git/config")], tmp_path)
+        assert not (tmp_path / ".git" / "config").exists()
+        assert any("[skip]" in m and "unsafe" in m for m in msgs)
+
+    def test_runs_jsonl_skipped(self, tmp_path):
+        msgs = _run_write([_cf(".openshard/runs.jsonl")], tmp_path)
+        assert not (tmp_path / ".openshard" / "runs.jsonl").exists()
+        assert any("[skip]" in m and "unsafe" in m for m in msgs)
+
+    def test_mixed_list_writes_safe_only(self, tmp_path):
+        files = [
+            _cf("good.py", "ok"),
+            _cf("../evil.py", "bad"),
+        ]
+        msgs = _run_write(files, tmp_path)
+        assert (tmp_path / "good.py").read_text() == "ok"
+        assert not (tmp_path.parent / "evil.py").exists()
+        assert any("[written]" in m for m in msgs)
+        assert any("[skip]" in m and "unsafe" in m for m in msgs)
+
+    def test_unsafe_does_not_crash_run(self, tmp_path):
+        # A list of all-unsafe paths must complete without raising
+        files = [_cf("../x.py"), _cf("/tmp/y.py"), _cf(".git/config")]
+        _run_write(files, tmp_path)  # must not raise
+
+    def test_safe_delete_still_works(self, tmp_path):
+        target = tmp_path / "old.py"
+        target.write_text("old")
+        msgs = _run_write([_cf("old.py", change_type="delete")], tmp_path)
+        assert not target.exists()
+        assert any("[deleted]" in m for m in msgs)
