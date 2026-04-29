@@ -34,7 +34,7 @@ from openshard.routing.profiles import ProfileDecision, ProfileHistorySummary, b
 from openshard.skills.discovery import discover_skills
 from openshard.skills.matcher import MatchedSkill, match_skills
 from openshard.skills.context import build_skills_context
-from openshard.verification.plan import VerificationPlan, build_verification_plan
+from openshard.verification.plan import CommandSafety, VerificationPlan, build_verification_plan
 
 
 @click.group()
@@ -645,54 +645,59 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
 
     if write and verify:
         click.echo("")
-        _vcmd = _detect_command(workspace)
-        if _vcmd:
-            _sc_dec = gate.check_shell_command(" ".join(_vcmd))
-            if _sc_dec.required:
-                confirm_or_abort(_sc_dec.reason)
-        code = _run_verification(workspace, detail=detail)
+        code = _run_verification_plan(_verification_plan, workspace, gate=gate, detail=detail)
         # Escalation loop: try each model in chain until verification passes.
         # Direct mode uses ESCALATION_CHAIN (sonnet → opus).
         # OpenCode mode uses a single fixer-model retry (no chain).
         _escalation = ESCALATION_CHAIN if not opencode_mode else [generator.fixer_model]
         _last_attempt = result
-        for _esc_model in _escalation:
-            if code == 0:
-                break
-            retry_triggered = True
-            _, verify_output = _run_verification(workspace, capture=True)
-            retry_prompt = _build_retry_prompt(task, _last_attempt, verify_output)
-            if detail == "full":
-                snippet = retry_prompt[:300] + ("..." if len(retry_prompt) > 300 else "")
-                click.echo(f"\n  [retry prompt] {snippet}")
-                if verify_output.strip():
-                    click.echo(f"\n  [verify output] {verify_output.strip()[:300]}")
-            _esc_label = _esc_model.split("/")[-1]
-            spinner.start(f"Retrying - escalating to {_model_label(_esc_model)}")
-            try:
-                if opencode_mode:
-                    _last_attempt = generator.generate(
-                        retry_prompt, model=_esc_model, workspace=workspace
-                    )
-                else:
-                    _last_attempt = generator.generate(retry_prompt, model=_esc_model)
-            except RuntimeError as exc:
-                raise click.ClickException(str(exc))
-            except ProviderAuthError:
-                raise click.ClickException(
-                    "Authentication failed. Check that your provider API key is valid."
+        _can_escalate = (
+            _verification_plan.has_commands
+            and _verification_plan.commands[0].safety != CommandSafety.blocked
+        )
+        if _can_escalate:
+            for _esc_model in _escalation:
+                if code == 0:
+                    break
+                retry_triggered = True
+                _, verify_output = _run_verification_plan(
+                    _verification_plan, workspace, gate=None, capture=True
                 )
-            except ProviderRateLimitError:
-                raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
-            except ProviderError as exc:
-                raise click.ClickException(f"API error: {exc}")
-            finally:
-                spinner.stop()
-            retry_usage = _last_attempt.usage
-            final_files = _last_attempt.files
-            if not opencode_mode:
-                _write_files(_last_attempt.files, workspace)
-            code = _run_verification(workspace, label=f"[retry/{_esc_label}]", detail=detail)
+                retry_prompt = _build_retry_prompt(task, _last_attempt, verify_output)
+                if detail == "full":
+                    snippet = retry_prompt[:300] + ("..." if len(retry_prompt) > 300 else "")
+                    click.echo(f"\n  [retry prompt] {snippet}")
+                    if verify_output.strip():
+                        click.echo(f"\n  [verify output] {verify_output.strip()[:300]}")
+                _esc_label = _esc_model.split("/")[-1]
+                spinner.start(f"Retrying - escalating to {_model_label(_esc_model)}")
+                try:
+                    if opencode_mode:
+                        _last_attempt = generator.generate(
+                            retry_prompt, model=_esc_model, workspace=workspace
+                        )
+                    else:
+                        _last_attempt = generator.generate(retry_prompt, model=_esc_model)
+                except RuntimeError as exc:
+                    raise click.ClickException(str(exc))
+                except ProviderAuthError:
+                    raise click.ClickException(
+                        "Authentication failed. Check that your provider API key is valid."
+                    )
+                except ProviderRateLimitError:
+                    raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
+                except ProviderError as exc:
+                    raise click.ClickException(f"API error: {exc}")
+                finally:
+                    spinner.stop()
+                retry_usage = _last_attempt.usage
+                final_files = _last_attempt.files
+                if not opencode_mode:
+                    _write_files(_last_attempt.files, workspace)
+                code = _run_verification_plan(
+                    _verification_plan, workspace, gate=None,
+                    label=f"[retry/{_esc_label}]", detail=detail,
+                )
         verification_passed = code == 0
         if code != 0:
             _print_summary(start, generator, retry_triggered, final_files,
@@ -1289,6 +1294,64 @@ def _run_verification(
         text=capture,
         **({"encoding": "utf-8", "errors": "replace"} if capture else {}),
     )
+    if capture:
+        return proc.returncode, proc.stdout or ""
+
+    if proc.returncode == 0:
+        click.echo(f"  {label} passed")
+    else:
+        click.echo(f"  {label} failed (exit code {proc.returncode})")
+    return proc.returncode
+
+
+def _run_verification_plan(
+    plan: VerificationPlan,
+    cwd: Path,
+    gate: "GateEvaluator | None" = None,
+    label: str = "[verify]",
+    capture: bool = False,
+    detail: str = "default",
+) -> "int | tuple[int, str]":
+    """Execute the first VerificationCommand from *plan*.
+
+    - No commands  → returns 0; announces nothing-to-run (matches old behaviour).
+    - blocked      → skips subprocess, returns 1 with a clear message.
+    - needs_approval with gate → calls confirm_or_abort when approval required.
+    - safe         → executes argv directly (never shell=True).
+
+    capture=False: streams output live, returns int exit code.
+    capture=True: captures silently, returns (exit_code, output).
+    """
+    if not plan.has_commands:
+        if not capture:
+            click.echo(f"  {label} no test command detected")
+        return (0, "") if capture else 0
+
+    cmd = plan.commands[0]
+
+    if cmd.safety == CommandSafety.blocked:
+        msg = f"  {label} blocked: {cmd.reason}"
+        if not capture:
+            click.echo(msg)
+        return (1, msg) if capture else 1
+
+    if cmd.safety == CommandSafety.needs_approval and gate is not None:
+        _sc_dec = gate.check_shell_command(" ".join(cmd.argv))
+        if _sc_dec.required:
+            confirm_or_abort(_sc_dec.reason)
+
+    if not capture:
+        click.echo(f"  {label} running: {' '.join(cmd.argv)}")
+
+    proc = subprocess.run(
+        cmd.argv,
+        cwd=cwd,
+        stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.STDOUT if capture else None,
+        text=capture,
+        **({"encoding": "utf-8", "errors": "replace"} if capture else {}),
+    )
+
     if capture:
         return proc.returncode, proc.stdout or ""
 
