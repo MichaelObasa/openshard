@@ -86,7 +86,7 @@ def plan(task: str):
     default=None,
     help=(
         "Execution workflow: auto (default, policy-driven), direct (single-pass API call), "
-        "staged (planning then implementation), native (native agent — not yet available), "
+        "staged (planning then implementation), native (native agent - not yet available), "
         "opencode (OpenCode CLI), claude-code (not yet available), codex (not yet available)."
     ),
 )
@@ -362,10 +362,10 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         _req_str = ", ".join(_req_parts) if _req_parts else "none"
         click.echo(f"  [routing] category: {_scored.category}, requirements: {_req_str}")
         if _scored.used_fallback:
-            click.echo(f"  [routing] candidates: {_scored.candidate_count} → fallback (keyword routing)")
+            click.echo(f"  [routing] candidates: {_scored.candidate_count} -> fallback (keyword routing)")
         else:
             _cost_str = f"cost: ${_scored.selected_cost_per_m:.2f}/M" if _scored.selected_cost_per_m is not None else "cost: unknown"
-            click.echo(f"  [routing] candidates: {_scored.candidate_count} → {_model_label(_scored.selected_model)} ({_cost_str})")
+            click.echo(f"  [routing] candidates: {_scored.candidate_count} -> {_model_label(_scored.selected_model)} ({_cost_str})")
         if _use_history_scoring:
             click.echo("  [routing] history scoring: enabled")
             _nonzero = [
@@ -376,7 +376,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
             for _hm, _hadj in _nonzero:
                 _rsn = _hist_reasons.get(_hm, "")
                 _rsn_str = f" ({_rsn})" if _rsn else ""
-                _marker = " ← selected" if _hm == _scored.selected_model else ""
+                _marker = " <- selected" if _hm == _scored.selected_model else ""
                 click.echo(f"  [routing] history: {_model_label(_hm)}: {_hadj:+.1f}{_rsn_str}{_marker}")
 
     _matched_skills: list[MatchedSkill] = []
@@ -424,7 +424,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         if effective_workflow == "opencode":
             _shape_desc = "opencode (delegated to OpenCode CLI)"
         elif _use_stages:
-            _shape_desc = "staged (planning → implementation)"
+            _shape_desc = "staged (planning -> implementation)"
         else:
             _shape_desc = "direct single-pass"
         click.echo(f"\n  Workflow:  {_shape_desc}")
@@ -1493,7 +1493,7 @@ def models_stats():
         avg_dur = f"{s['avg_duration']:.1f}s" if s["avg_duration"] is not None else "-"
         pass_rate = f"{s['verification_pass_rate']:.0%}" if s["verification_pass_rate"] is not None else "-"
         retry = f"{s['retry_rate']:.0%}"
-        mid = model_id if len(model_id) <= col_model else model_id[: col_model - 1] + "…"
+        mid = model_id if len(model_id) <= col_model else model_id[: col_model - 1] + "..."
         click.echo(f"  {mid:<{col_model}}  {runs_n:>5}  {avg_cost:>9}  {avg_dur:>8}  {pass_rate:>9}  {retry:>6}")
 
 
@@ -1579,7 +1579,7 @@ def skills_stats():
         avg_dur = f"{s['avg_duration']:.1f}s" if s["avg_duration"] is not None else "-"
         pass_rate = f"{s['verification_pass_rate']:.0%}" if s["verification_pass_rate"] is not None else "-"
         retry = f"{s['retry_rate']:.0%}" if s["retry_rate"] is not None else "-"
-        label = slug if len(slug) <= col else slug[: col - 1] + "…"
+        label = slug if len(slug) <= col else slug[: col - 1] + "..."
         click.echo(f"  {label:<{col}}  {n:>5}  {avg_cost:>9}  {avg_dur:>8}  {pass_rate:>9}  {retry:>6}")
 
 
@@ -1795,11 +1795,11 @@ def _render_log_entry(entry: dict, detail: str) -> None:
     if detail != "default" and "routing_category" in entry:
         click.echo(f"\n  [routing] category: {entry['routing_category']}")
         if entry.get("routing_used_fallback"):
-            click.echo(f"  [routing] candidates: {entry.get('routing_candidate_count')} → fallback (keyword routing)")
+            click.echo(f"  [routing] candidates: {entry.get('routing_candidate_count')} -> fallback (keyword routing)")
         elif entry.get("routing_selected_model"):
             _prov = entry.get("routing_selected_provider")
             _prov_suffix = f" ({_prov})" if _prov else ""
-            click.echo(f"  [routing] candidates: {entry.get('routing_candidate_count')} → {_model_label(entry['routing_selected_model'])}{_prov_suffix}")
+            click.echo(f"  [routing] candidates: {entry.get('routing_candidate_count')} -> {_model_label(entry['routing_selected_model'])}{_prov_suffix}")
 
     # Execution profile (--more / --full)
     if detail != "default" and entry.get("execution_profile"):
@@ -1910,8 +1910,8 @@ def eval_list(suite: str):
     click.echo(header)
     click.echo("  " + "-" * (len(header) - 2))
     for task in tasks:
-        tid = task.id if len(task.id) <= col_id else task.id[: col_id - 1] + "…"
-        ttitle = task.title if len(task.title) <= col_title else task.title[: col_title - 1] + "…"
+        tid = task.id if len(task.id) <= col_id else task.id[: col_id - 1] + "..."
+        ttitle = task.title if len(task.title) <= col_title else task.title[: col_title - 1] + "..."
         click.echo(f"  {tid:<{col_id}}  {ttitle:<{col_title}}  {task.category}")
 
 

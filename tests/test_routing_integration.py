@@ -360,7 +360,7 @@ class TestHistoryScoringDisplay(unittest.TestCase):
 
         self.assertIn("+1.0", result.output, result.output)
         self.assertIn("high pass rate", result.output, result.output)
-        self.assertIn("← selected", result.output, result.output)
+        self.assertIn("<- selected", result.output, result.output)
 
     def test_history_scoring_hidden_without_flag(self):
         """history scoring lines must NOT appear when --history-scoring is absent."""
