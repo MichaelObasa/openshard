@@ -188,7 +188,7 @@ class TestNeedsApprovalCommand(unittest.TestCase):
         with (
             patch("subprocess.run", return_value=_proc()),
             patch("click.echo"),
-            patch("openshard.cli.main.confirm_or_abort") as mock_confirm,
+            patch("openshard.verification.executor.confirm_or_abort") as mock_confirm,
         ):
             result = _run_verification_plan(_needs_approval_plan(), Path("/tmp"), gate=_gate("auto"))
         mock_confirm.assert_not_called()
@@ -198,7 +198,7 @@ class TestNeedsApprovalCommand(unittest.TestCase):
         with (
             patch("subprocess.run", return_value=_proc()),
             patch("click.echo"),
-            patch("openshard.cli.main.confirm_or_abort") as mock_confirm,
+            patch("openshard.verification.executor.confirm_or_abort") as mock_confirm,
         ):
             _run_verification_plan(_needs_approval_plan(), Path("/tmp"), gate=_gate("ask"))
         mock_confirm.assert_called_once()
@@ -207,7 +207,7 @@ class TestNeedsApprovalCommand(unittest.TestCase):
         with (
             patch("subprocess.run", return_value=_proc()),
             patch("click.echo"),
-            patch("openshard.cli.main.confirm_or_abort") as mock_confirm,
+            patch("openshard.verification.executor.confirm_or_abort") as mock_confirm,
         ):
             _run_verification_plan(_needs_approval_plan(), Path("/tmp"), gate=_gate("smart"))
         mock_confirm.assert_called_once()
@@ -216,7 +216,7 @@ class TestNeedsApprovalCommand(unittest.TestCase):
         with (
             patch("subprocess.run", return_value=_proc()) as mock_run,
             patch("click.echo"),
-            patch("openshard.cli.main.confirm_or_abort") as mock_confirm,
+            patch("openshard.verification.executor.confirm_or_abort") as mock_confirm,
         ):
             result = _run_verification_plan(_needs_approval_plan(), Path("/tmp"), gate=None)
         mock_confirm.assert_not_called()
@@ -227,7 +227,7 @@ class TestNeedsApprovalCommand(unittest.TestCase):
         with (
             patch("subprocess.run", return_value=_proc()) as mock_run,
             patch("click.echo"),
-            patch("openshard.cli.main.confirm_or_abort"),
+            patch("openshard.verification.executor.confirm_or_abort"),
         ):
             _run_verification_plan(_needs_approval_plan(), Path("/tmp"), gate=_gate("auto"))
         self.assertEqual(mock_run.call_args.args[0], ["make", "test"])

@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -7,6 +8,8 @@ from click.testing import CliRunner
 
 from openshard.evals.registry import load_eval_tasks, validate_eval_task
 from openshard.cli.main import cli
+from openshard.execution.generator import ChangedFile, ExecutionResult
+from openshard.providers.base import UsageStats
 
 
 def test_loads_bundled_basic_evals():
@@ -129,3 +132,103 @@ def test_readme_mentions_eval_commands():
     readme = (Path(__file__).parent.parent / "README.md").read_text(encoding="utf-8")
     assert "eval list" in readme
     assert "eval validate" in readme
+
+
+# ---------------------------------------------------------------------------
+# eval run tests — all mock ExecutionGenerator.generate (no real AI calls)
+# ---------------------------------------------------------------------------
+
+def _fake_result(files: list[ChangedFile] | None = None) -> ExecutionResult:
+    return ExecutionResult(
+        summary="done",
+        files=files or [],
+        notes=[],
+        usage=UsageStats(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+    )
+
+
+def test_eval_run_help_exits_zero():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "run", "--help"])
+    assert result.exit_code == 0
+    assert "--suite" in result.output
+    assert "--model" in result.output
+
+
+def test_eval_run_missing_suite_fails_cleanly():
+    runner = CliRunner()
+    with patch("openshard.execution.generator.ExecutionGenerator.generate", return_value=_fake_result()):
+        result = runner.invoke(cli, ["eval", "run", "--suite", "nonexistent"])
+    assert result.exit_code != 0
+    assert "nonexistent" in result.output or "Error" in result.output
+
+
+def test_eval_run_writes_result_record(tmp_path, monkeypatch):
+    log_path = tmp_path / ".openshard" / "eval-runs.jsonl"
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        patch("openshard.execution.generator.ExecutionGenerator.generate", return_value=_fake_result()),
+        patch("openshard.run.pipeline._copy_cwd_to_workspace"),
+        patch("openshard.verification.executor.run_verification_plan", return_value=(0, "ok")),
+    ):
+        runner = CliRunner()
+        runner.invoke(cli, ["eval", "run", "--suite", "basic"])
+
+    assert log_path.exists(), "eval-runs.jsonl was not created"
+    lines = log_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 3  # one per task in basic suite
+
+    required_keys = {
+        "timestamp", "suite", "task_id", "model", "passed",
+        "duration_seconds", "verification_attempted", "verification_passed",
+        "verification_returncode", "verification_output",
+        "files_written", "unsafe_files",
+        "prompt_tokens", "completion_tokens", "total_tokens", "error",
+    }
+    for line in lines:
+        record = json.loads(line)
+        assert required_keys.issubset(record.keys()), f"missing keys in: {record}"
+        assert record["suite"] == "basic"
+
+
+def test_eval_run_prints_pass_fail(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        patch("openshard.execution.generator.ExecutionGenerator.generate", return_value=_fake_result()),
+        patch("openshard.run.pipeline._copy_cwd_to_workspace"),
+        patch("openshard.verification.executor.run_verification_plan", return_value=(0, "ok")),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["eval", "run", "--suite", "basic"])
+
+    task_ids = {"docs_update", "helper_function", "cli_flag"}
+    for task_id in task_ids:
+        assert task_id in result.output, f"{task_id} not in output"
+    assert "PASS" in result.output or "FAIL" in result.output
+
+
+def test_generated_unsafe_path_is_not_written(tmp_path, monkeypatch):
+    unsafe_file = ChangedFile(path="../../etc/passwd", change_type="create", content="pwned", summary="unsafe")
+    fake = _fake_result(files=[unsafe_file])
+
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        patch("openshard.execution.generator.ExecutionGenerator.generate", return_value=fake),
+        patch("openshard.run.pipeline._copy_cwd_to_workspace"),
+        patch("openshard.verification.executor.run_verification_plan", return_value=(0, "ok")),
+    ):
+        runner = CliRunner()
+        runner.invoke(cli, ["eval", "run", "--suite", "basic"])
+
+    log_path = tmp_path / ".openshard" / "eval-runs.jsonl"
+    assert log_path.exists()
+    for line in log_path.read_text(encoding="utf-8").strip().splitlines():
+        record = json.loads(line)
+        assert "../../etc/passwd" not in record["files_written"]
+        assert "../../etc/passwd" in record["unsafe_files"] or record["files_written"] == []
+
+    passwd_path = tmp_path / "etc" / "passwd"
+    assert not passwd_path.exists(), "unsafe path was written to disk"

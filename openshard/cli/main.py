@@ -31,7 +31,7 @@ from openshard.routing.profiles import ProfileDecision, ProfileHistorySummary, b
 from openshard.skills.discovery import discover_skills
 from openshard.skills.matcher import MatchedSkill, match_skills
 from openshard.skills.context import build_skills_context
-from openshard.verification.plan import CommandSafety, VerificationPlan, build_verification_plan
+from openshard.verification.plan import CommandSafety, build_verification_plan
 from openshard.run.pipeline import (
     _LOG_PATH,
     _suggest_executor,
@@ -1102,69 +1102,7 @@ def _run_verification(
     return proc.returncode
 
 
-def _run_verification_plan(
-    plan: VerificationPlan,
-    cwd: Path,
-    gate: "GateEvaluator | None" = None,
-    label: str = "[verify]",
-    capture: bool = False,
-    detail: str = "default",
-) -> "int | tuple[int, str]":
-    """Execute the first VerificationCommand from *plan*.
-
-    - No commands  → returns 0; announces nothing-to-run (matches old behaviour).
-    - blocked      → skips subprocess, returns 1 with a clear message.
-    - needs_approval with gate → calls confirm_or_abort when approval required.
-    - safe         → executes argv directly (never shell=True).
-
-    capture=False: streams output live, returns int exit code.
-    capture=True: captures silently, returns (exit_code, output).
-    """
-    if not plan.has_commands:
-        if not capture:
-            click.echo(f"  {label} no test command detected")
-        return (0, "") if capture else 0
-
-    cmd = plan.commands[0]
-
-    if cmd.safety == CommandSafety.blocked:
-        msg = f"  {label} blocked: {cmd.reason}"
-        if not capture:
-            click.echo(msg)
-        return (1, msg) if capture else 1
-
-    if cmd.safety == CommandSafety.needs_approval and gate is not None:
-        _sc_dec = gate.check_shell_command(" ".join(cmd.argv))
-        if _sc_dec.required:
-            confirm_or_abort(_sc_dec.reason)
-
-    if not capture:
-        click.echo(f"  {label} running: {' '.join(cmd.argv)}")
-
-    proc = subprocess.run(
-        cmd.argv,
-        cwd=cwd,
-        stdout=subprocess.PIPE if capture else None,
-        stderr=subprocess.STDOUT if capture else None,
-        text=capture,
-        **({"encoding": "utf-8", "errors": "replace"} if capture else {}),
-    )
-
-    if capture:
-        return proc.returncode, proc.stdout or ""
-
-    if proc.returncode == 0:
-        click.echo(f"  {label} passed")
-    else:
-        click.echo(f"  {label} failed (exit code {proc.returncode})")
-    return proc.returncode
-
-
-def confirm_or_abort(reason: str) -> None:
-    click.echo(f"\n[gate] {reason}")
-    if not click.confirm("Proceed?", default=False):
-        click.echo("Aborted!")
-        raise SystemExit(0)
+from openshard.verification.executor import run_verification_plan as _run_verification_plan, confirm_or_abort  # noqa: E402
 
 
 @cli.command()
@@ -1796,6 +1734,49 @@ def eval_validate(suite: str):
         raise click.ClickException(f"{len(errors)} task(s) failed validation.")
 
     click.echo(f"OK  {len(tasks)} task(s) passed validation for suite '{suite}'.")
+
+
+@eval.command("run")
+@click.option("--suite", default="basic", show_default=True, help="Eval suite to run.")
+@click.option(
+    "--model",
+    default="anthropic/claude-haiku-4-5-20251001",
+    show_default=True,
+    help="Model for execution.",
+)
+def eval_run(suite: str, model: str):
+    """Run all eval tasks in a suite and report pass/fail."""
+    import tempfile
+
+    from openshard.evals.registry import load_eval_tasks
+    from openshard.evals.runner import append_eval_result, run_eval_task
+    from openshard.run.pipeline import _copy_cwd_to_workspace
+
+    try:
+        tasks = load_eval_tasks(suite)
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc))
+
+    log_path = Path(".openshard") / "eval-runs.jsonl"
+    passed_count = failed_count = 0
+
+    for task in tasks:
+        with tempfile.TemporaryDirectory(prefix=f"openshard-eval-{task.id}-") as tmp:
+            workspace = Path(tmp)
+            _copy_cwd_to_workspace(workspace)
+            result = run_eval_task(task, model=model, suite=suite, workspace_root=workspace)
+        append_eval_result(result, log_path)
+        status = "PASS" if result.passed else "FAIL"
+        extra = f"  ({result.error})" if result.error else ""
+        click.echo(f"{status}  {task.id:<28}  {result.duration_seconds:.1f}s{extra}")
+        if result.passed:
+            passed_count += 1
+        else:
+            failed_count += 1
+
+    click.echo(f"\n{passed_count} passed, {failed_count} failed  — results in {log_path}")
+    if failed_count:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
