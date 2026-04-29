@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+
 import pytest
 
 from click.testing import CliRunner
@@ -83,9 +85,47 @@ def test_eval_list_output_includes_fixture_ids():
     assert "cli_flag" in result.output
 
 
+def test_eval_list_with_suite_option():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "list", "--suite", "basic"])
+    assert result.exit_code == 0, result.output
+    assert "docs_update" in result.output
+    assert "helper_function" in result.output
+    assert "cli_flag" in result.output
+
+
+def test_eval_list_missing_suite_fails_cleanly():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "list", "--suite", "nonexistent"])
+    assert result.exit_code != 0
+    assert "nonexistent" in result.output or "Error" in result.output
+
+
 def test_eval_validate_succeeds_on_bundled_fixtures():
     runner = CliRunner()
     result = runner.invoke(cli, ["eval", "validate"])
     assert result.exit_code == 0, result.output
     assert "OK" in result.output
     assert "3" in result.output
+
+
+def test_eval_validate_with_suite_option():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "validate", "--suite", "basic"])
+    assert result.exit_code == 0, result.output
+    assert "OK" in result.output
+    assert "3" in result.output
+    assert "basic" in result.output
+
+
+def test_eval_validate_missing_suite_fails_cleanly():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "validate", "--suite", "nonexistent"])
+    assert result.exit_code != 0
+    assert "nonexistent" in result.output or "Error" in result.output
+
+
+def test_readme_mentions_eval_commands():
+    readme = (Path(__file__).parent.parent / "README.md").read_text(encoding="utf-8")
+    assert "eval list" in readme
+    assert "eval validate" in readme

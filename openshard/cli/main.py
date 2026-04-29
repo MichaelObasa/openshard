@@ -1894,12 +1894,13 @@ def eval(ctx: click.Context):
 
 
 @eval.command("list")
-def eval_list():
+@click.option("--suite", default="basic", show_default=True, help="Eval suite to list.")
+def eval_list(suite: str):
     """List available eval tasks."""
     from openshard.evals.registry import load_eval_tasks
 
     try:
-        tasks = load_eval_tasks()
+        tasks = load_eval_tasks(suite)
     except FileNotFoundError as exc:
         raise click.ClickException(str(exc))
 
@@ -1915,15 +1916,15 @@ def eval_list():
 
 
 @eval.command("validate")
-def eval_validate():
-    """Validate that all bundled eval tasks load correctly."""
+@click.option("--suite", default="basic", show_default=True, help="Eval suite to validate.")
+def eval_validate(suite: str):
+    """Validate that all eval tasks in a suite load correctly."""
     from openshard.evals.registry import load_eval_tasks
 
     try:
-        tasks = load_eval_tasks()
+        tasks = load_eval_tasks(suite)
     except FileNotFoundError as exc:
-        click.echo(f"FAIL  {exc}")
-        raise click.ClickException("Validation failed.")
+        raise click.ClickException(str(exc))
 
     errors: list[str] = []
     for task in tasks:
@@ -1935,7 +1936,7 @@ def eval_validate():
             click.echo(f"FAIL  {err}")
         raise click.ClickException(f"{len(errors)} task(s) failed validation.")
 
-    click.echo(f"OK  {len(tasks)} task(s) passed validation.")
+    click.echo(f"OK  {len(tasks)} task(s) passed validation for suite '{suite}'.")
 
 
 if __name__ == "__main__":

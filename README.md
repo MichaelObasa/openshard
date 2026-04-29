@@ -192,7 +192,13 @@ openshard models                 # list available models
 openshard models stats           # per-model performance from run history
 openshard profiles stats         # per-profile cost and pass-rate metrics
 openshard skills stats           # per-skill performance metrics
+openshard eval list              # list eval tasks in the default suite
+openshard eval list --suite basic  # list tasks in a specific suite
+openshard eval validate          # validate eval task fixtures load correctly
+openshard eval validate --suite basic  # validate a specific suite
 ```
+
+> **Eval execution is not implemented yet.** The eval harness currently supports listing and validating task fixtures only. Running evals against models and scoring results is on the roadmap.
 
 **Flags for `openshard run`:**
 - `--write` — Write generated files to disk (required for file changes)
