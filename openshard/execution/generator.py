@@ -241,7 +241,57 @@ class ExecutionGenerator:
         balanced = next((t for t in tiers if t.get("name") == "balanced"), None)
         return (powerful or balanced or tiers[0])["model"]
 
-    def _parse(self, raw: str) -> ExecutionResult:
+    @staticmethod
+    def _validate_file_object(
+        raw: object,
+        index: int,
+        notes: list[str],
+    ) -> ChangedFile | None:
+        if not isinstance(raw, dict):
+            notes.append(
+                f"File[{index}]: expected a dict, got {type(raw).__name__!r} — skipped"
+            )
+            return None
+
+        path = raw.get("path")
+        if not isinstance(path, str):
+            notes.append(
+                f"File[{index}]: 'path' must be a string,"
+                f" got {type(path).__name__!r} — skipped"
+            )
+            return None
+        if not path.strip():
+            notes.append(f"File[{index}]: 'path' is empty — skipped")
+            return None
+
+        change_type = raw.get("change_type")
+        if change_type not in _VALID_CHANGE_TYPES:
+            notes.append(
+                f"File[{index}] ({path!r}): invalid 'change_type' {change_type!r},"
+                f" must be one of {sorted(_VALID_CHANGE_TYPES)} — skipped"
+            )
+            return None
+
+        content = raw.get("content", "")
+        if not isinstance(content, str):
+            notes.append(
+                f"File[{index}] ({path!r}): 'content' must be a string,"
+                f" got {type(content).__name__!r} — skipped"
+            )
+            return None
+
+        summary = raw.get("summary", "")
+        if not isinstance(summary, str):
+            notes.append(
+                f"File[{index}] ({path!r}): 'summary' must be a string,"
+                f" got {type(summary).__name__!r} — skipped"
+            )
+            return None
+
+        return ChangedFile(path=path, change_type=change_type, content=content, summary=summary)
+
+    @staticmethod
+    def _parse(raw: str) -> ExecutionResult:
         text = re.sub(r"^```(?:json)?\s*", "", raw.strip())
         text = re.sub(r"\s*```$", "", text)
 
@@ -260,18 +310,30 @@ class ExecutionGenerator:
                     f"Model returned invalid JSON ({exc}).\nRaw response:\n{raw}"
                 ) from exc
 
-        files = [
-            ChangedFile(
-                path=f.get("path", ""),
-                change_type=f.get("change_type") if f.get("change_type") in _VALID_CHANGE_TYPES else "update",
-                content=f.get("content", ""),
-                summary=f.get("summary", ""),
+        if not isinstance(data, dict):
+            raise ProviderError(
+                f"Model response parsed as {type(data).__name__!r}, expected a JSON object.\n"
+                f"Raw response:\n{raw}"
             )
-            for f in data.get("files", [])
-        ]
 
-        return ExecutionResult(
-            summary=data.get("summary", ""),
-            files=files,
-            notes=[n for n in data.get("notes", []) if n],
-        )
+        raw_files = data.get("files", [])
+        if not isinstance(raw_files, list):
+            raise ProviderError(
+                f"'files' field is {type(raw_files).__name__!r}, expected a list.\n"
+                f"Raw response:\n{raw}"
+            )
+
+        notes: list[str] = [
+            n for n in data.get("notes", []) if isinstance(n, str) and n
+        ]
+        files: list[ChangedFile] = []
+        for i, item in enumerate(raw_files):
+            cf = ExecutionGenerator._validate_file_object(item, i, notes)
+            if cf is not None:
+                files.append(cf)
+
+        summary = data.get("summary", "")
+        if not isinstance(summary, str):
+            summary = ""
+
+        return ExecutionResult(summary=summary, files=files, notes=notes)
