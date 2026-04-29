@@ -6,7 +6,8 @@ import pytest
 
 from click.testing import CliRunner
 
-from openshard.evals.registry import load_eval_tasks, validate_eval_task
+from openshard.evals.registry import EvalTask, load_eval_tasks, validate_eval_task
+from openshard.evals.runner import run_eval_task
 from openshard.cli.main import cli
 from openshard.execution.generator import ChangedFile, ExecutionResult
 from openshard.providers.base import UsageStats
@@ -367,3 +368,59 @@ def test_eval_report_no_matching_filter(tmp_path, monkeypatch):
     result = runner.invoke(cli, ["eval", "report", "--suite", "nosuchsuite"])
     assert result.exit_code == 0, result.output
     assert "No records match" in result.output
+
+
+# ---------------------------------------------------------------------------
+# fixture copying and suite-level sanity checks
+# ---------------------------------------------------------------------------
+
+def test_run_eval_task_copies_fixture_files(tmp_path):
+    task_dir = tmp_path / "my_task"
+    task_dir.mkdir()
+    (task_dir / "prompt.txt").write_text("Do something.")
+    (task_dir / "metadata.json").write_text(
+        json.dumps({
+            "id": "my_task",
+            "title": "My Task",
+            "category": "standard",
+            "expected_files": ["foo.py"],
+            "verification_command": None,
+        })
+    )
+    fixtures = task_dir / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "seed.txt").write_text("hello fixture")
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    task = EvalTask(
+        id="my_task",
+        title="My Task",
+        category="standard",
+        expected_files=["foo.py"],
+        verification_command=None,
+        prompt="Do something.",
+        task_dir=task_dir,
+    )
+
+    fake_result = ExecutionResult(
+        summary="done",
+        files=[],
+        notes=[],
+        usage=UsageStats(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+    )
+    with patch("openshard.evals.runner.ExecutionGenerator") as mock_cls:
+        mock_cls.return_value.generate.return_value = fake_result
+        run_eval_task(task, model="test-model", suite="test", workspace_root=workspace)
+
+    assert (workspace / "seed.txt").exists(), "fixture file was not copied into workspace"
+    assert (workspace / "seed.txt").read_text() == "hello fixture"
+
+
+def test_basic_suite_tasks_have_verification_commands():
+    tasks = load_eval_tasks("basic")
+    for task in tasks:
+        assert task.verification_command is not None, (
+            f"task {task.id!r} has no verification_command — eval run will always fail"
+        )

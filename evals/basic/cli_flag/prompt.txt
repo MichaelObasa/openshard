@@ -1,2 +1,6 @@
-Add a --json flag to the `openshard report` command that outputs the report data
-as a JSON object instead of human-readable text.
+Add a --json flag to the `report` command in tools/demo_cli.py that outputs the
+report data as a JSON object instead of human-readable text.
+
+When --json is passed, the command should print a JSON object (e.g. {"runs": 3,
+"passed": 2, "failed": 1}) to stdout instead of the human-readable summary.
+Do not modify any other files.

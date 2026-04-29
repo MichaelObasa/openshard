@@ -2,6 +2,6 @@
   "id": "cli_flag",
   "title": "Add --json output flag to report command",
   "category": "standard",
-  "expected_files": ["openshard/cli/main.py"],
-  "verification_command": null
+  "expected_files": ["tools/demo_cli.py"],
+  "verification_command": "python -m pytest tests/test_cli_flag.py -q"
 }

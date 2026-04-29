@@ -3,5 +3,5 @@
   "title": "Document the --dry-run flag in README",
   "category": "boilerplate",
   "expected_files": ["README.md"],
-  "verification_command": null
+  "verification_command": "python verify_docs.py"
 }

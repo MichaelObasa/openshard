@@ -3,5 +3,5 @@
   "title": "Add format_duration helper function",
   "category": "standard",
   "expected_files": ["openshard/utils.py"],
-  "verification_command": "python -m pytest tests/ -q"
+  "verification_command": "python -m pytest tests/test_format_duration.py -q"
 }
