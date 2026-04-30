@@ -1933,5 +1933,52 @@ def eval_report(suite: str | None, model: str | None):
         click.echo(f"  {mdl:<44}  {p}/{n}  ({pct:.1f}%)")
 
 
+@eval.command("stats")
+@click.option("--suite", default=None, help="Filter by suite name.")
+@click.option("--model", default=None, help="Filter by model slug.")
+@click.option("--task", default=None, help="Filter by task_id.")
+def eval_stats(suite: str | None, model: str | None, task: str | None):
+    """Show grouped pass/fail stats from .openshard/eval-runs.jsonl."""
+    from openshard.evals.stats import EVAL_RUNS_PATH, compute_eval_stats, load_eval_runs
+
+    records = load_eval_runs(Path.cwd() / EVAL_RUNS_PATH)
+    rows = compute_eval_stats(records, suite=suite, model=model, task=task)
+
+    if not rows:
+        click.echo("No eval results found.")
+        return
+
+    click.echo("\n[eval stats]")
+    parts = []
+    if suite:
+        parts.append(f"suite: {suite}")
+    if model:
+        parts.append(f"model: {model}")
+    if task:
+        parts.append(f"task: {task}")
+    if parts:
+        click.echo("  " + "  ".join(parts))
+
+    header = (
+        f"  {'suite':<10}  {'model':<44}  {'task_id':<24}"
+        f"  {'runs':>5}  {'pass':>5}  {'fail':>5}  {'pass%':>6}"
+        f"  {'avg_dur':>8}  {'avg_tokens':>11}  {'unsafe':>7}"
+    )
+    click.echo(f"\n{header}")
+    for s in rows:
+        tok = f"{s.avg_total_tokens:,.0f}" if s.avg_total_tokens is not None else "-"
+        click.echo(
+            f"  {s.suite:<10}  {s.model:<44}  {s.task_id:<24}"
+            f"  {s.run_count:>5}  {s.pass_count:>5}  {s.fail_count:>5}  {s.pass_rate:>5.0%}"
+            f"  {s.avg_duration:>7.1f}s  {tok:>11}  {s.unsafe_file_count:>7}"
+        )
+
+    total_runs = sum(s.run_count for s in rows)
+    total_pass = sum(s.pass_count for s in rows)
+    total_fail = sum(s.fail_count for s in rows)
+    overall_rate = total_pass / total_runs if total_runs else 0.0
+    click.echo(f"\n  total: {total_runs} runs  pass: {total_pass}  fail: {total_fail}  pass rate: {overall_rate:.0%}")
+
+
 if __name__ == "__main__":
     cli()

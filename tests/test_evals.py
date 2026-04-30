@@ -8,6 +8,7 @@ from click.testing import CliRunner
 
 from openshard.evals.registry import EvalTask, load_eval_tasks, validate_eval_task
 from openshard.evals.runner import EvalResult, run_eval_task
+from openshard.evals.stats import compute_eval_stats, load_eval_runs
 from openshard.cli.main import cli
 from openshard.execution.generator import ChangedFile, ExecutionResult
 from openshard.providers.base import UsageStats
@@ -540,3 +541,220 @@ def test_eval_compare_exit_code(tmp_path, monkeypatch):
         runner = CliRunner()
         result = runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "modelA"])
     assert result.exit_code == 1, result.output
+
+
+# ---------------------------------------------------------------------------
+# eval stats — unit tests for load_eval_runs and compute_eval_stats
+# ---------------------------------------------------------------------------
+
+def test_load_eval_runs_missing_file(tmp_path):
+    assert load_eval_runs(tmp_path / "nonexistent.jsonl") == []
+
+
+def test_load_eval_runs_empty_file(tmp_path):
+    p = tmp_path / "runs.jsonl"
+    p.write_text("", encoding="utf-8")
+    assert load_eval_runs(p) == []
+
+
+def test_load_eval_runs_skips_blank_lines(tmp_path):
+    p = tmp_path / "runs.jsonl"
+    p.write_text('\n{"a": 1}\n\n{"b": 2}\n', encoding="utf-8")
+    assert load_eval_runs(p) == [{"a": 1}, {"b": 2}]
+
+
+def test_load_eval_runs_skips_malformed_json(tmp_path):
+    p = tmp_path / "runs.jsonl"
+    p.write_text('{"a": 1}\nnot json\n{"b": 2}\n', encoding="utf-8")
+    assert load_eval_runs(p) == [{"a": 1}, {"b": 2}]
+
+
+def test_compute_eval_stats_grouping():
+    records = [
+        _rec(task_id="t1", model="m1", suite="s1", passed=True),
+        _rec(task_id="t1", model="m1", suite="s1", passed=False),
+        _rec(task_id="t2", model="m2", suite="s1", passed=True),
+    ]
+    rows = compute_eval_stats(records)
+    assert len(rows) == 2
+    by_key = {(r.model, r.task_id): r for r in rows}
+    assert by_key[("m1", "t1")].run_count == 2
+    assert by_key[("m1", "t1")].pass_count == 1
+    assert by_key[("m1", "t1")].fail_count == 1
+    assert by_key[("m1", "t1")].pass_rate == pytest.approx(0.5)
+    assert by_key[("m2", "t2")].pass_count == 1
+
+
+def test_compute_eval_stats_skips_records_missing_required_fields():
+    records = [
+        {"suite": "s", "task_id": "t"},          # missing model
+        {"model": "m", "task_id": "t"},           # missing suite
+        {"model": "m", "suite": "s"},             # missing task_id
+        _rec(task_id="t1", model="m1", suite="s1"),
+    ]
+    rows = compute_eval_stats(records)
+    assert len(rows) == 1
+
+
+def test_compute_eval_stats_avg_duration_only_numeric():
+    records = [
+        {**_rec(), "duration_seconds": 2.0},
+        {**_rec(), "duration_seconds": "bad"},
+        {**_rec(), "duration_seconds": 4.0},
+    ]
+    rows = compute_eval_stats(records)
+    assert rows[0].avg_duration == pytest.approx(3.0)
+
+
+def test_compute_eval_stats_avg_tokens_includes_zero():
+    records = [
+        {**_rec(), "total_tokens": 0},
+        {**_rec(), "total_tokens": 200},
+    ]
+    rows = compute_eval_stats(records)
+    assert rows[0].avg_total_tokens == pytest.approx(100.0)
+
+
+def test_compute_eval_stats_avg_tokens_none_when_missing():
+    records = [
+        {k: v for k, v in _rec().items() if k != "total_tokens"},
+    ]
+    rows = compute_eval_stats(records)
+    assert rows[0].avg_total_tokens is None
+
+
+def test_compute_eval_stats_unsafe_count():
+    records = [
+        _rec(unsafe=["a/b"]),
+        _rec(unsafe=["x", "y"]),
+        _rec(unsafe=[]),
+    ]
+    rows = compute_eval_stats(records)
+    assert rows[0].unsafe_file_count == 3
+
+
+def test_compute_eval_stats_unsafe_count_skips_non_list():
+    records = [
+        {**_rec(), "unsafe_files": "not-a-list"},
+        _rec(unsafe=["x"]),
+    ]
+    rows = compute_eval_stats(records)
+    assert rows[0].unsafe_file_count == 1
+
+
+def test_compute_eval_stats_suite_filter():
+    records = [_rec(suite="a"), _rec(suite="b")]
+    rows = compute_eval_stats(records, suite="a")
+    assert all(r.suite == "a" for r in rows)
+    assert len(rows) == 1
+
+
+def test_compute_eval_stats_model_filter():
+    records = [_rec(model="m1"), _rec(model="m2")]
+    rows = compute_eval_stats(records, model="m1")
+    assert all(r.model == "m1" for r in rows)
+
+
+def test_compute_eval_stats_task_filter():
+    records = [_rec(task_id="t1"), _rec(task_id="t2")]
+    rows = compute_eval_stats(records, task="t1")
+    assert all(r.task_id == "t1" for r in rows)
+
+
+# ---------------------------------------------------------------------------
+# eval stats — CLI tests
+# ---------------------------------------------------------------------------
+
+def test_eval_stats_no_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "stats"])
+    assert result.exit_code == 0, result.output
+    assert "No eval results found" in result.output
+
+
+def test_eval_stats_basic_output(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [
+        _rec(task_id="t1", model="m1", suite="basic", passed=True),
+        _rec(task_id="t1", model="m1", suite="basic", passed=False),
+        _rec(task_id="t2", model="m1", suite="basic", passed=True),
+    ])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "stats"])
+    assert result.exit_code == 0, result.output
+    assert "t1" in result.output
+    assert "t2" in result.output
+    assert "total: 3 runs" in result.output
+    assert "pass: 2" in result.output
+    assert "fail: 1" in result.output
+
+
+def test_eval_stats_suite_filter(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [
+        _rec(task_id="t1", suite="foo"),
+        _rec(task_id="t2", suite="bar"),
+    ])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "stats", "--suite", "foo"])
+    assert result.exit_code == 0, result.output
+    assert "t1" in result.output
+    assert "t2" not in result.output
+
+
+def test_eval_stats_model_filter(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [
+        _rec(task_id="t1", model="m1"),
+        _rec(task_id="t2", model="m2"),
+    ])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "stats", "--model", "m1"])
+    assert result.exit_code == 0, result.output
+    assert "t1" in result.output
+    assert "t2" not in result.output
+
+
+def test_eval_stats_task_filter(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [
+        _rec(task_id="t1"),
+        _rec(task_id="t2"),
+    ])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "stats", "--task", "t1"])
+    assert result.exit_code == 0, result.output
+    assert "t1" in result.output
+    assert "t2" not in result.output
+
+
+def test_eval_stats_output_has_suite_model_task_columns(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [_rec(task_id="mytask", model="mymodel", suite="mysuite")])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "stats"])
+    assert result.exit_code == 0, result.output
+    assert "mysuite" in result.output
+    assert "mymodel" in result.output
+    assert "mytask" in result.output
+
+
+def test_eval_stats_sorted_by_suite_model_task(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [
+        _rec(task_id="z", model="m", suite="b"),
+        _rec(task_id="a", model="m", suite="a"),
+    ])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "stats"])
+    assert result.exit_code == 0, result.output
+    idx_a = result.output.index("a")
+    idx_z = result.output.index("z")
+    assert idx_a < idx_z
