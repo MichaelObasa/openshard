@@ -125,7 +125,8 @@ def plan(task: str):
     help="API provider: openrouter (default), anthropic (requires ANTHROPIC_API_KEY), or openai (requires OPENAI_API_KEY).",
 )
 @click.option("--history-scoring", "history_scoring", is_flag=True, default=False, help="Apply run-history bonuses/penalties to model scoring (opt-in).")
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool):
+@click.option("--eval-scoring", "eval_scoring", is_flag=True, default=False, help="Apply eval-run bonuses/penalties to model scoring (opt-in).")
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool):
     """Execute TASK and return a structured result."""
     detail = "full" if full else ("more" if more else "default")
     start = time.time()
@@ -140,6 +141,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         _cfg_workflow = _cfg.get("workflow", "").strip().lower()
         _cfg_executor_legacy = _cfg.get("executor", "direct").strip().lower()
         _use_history_scoring = history_scoring or bool(_cfg.get("history_scoring", False))
+        _use_eval_scoring = eval_scoring or bool(_cfg.get("eval_scoring", False))
         _policy_executor, _policy_reason = _suggest_executor(task)
 
         # --workflow > --executor (deprecated) > config.workflow > config.executor > auto
@@ -278,7 +280,24 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                     _hist_reasons = compute_history_adjustment_reasons(_runs)
                 except Exception:
                     _runs = []
-            _scored = select_with_info(_entries, _reqs, routing_decision.category, history_adjustments=_hist_adjustments)
+            _eval_adjustments: dict[str, float] = {}
+            _eval_reasons: dict[str, str] = {}
+            if _use_eval_scoring:
+                try:
+                    from openshard.evals.stats import EVAL_RUNS_PATH, compute_eval_stats, load_eval_runs
+                    from openshard.evals.adjustments import compute_eval_adjustments, compute_eval_adjustment_reasons
+                    _eval_records = load_eval_runs(Path.cwd() / EVAL_RUNS_PATH)
+                    _eval_stats_data = compute_eval_stats(_eval_records)
+                    _eval_adjustments = compute_eval_adjustments(_eval_stats_data)
+                    _eval_reasons = compute_eval_adjustment_reasons(_eval_stats_data)
+                except Exception:
+                    pass
+            _merged_adjustments: dict[str, float] | None = None
+            if _hist_adjustments is not None or _eval_adjustments:
+                _merged_adjustments = dict(_hist_adjustments or {})
+                for _em, _ea in _eval_adjustments.items():
+                    _merged_adjustments[_em] = _merged_adjustments.get(_em, 0.0) + _ea
+            _scored = select_with_info(_entries, _reqs, routing_decision.category, history_adjustments=_merged_adjustments)
             if (
                 _scored.selected_model is not None
                 and _mgr.providers.get(_scored.selected_provider) is not None
@@ -389,6 +408,20 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 _rsn_str = f" ({_rsn})" if _rsn else ""
                 _marker = " <- selected" if _hm == _scored.selected_model else ""
                 click.echo(f"  [routing] history: {_model_label(_hm)}: {_hadj:+.1f}{_rsn_str}{_marker}")
+        if _use_eval_scoring:
+            click.echo("  [routing] eval scoring: enabled")
+            _eval_nonzero = [
+                (m, adj)
+                for m, adj in _eval_adjustments.items()
+                if m in set(_scored.candidates) and adj != 0.0
+            ]
+            for _em, _ea in _eval_nonzero:
+                _rsn = _eval_reasons.get(_em, "")
+                _rsn_str = f" ({_rsn})" if _rsn else ""
+                _marker = " <- selected" if _em == _scored.selected_model else ""
+                click.echo(f"  [routing] eval: {_model_label(_em)}: {_ea:+.1f}{_rsn_str}{_marker}")
+            if not _eval_nonzero:
+                click.echo("  [routing] eval: no relevant stats (no adjustment)")
 
     _matched_skills: list[MatchedSkill] = []
     if _repo_facts is not None and routing_decision is not None:
