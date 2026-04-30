@@ -10,6 +10,7 @@ EVAL_RUNS_PATH = Path(".openshard/eval-runs.jsonl")
 def load_eval_runs(path: Path) -> list[dict]:
     if not path.exists():
         return []
+
     records: list[dict] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -57,36 +58,50 @@ def compute_eval_stats(
         t = r.get("task_id")
         if not (m and s and t):
             continue
-        key = (str(m), str(s), str(t))
+
+        key = (str(s), str(m), str(t))
         groups.setdefault(key, []).append(r)
 
     stats: list[EvalStats] = []
-    for (mdl, sut, tid), runs in sorted(groups.items(), key=lambda kv: kv[0]):
+    for (sut, mdl, tid), runs in sorted(groups.items(), key=lambda kv: kv[0]):
         run_count = len(runs)
         pass_count = sum(1 for r in runs if r.get("passed") is True)
         fail_count = run_count - pass_count
         pass_rate = pass_count / run_count if run_count else 0.0
 
-        durations = [r["duration_seconds"] for r in runs if isinstance(r.get("duration_seconds"), (int, float))]
+        durations = [
+            r["duration_seconds"]
+            for r in runs
+            if isinstance(r.get("duration_seconds"), (int, float))
+        ]
         avg_duration = sum(durations) / len(durations) if durations else 0.0
 
-        token_values = [r["total_tokens"] for r in runs if isinstance(r.get("total_tokens"), (int, float))]
+        token_values = [
+            r["total_tokens"]
+            for r in runs
+            if isinstance(r.get("total_tokens"), (int, float))
+        ]
         avg_total_tokens = sum(token_values) / len(token_values) if token_values else None
 
         unsafe_file_count = sum(
-            len(r["unsafe_files"]) for r in runs if isinstance(r.get("unsafe_files"), list)
+            len(r["unsafe_files"])
+            for r in runs
+            if isinstance(r.get("unsafe_files"), list)
         )
 
-        stats.append(EvalStats(
-            model=mdl,
-            suite=sut,
-            task_id=tid,
-            run_count=run_count,
-            pass_count=pass_count,
-            fail_count=fail_count,
-            pass_rate=pass_rate,
-            avg_duration=avg_duration,
-            avg_total_tokens=avg_total_tokens,
-            unsafe_file_count=unsafe_file_count,
-        ))
+        stats.append(
+            EvalStats(
+                model=mdl,
+                suite=sut,
+                task_id=tid,
+                run_count=run_count,
+                pass_count=pass_count,
+                fail_count=fail_count,
+                pass_rate=pass_rate,
+                avg_duration=avg_duration,
+                avg_total_tokens=avg_total_tokens,
+                unsafe_file_count=unsafe_file_count,
+            )
+        )
+
     return stats
