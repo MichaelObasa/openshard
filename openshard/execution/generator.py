@@ -182,9 +182,21 @@ class ExecutionGenerator:
         config = load_config()
         self.model: str = self._resolve_model(config)
         self.fixer_model: str = self._resolve_fixer_model(config)
-        self.client: BaseProvider = (
-            provider if provider is not None else OpenRouterClient(get_api_key())
-        )
+        self._provider = provider
+        self._client: BaseProvider | None = None
+
+    @property
+    def client(self) -> BaseProvider:
+        if self._client is None:
+            try:
+                self._client = (
+                    self._provider if self._provider is not None
+                    else OpenRouterClient(get_api_key())
+                )
+            except ValueError as exc:
+                # Re-raise as RuntimeError so existing callers surface it as a ClickException.
+                raise RuntimeError(str(exc)) from exc
+        return self._client
 
     def generate(
         self,

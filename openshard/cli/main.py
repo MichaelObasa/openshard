@@ -503,6 +503,10 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     # --- Stage-based execution (direct mode, security/complex tasks) ----------
     result = None
 
+    if dry_run:
+        from openshard.execution.generator import ExecutionResult
+        result = ExecutionResult(summary="(dry run — no provider call)", files=[], notes=[], usage=None)
+
     if _use_stages:
         stages = split_task(task)
         for _stage in stages:

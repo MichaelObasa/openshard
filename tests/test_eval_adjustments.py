@@ -250,6 +250,49 @@ class TestEvalScoringCLI(unittest.TestCase):
 
         self.assertNotIn("eval scoring", result.output)
 
+    def _run_without_key(self, args: list[str], tmp: Path) -> object:
+        """Invoke CLI from tmp dir with OPENROUTER_API_KEY removed from env."""
+        import os
+        runner = CliRunner()
+        old_cwd = os.getcwd()
+        old_key = os.environ.pop("OPENROUTER_API_KEY", None)
+        try:
+            os.chdir(tmp)
+            from openshard.cli.main import cli
+            return runner.invoke(cli, args)
+        finally:
+            os.chdir(old_cwd)
+            if old_key is not None:
+                os.environ["OPENROUTER_API_KEY"] = old_key
+
+    def test_dry_run_works_without_api_key(self):
+        import tempfile
+        tmp = Path(tempfile.mkdtemp())
+        result = self._run_without_key(["run", "--dry-run", "hello"], tmp)
+        self.assertNotIn("OPENROUTER_API_KEY", result.output)
+        self.assertNotEqual(result.exit_code, 1)
+
+    def test_eval_scoring_dry_run_without_api_key(self):
+        import tempfile
+        tmp = Path(tempfile.mkdtemp())
+        eval_dir = tmp / ".openshard"
+        eval_dir.mkdir()
+        runs_file = eval_dir / "eval-runs.jsonl"
+        for _ in range(3):
+            self._write_eval_run(runs_file, "some/model", passed=True)
+        result = self._run_without_key(
+            ["run", "--eval-scoring", "--more", "--dry-run", "hello"], tmp
+        )
+        self.assertIn("eval scoring: enabled", result.output)
+        self.assertNotIn("OPENROUTER_API_KEY", result.output)
+
+    def test_non_dry_run_fails_without_api_key(self):
+        import tempfile
+        tmp = Path(tempfile.mkdtemp())
+        result = self._run_without_key(["run", "hello"], tmp)
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("OPENROUTER_API_KEY", result.output)
+
     def test_config_eval_scoring_respected(self):
         from unittest.mock import MagicMock, patch
         from openshard.cli.main import cli
