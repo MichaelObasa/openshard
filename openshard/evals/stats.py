@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from openshard.evals.runner import EvalResult
 
 EVAL_RUNS_PATH = Path(".openshard/eval-runs.jsonl")
 
@@ -105,3 +110,63 @@ def compute_eval_stats(
         )
 
     return stats
+
+
+@dataclass
+class ModelRanking:
+    rank: int
+    model: str
+    pass_rate: float
+    pass_count: int
+    run_count: int
+    cost_per_pass: float | None
+    avg_tokens: float | None
+    avg_duration: float
+    unsafe_count: int
+
+
+def rank_models(results_by_model: dict[str, list[EvalResult]]) -> list[ModelRanking]:
+    """Rank models by pass rate, then cost-per-pass, then avg duration, then unsafe count."""
+    entries: list[ModelRanking] = []
+
+    for model, results in results_by_model.items():
+        run_count = len(results)
+        if not run_count:
+            continue
+
+        pass_count = sum(1 for r in results if r.passed)
+        pass_rate = pass_count / run_count
+
+        avg_duration = sum(r.duration_seconds for r in results) / run_count
+
+        token_vals = [r.total_tokens for r in results if r.total_tokens > 0]
+        avg_tokens = sum(token_vals) / len(token_vals) if token_vals else None
+
+        unsafe_count = sum(len(r.unsafe_files) for r in results)
+
+        passing = [r for r in results if r.passed]
+        if not passing or any(getattr(r, "cost", None) is None for r in passing):
+            cost_per_pass = None
+        else:
+            cost_per_pass = sum(r.cost for r in passing) / pass_count  # type: ignore[union-attr]
+
+        entries.append(ModelRanking(
+            rank=0,
+            model=model,
+            pass_rate=pass_rate,
+            pass_count=pass_count,
+            run_count=run_count,
+            cost_per_pass=cost_per_pass,
+            avg_tokens=avg_tokens,
+            avg_duration=avg_duration,
+            unsafe_count=unsafe_count,
+        ))
+
+    def _sort_key(e: ModelRanking) -> tuple:
+        cost_key = e.cost_per_pass if e.cost_per_pass is not None else math.inf
+        return (-e.pass_rate, cost_key, e.avg_duration, e.unsafe_count)
+
+    entries.sort(key=_sort_key)
+    for i, entry in enumerate(entries, 1):
+        entry.rank = i
+    return entries

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from openshard.evals.registry import EvalTask
 from openshard.execution.generator import ExecutionGenerator
+from openshard.providers.openrouter import compute_cost
 from openshard.security.paths import UnsafePathError, resolve_safe_repo_path
 from openshard.verification.executor import run_verification_plan
 from openshard.verification.plan import build_verification_plan
@@ -32,6 +33,7 @@ class EvalResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    cost: float | None = None
     error: str | None = None
 
 
@@ -56,6 +58,7 @@ def run_eval_task(
     verification_returncode: int | None = None
     verification_output: str | None = None
     prompt_tokens = completion_tokens = total_tokens = 0
+    cost: float | None = None
 
     try:
         gen = ExecutionGenerator()
@@ -65,6 +68,7 @@ def run_eval_task(
             prompt_tokens = getattr(result.usage, "prompt_tokens", 0) or 0
             completion_tokens = getattr(result.usage, "completion_tokens", 0) or 0
             total_tokens = getattr(result.usage, "total_tokens", 0) or 0
+            cost = compute_cost(model, prompt_tokens, completion_tokens)
 
         root = workspace_root.resolve()
         for f in result.files:
@@ -122,6 +126,7 @@ def run_eval_task(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
+        cost=cost,
         error=error,
     )
 

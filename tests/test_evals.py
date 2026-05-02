@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 from openshard.evals.registry import EvalTask, load_eval_tasks, validate_eval_task
 from openshard.evals.runner import EvalResult, run_eval_task
-from openshard.evals.stats import compute_eval_stats, load_eval_runs
+from openshard.evals.stats import compute_eval_stats, load_eval_runs, rank_models
 from openshard.cli.main import cli
 from openshard.execution.generator import ChangedFile, ExecutionResult
 from openshard.providers.base import UsageStats
@@ -197,7 +197,7 @@ def test_eval_run_writes_result_record(tmp_path, monkeypatch):
         "duration_seconds", "verification_attempted", "verification_passed",
         "verification_returncode", "verification_output",
         "files_written", "unsafe_files",
-        "prompt_tokens", "completion_tokens", "total_tokens", "error",
+        "prompt_tokens", "completion_tokens", "total_tokens", "cost", "error",
     }
     for line in lines:
         record = json.loads(line)
@@ -769,3 +769,268 @@ def test_eval_stats_sorted_by_suite_model_task(tmp_path, monkeypatch):
     idx_a = result.output.index("a")
     idx_z = result.output.index("z")
     assert idx_a < idx_z
+
+
+# ---------------------------------------------------------------------------
+# rank_models — unit tests
+# ---------------------------------------------------------------------------
+
+def _er(
+    model: str = "model-a",
+    passed: bool = True,
+    cost: float | None = None,
+    duration: float = 1.0,
+    tokens: int = 100,
+    unsafe: list[str] | None = None,
+) -> EvalResult:
+    return EvalResult(
+        timestamp="2026-01-01T00:00:00+00:00",
+        suite="basic",
+        task_id="t1",
+        model=model,
+        passed=passed,
+        duration_seconds=duration,
+        verification_attempted=True,
+        verification_passed=passed,
+        verification_returncode=0 if passed else 1,
+        verification_output="ok",
+        total_tokens=tokens,
+        cost=cost,
+        unsafe_files=unsafe or [],
+    )
+
+
+def test_rank_models_sorts_by_pass_rate():
+    results = {
+        "model-a": [_er("model-a", passed=True), _er("model-a", passed=False)],  # 50%
+        "model-b": [_er("model-b", passed=True), _er("model-b", passed=True)],   # 100%
+    }
+    ranking = rank_models(results)
+    assert ranking[0].model == "model-b"
+    assert ranking[1].model == "model-a"
+
+
+def test_rank_models_tiebreak_by_cost_per_pass():
+    results = {
+        "model-a": [_er("model-a", passed=True, cost=0.005)],  # 100%, higher cost
+        "model-b": [_er("model-b", passed=True, cost=0.002)],  # 100%, lower cost
+    }
+    ranking = rank_models(results)
+    assert ranking[0].model == "model-b"
+    assert ranking[1].model == "model-a"
+
+
+def test_rank_models_cost_none_sorts_after_known_cost():
+    results = {
+        "model-a": [_er("model-a", passed=True, cost=None)],   # 100%, no cost
+        "model-b": [_er("model-b", passed=True, cost=0.010)],  # 100%, high cost
+    }
+    ranking = rank_models(results)
+    # model-b has known cost (even if expensive) → sorts before model-a (unknown)
+    assert ranking[0].model == "model-b"
+    assert ranking[1].model == "model-a"
+
+
+def test_rank_models_no_passing_runs_cost_none():
+    results = {"model-a": [_er("model-a", passed=False, cost=0.001)]}
+    ranking = rank_models(results)
+    assert ranking[0].cost_per_pass is None
+
+
+def test_rank_models_any_pass_missing_cost_gives_none():
+    results = {
+        "model-a": [
+            _er("model-a", passed=True, cost=0.003),
+            _er("model-a", passed=True, cost=None),  # one passing run has no cost
+        ]
+    }
+    ranking = rank_models(results)
+    assert ranking[0].cost_per_pass is None
+
+
+def test_rank_models_all_passes_have_cost_computes_correctly():
+    results = {
+        "model-a": [
+            _er("model-a", passed=True, cost=0.004),
+            _er("model-a", passed=True, cost=0.006),
+            _er("model-a", passed=False, cost=0.001),  # failed run not in cost_per_pass
+        ]
+    }
+    ranking = rank_models(results)
+    assert ranking[0].cost_per_pass == pytest.approx(0.005)
+
+
+def test_rank_models_tiebreak_by_duration():
+    results = {
+        "model-a": [_er("model-a", passed=True, cost=0.002, duration=3.0)],
+        "model-b": [_er("model-b", passed=True, cost=0.002, duration=1.0)],
+    }
+    ranking = rank_models(results)
+    assert ranking[0].model == "model-b"
+
+
+def test_rank_models_tiebreak_by_unsafe():
+    results = {
+        "model-a": [_er("model-a", passed=True, cost=0.002, duration=1.0, unsafe=["bad/path"])],
+        "model-b": [_er("model-b", passed=True, cost=0.002, duration=1.0, unsafe=[])],
+    }
+    ranking = rank_models(results)
+    assert ranking[0].model == "model-b"
+
+
+def test_rank_models_assigns_sequential_ranks():
+    results = {
+        "model-a": [_er("model-a", passed=True)],
+        "model-b": [_er("model-b", passed=True)],
+        "model-c": [_er("model-c", passed=True)],
+    }
+    ranking = rank_models(results)
+    assert [e.rank for e in ranking] == [1, 2, 3]
+
+
+def test_rank_models_single_model():
+    results = {"model-a": [_er("model-a", passed=True)]}
+    ranking = rank_models(results)
+    assert len(ranking) == 1
+    assert ranking[0].rank == 1
+
+
+# ---------------------------------------------------------------------------
+# eval compare — ranking section CLI tests
+# ---------------------------------------------------------------------------
+
+def _make_er(model: str, passed: bool, cost: float | None = None) -> EvalResult:
+    return EvalResult(
+        timestamp="2026-01-01T00:00:00+00:00",
+        suite="basic",
+        task_id="t1",
+        model=model,
+        passed=passed,
+        duration_seconds=1.0,
+        verification_attempted=True,
+        verification_passed=passed,
+        verification_returncode=0 if passed else 1,
+        verification_output="ok",
+        cost=cost,
+    )
+
+
+def test_eval_compare_ranking_section_present(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    results = iter([
+        _make_er("model-a", passed=True),
+        _make_er("model-a", passed=True),
+        _make_er("model-b", passed=False),
+        _make_er("model-b", passed=False),
+    ] * 10)
+
+    with (
+        patch("openshard.cli.main.run_eval_task", side_effect=results),
+        patch("openshard.cli.main.append_eval_result"),
+        patch("openshard.cli.main._copy_cwd_to_workspace"),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "model-a,model-b"])
+
+    assert "[ranking]" in result.output
+
+
+def test_eval_compare_ranking_not_shown_for_single_model(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    with (
+        patch("openshard.cli.main.run_eval_task", return_value=_make_er("model-a", passed=True)),
+        patch("openshard.cli.main.append_eval_result"),
+        patch("openshard.cli.main._copy_cwd_to_workspace"),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "model-a"])
+
+    assert "[ranking]" not in result.output
+
+
+def test_eval_compare_ranking_order_by_pass_rate(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    # model-b passes all 10, model-a passes none
+    side_effects = (
+        [_make_er("model-a", passed=False)] * 10
+        + [_make_er("model-b", passed=True)] * 10
+    )
+
+    with (
+        patch("openshard.cli.main.run_eval_task", side_effect=side_effects),
+        patch("openshard.cli.main.append_eval_result"),
+        patch("openshard.cli.main._copy_cwd_to_workspace"),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "model-a,model-b"])
+
+    ranking_section = result.output.split("[ranking]")[-1]
+    idx_a = ranking_section.index("model-a")
+    idx_b = ranking_section.index("model-b")
+    assert idx_b < idx_a  # model-b (100%) ranked above model-a (0%)
+
+
+def test_eval_compare_ranking_dash_when_no_cost(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    side_effects = (
+        [_make_er("model-a", passed=True, cost=None)] * 10
+        + [_make_er("model-b", passed=True, cost=None)] * 10
+    )
+
+    with (
+        patch("openshard.cli.main.run_eval_task", side_effect=side_effects),
+        patch("openshard.cli.main.append_eval_result"),
+        patch("openshard.cli.main._copy_cwd_to_workspace"),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "model-a,model-b"])
+
+    assert "[ranking]" in result.output
+    ranking_section = result.output.split("[ranking]")[-1]
+    assert "cost/pass: -" in ranking_section
+
+
+def test_eval_compare_ranking_shows_cost_when_available(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    side_effects = (
+        [_make_er("model-a", passed=True, cost=0.0031)] * 10
+        + [_make_er("model-b", passed=True, cost=0.0009)] * 10
+    )
+
+    with (
+        patch("openshard.cli.main.run_eval_task", side_effect=side_effects),
+        patch("openshard.cli.main.append_eval_result"),
+        patch("openshard.cli.main._copy_cwd_to_workspace"),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "model-a,model-b"])
+
+    ranking_section = result.output.split("[ranking]")[-1]
+    assert "$" in ranking_section
+
+
+def test_eval_compare_all_failing_models_shows_unavailable_message(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    side_effects = (
+        [_make_er("model-a", passed=False)] * 10
+        + [_make_er("model-b", passed=False)] * 10
+    )
+
+    with (
+        patch("openshard.cli.main.run_eval_task", side_effect=side_effects),
+        patch("openshard.cli.main.append_eval_result"),
+        patch("openshard.cli.main._copy_cwd_to_workspace"),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["eval", "compare", "--suite", "basic", "--models", "model-a,model-b"])
+
+    assert "[ranking]" in result.output
+    ranking_section = result.output.split("[ranking]")[-1]
+    assert "no passing runs" in ranking_section
+    assert "unavailable" in ranking_section
+    assert "1." not in ranking_section  # no numbered entries
