@@ -1,0 +1,4 @@
+Add a docstring to `parse_csv_row(line: str) -> list` in `csv_utils.py`.
+
+The docstring should describe what the function does, its parameter, and its return
+value. Do not change the function's logic. Do not modify any other files.

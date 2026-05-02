@@ -1,0 +1,7 @@
+{
+  "id": "bug_fix",
+  "title": "Fix off-by-one bug in word counter",
+  "category": "standard",
+  "expected_files": ["word_utils.py"],
+  "verification_command": "python -m pytest tests/test_bug_fix.py -q"
+}

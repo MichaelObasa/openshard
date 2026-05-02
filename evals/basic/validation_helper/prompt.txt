@@ -1,0 +1,5 @@
+Add input validation to `parse_age(value)` in `age_utils.py`.
+
+After converting the value to an int, raise `ValueError` if the result is negative
+or greater than 150. Values of 0 and 150 are valid. The existing conversion logic
+must remain unchanged. Do not modify any other files.

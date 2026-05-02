@@ -1,0 +1,4 @@
+Fix the bug in `word_utils.py`. The function `count_words(text)` currently returns 1
+when given an empty string, but it should return 0.
+
+Do not change the behaviour for non-empty strings. Do not modify any other files.
