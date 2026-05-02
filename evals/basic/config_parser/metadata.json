@@ -1,0 +1,7 @@
+{
+  "id": "config_parser",
+  "title": "Implement KEY=VALUE config parser",
+  "category": "standard",
+  "expected_files": ["config_utils.py"],
+  "verification_command": "python -m pytest tests/test_config_parser.py -q"
+}

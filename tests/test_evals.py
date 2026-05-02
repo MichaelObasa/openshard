@@ -16,9 +16,20 @@ from openshard.providers.base import UsageStats
 
 def test_loads_bundled_basic_evals():
     tasks = load_eval_tasks("basic")
-    assert len(tasks) == 3
+    assert len(tasks) == 10
     ids = {t.id for t in tasks}
-    assert ids == {"docs_update", "helper_function", "cli_flag"}
+    assert ids == {
+        "docs_update",
+        "helper_function",
+        "cli_flag",
+        "bug_fix",
+        "config_parser",
+        "validation_helper",
+        "formatting_helper",
+        "unit_test_addition",
+        "add_docstring",
+        "rename_symbol",
+    }
 
 
 def test_validates_required_metadata_fields(tmp_path):
@@ -111,7 +122,7 @@ def test_eval_validate_succeeds_on_bundled_fixtures():
     result = runner.invoke(cli, ["eval", "validate"])
     assert result.exit_code == 0, result.output
     assert "OK" in result.output
-    assert "3" in result.output
+    assert "10" in result.output
 
 
 def test_eval_validate_with_suite_option():
@@ -119,7 +130,7 @@ def test_eval_validate_with_suite_option():
     result = runner.invoke(cli, ["eval", "validate", "--suite", "basic"])
     assert result.exit_code == 0, result.output
     assert "OK" in result.output
-    assert "3" in result.output
+    assert "10" in result.output
     assert "basic" in result.output
 
 
@@ -179,7 +190,7 @@ def test_eval_run_writes_result_record(tmp_path, monkeypatch):
 
     assert log_path.exists(), "eval-runs.jsonl was not created"
     lines = log_path.read_text(encoding="utf-8").strip().splitlines()
-    assert len(lines) == 3  # one per task in basic suite
+    assert len(lines) == 10  # one per task in basic suite
 
     required_keys = {
         "timestamp", "suite", "task_id", "model", "passed",
@@ -466,8 +477,8 @@ def test_eval_compare_writes_results_for_each_model(tmp_path, monkeypatch):
 
     assert log_path.exists()
     lines = log_path.read_text(encoding="utf-8").strip().splitlines()
-    # 2 models × 3 tasks in basic suite = 6 records
-    assert len(lines) == 6
+    # 2 models × 10 tasks in basic suite = 20 records
+    assert len(lines) == 20
     models_seen = {json.loads(line)["model"] for line in lines}
     assert models_seen == {"modelA", "modelB"}
 

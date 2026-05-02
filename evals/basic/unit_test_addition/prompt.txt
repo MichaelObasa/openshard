@@ -1,0 +1,8 @@
+Add at least 3 more test functions to `tests/test_palindrome.py`. The new tests
+should cover edge cases not already tested, such as:
+- an empty string
+- a single character
+- a mixed-case palindrome like "Racecar" (treat case-insensitively or document
+  your assumption clearly)
+
+Do not modify `palindrome.py`. Do not modify any other files.

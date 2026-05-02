@@ -1,0 +1,7 @@
+{
+  "id": "add_docstring",
+  "title": "Add docstring to parse_csv_row",
+  "category": "boilerplate",
+  "expected_files": ["csv_utils.py"],
+  "verification_command": "python verify_docstring.py"
+}

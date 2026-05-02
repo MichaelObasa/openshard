@@ -1,0 +1,9 @@
+Implement `parse_config(text: str) -> dict` in `config_utils.py`.
+
+The function should parse a string of configuration lines in KEY=VALUE format and
+return a dict mapping each key to its string value. Rules:
+- Lines starting with `#` are comments and must be ignored.
+- Blank lines must be ignored.
+- If the same key appears more than once, the last value wins.
+
+Do not modify any other files.

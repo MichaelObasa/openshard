@@ -1,0 +1,5 @@
+Implement `truncate_string(s: str, max_len: int, suffix: str = "...") -> str` in
+`string_utils.py`.
+
+Behaviour: if `len(s) > max_len`, return `s[:max_len] + suffix`. Otherwise return
+`s` unchanged. Include a type annotation. Do not modify any other files.

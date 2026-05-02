@@ -1,0 +1,7 @@
+{
+  "id": "formatting_helper",
+  "title": "Implement truncate_string helper",
+  "category": "standard",
+  "expected_files": ["string_utils.py"],
+  "verification_command": "python -m pytest tests/test_formatting_helper.py -q"
+}

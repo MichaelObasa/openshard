@@ -1,0 +1,7 @@
+{
+  "id": "unit_test_addition",
+  "title": "Add edge case tests for is_palindrome",
+  "category": "standard",
+  "expected_files": ["tests/test_palindrome.py"],
+  "verification_command": "python verify_tests.py"
+}

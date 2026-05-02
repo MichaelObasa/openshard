@@ -1,0 +1,3 @@
+Rename the function `calc` to `calculate_total` in `math_utils.py`. Update the
+import and the call in `main.py` to use the new name. Do not change any other
+logic in either file.

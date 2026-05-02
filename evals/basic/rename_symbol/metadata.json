@@ -1,0 +1,7 @@
+{
+  "id": "rename_symbol",
+  "title": "Rename calc to calculate_total across two files",
+  "category": "standard",
+  "expected_files": ["math_utils.py", "main.py"],
+  "verification_command": "python verify_rename.py"
+}

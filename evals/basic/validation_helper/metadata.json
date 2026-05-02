@@ -1,0 +1,7 @@
+{
+  "id": "validation_helper",
+  "title": "Add input validation to parse_age",
+  "category": "standard",
+  "expected_files": ["age_utils.py"],
+  "verification_command": "python -m pytest tests/test_validation_helper.py -q"
+}
