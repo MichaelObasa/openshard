@@ -1880,6 +1880,27 @@ def eval_compare(suite: str, models: str):
         click.echo(row)
 
     click.echo(f"\nResults appended to {log_path}")
+
+    if len(model_list) > 1:
+        from openshard.evals.stats import rank_models
+        ranking = rank_models(results_by_model)
+        click.echo("\n[ranking]")
+        if all(entry.pass_count == 0 for entry in ranking):
+            click.echo("  no passing runs; cost-per-pass ranking unavailable")
+        else:
+            for entry in ranking:
+                pass_pct = f"{entry.pass_rate:.0%}"
+                cost_str = f"${entry.cost_per_pass:.4f}" if entry.cost_per_pass is not None else "-"
+                tok_str = f"{entry.avg_tokens:,.0f}" if entry.avg_tokens is not None else "-"
+                click.echo(
+                    f"  {entry.rank}. {entry.model:<44}"
+                    f"  pass: {pass_pct:>4}"
+                    f"  cost/pass: {cost_str:<10}"
+                    f"  avg tokens: {tok_str:>7}"
+                    f"  avg dur: {entry.avg_duration:.1f}s"
+                    f"  unsafe: {entry.unsafe_count}"
+                )
+
     if any_failures:
         raise SystemExit(1)
 
