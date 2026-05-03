@@ -113,6 +113,99 @@ def compute_eval_stats(
 
 
 @dataclass
+class CategoryStats:
+    suite: str
+    category: str
+    model: str
+    run_count: int
+    pass_count: int
+    fail_count: int
+    pass_rate: float
+    avg_duration: float
+    avg_total_tokens: float | None
+    cost_per_pass: float | None
+    unsafe_file_count: int
+
+
+def compute_category_stats(
+    records: list[dict],
+    category_maps: dict[str, dict[str, str]],
+    *,
+    suite: str | None = None,
+    model: str | None = None,
+    task: str | None = None,
+) -> list[CategoryStats]:
+    if suite:
+        records = [r for r in records if r.get("suite") == suite]
+    if model:
+        records = [r for r in records if r.get("model") == model]
+    if task:
+        records = [r for r in records if r.get("task_id") == task]
+
+    groups: dict[tuple[str, str, str], list[dict]] = {}
+    for r in records:
+        s = r.get("suite")
+        m = r.get("model")
+        t = r.get("task_id")
+        if not (s and m and t):
+            continue
+        category = category_maps.get(str(s), {}).get(str(t), "unknown")
+        key = (str(s), category, str(m))
+        groups.setdefault(key, []).append(r)
+
+    stats: list[CategoryStats] = []
+    for (sut, cat, mdl), runs in sorted(groups.items(), key=lambda kv: kv[0]):
+        run_count = len(runs)
+        pass_count = sum(1 for r in runs if r.get("passed") is True)
+        fail_count = run_count - pass_count
+        pass_rate = pass_count / run_count if run_count else 0.0
+
+        durations = [
+            r["duration_seconds"]
+            for r in runs
+            if isinstance(r.get("duration_seconds"), (int, float))
+        ]
+        avg_duration = sum(durations) / len(durations) if durations else 0.0
+
+        token_values = [
+            r["total_tokens"]
+            for r in runs
+            if isinstance(r.get("total_tokens"), (int, float))
+        ]
+        avg_total_tokens = sum(token_values) / len(token_values) if token_values else None
+
+        passing = [r for r in runs if r.get("passed") is True]
+        if not passing or any(r.get("cost") is None for r in passing):
+            cost_per_pass = None
+        else:
+            cost_per_pass = sum(r["cost"] for r in passing) / pass_count
+
+        unsafe_file_count = sum(
+            len(r["unsafe_files"])
+            for r in runs
+            if isinstance(r.get("unsafe_files"), list)
+        )
+
+        stats.append(
+            CategoryStats(
+                suite=sut,
+                category=cat,
+                model=mdl,
+                run_count=run_count,
+                pass_count=pass_count,
+                fail_count=fail_count,
+                pass_rate=pass_rate,
+                avg_duration=avg_duration,
+                avg_total_tokens=avg_total_tokens,
+                cost_per_pass=cost_per_pass,
+                unsafe_file_count=unsafe_file_count,
+            )
+        )
+
+    return stats
+
+
+@dataclass
 class ModelRanking:
     rank: int
     model: str
