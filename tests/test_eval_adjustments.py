@@ -8,16 +8,23 @@ from click.testing import CliRunner
 
 from openshard.evals.adjustments import (
     MIN_EVAL_RUNS,
+    MIN_CATEGORY_EVAL_RUNS,
     _ADJ_MAX,
     _ADJ_MIN,
+    _CAT_COST_BONUS,
+    _CAT_PASS_RATE_BONUS,
+    _CAT_PASS_RATE_PENALTY,
+    _CAT_UNSAFE_PENALTY,
     _PASS_RATE_BONUS,
     _PASS_RATE_PENALTY,
     _TOKEN_BONUS,
     _UNSAFE_PENALTY,
+    compute_category_eval_adjustments,
+    compute_category_eval_adjustment_reasons,
     compute_eval_adjustments,
     compute_eval_adjustment_reasons,
 )
-from openshard.evals.stats import EvalStats
+from openshard.evals.stats import CategoryStats, EvalStats
 
 
 def _stat(
@@ -310,3 +317,141 @@ class TestEvalScoringCLI(unittest.TestCase):
             result = runner.invoke(cli, ["run", "--more", "--dry-run", "hello"])
 
         self.assertIn("eval scoring: enabled", result.output)
+
+
+def _cat_stat(
+    model: str = "m/a",
+    suite: str = "basic",
+    category: str = "standard",
+    run_count: int = 2,
+    pass_count: int = 2,
+    unsafe_file_count: int = 0,
+    cost_per_pass: float | None = None,
+    avg_total_tokens: float | None = None,
+) -> CategoryStats:
+    fail_count = run_count - pass_count
+    pass_rate = pass_count / run_count if run_count else 0.0
+    return CategoryStats(
+        suite=suite,
+        category=category,
+        model=model,
+        run_count=run_count,
+        pass_count=pass_count,
+        fail_count=fail_count,
+        pass_rate=pass_rate,
+        avg_duration=1.0,
+        avg_total_tokens=avg_total_tokens,
+        cost_per_pass=cost_per_pass,
+        unsafe_file_count=unsafe_file_count,
+    )
+
+
+class TestComputeCategoryEvalAdjustments(unittest.TestCase):
+
+    def test_empty_returns_empty(self):
+        self.assertEqual(compute_category_eval_adjustments([], "standard"), {})
+
+    def test_wrong_category_excluded(self):
+        s = _cat_stat(category="boilerplate", run_count=3, pass_count=3)
+        adj = compute_category_eval_adjustments([s], "security")
+        self.assertNotIn("m/a", adj)
+
+    def test_high_pass_rate_gives_bonus(self):
+        s = _cat_stat(category="security", run_count=2, pass_count=2)
+        adj = compute_category_eval_adjustments([s], "security")
+        self.assertAlmostEqual(adj["m/a"], _CAT_PASS_RATE_BONUS)
+
+    def test_low_pass_rate_gives_penalty(self):
+        s = _cat_stat(category="security", run_count=4, pass_count=1)
+        adj = compute_category_eval_adjustments([s], "security")
+        self.assertAlmostEqual(adj["m/a"], _CAT_PASS_RATE_PENALTY)
+
+    def test_mid_pass_rate_no_adjustment(self):
+        # pass_rate = 0.67: neither >= 0.80 nor < 0.50
+        s = _cat_stat(category="standard", run_count=3, pass_count=2)
+        adj = compute_category_eval_adjustments([s], "standard")
+        self.assertNotIn("m/a", adj)
+
+    def test_unsafe_penalty_alone(self):
+        s = _cat_stat(category="standard", run_count=3, pass_count=2, unsafe_file_count=1)
+        adj = compute_category_eval_adjustments([s], "standard")
+        self.assertAlmostEqual(adj["m/a"], _CAT_UNSAFE_PENALTY)
+
+    def test_cost_bonus_with_strong_pass_rate_and_low_cost(self):
+        s = _cat_stat(
+            category="standard", run_count=2, pass_count=2,
+            cost_per_pass=0.0005,
+        )
+        adj = compute_category_eval_adjustments([s], "standard")
+        self.assertAlmostEqual(adj["m/a"], _CAT_PASS_RATE_BONUS + _CAT_COST_BONUS)
+
+    def test_cost_bonus_suppressed_when_cost_above_threshold(self):
+        s = _cat_stat(
+            category="standard", run_count=2, pass_count=2,
+            cost_per_pass=0.005,
+        )
+        adj = compute_category_eval_adjustments([s], "standard")
+        self.assertAlmostEqual(adj["m/a"], _CAT_PASS_RATE_BONUS)
+
+    def test_cost_bonus_suppressed_when_pass_rate_weak(self):
+        s = _cat_stat(
+            category="standard", run_count=4, pass_count=1,
+            cost_per_pass=0.0001,
+        )
+        adj = compute_category_eval_adjustments([s], "standard")
+        self.assertAlmostEqual(adj["m/a"], _CAT_PASS_RATE_PENALTY)
+
+    def test_cost_bonus_suppressed_when_cost_per_pass_none(self):
+        s = _cat_stat(category="standard", run_count=2, pass_count=2, cost_per_pass=None)
+        adj = compute_category_eval_adjustments([s], "standard")
+        self.assertAlmostEqual(adj["m/a"], _CAT_PASS_RATE_BONUS)
+
+    def test_below_min_runs_excluded(self):
+        s = _cat_stat(category="standard", run_count=MIN_CATEGORY_EVAL_RUNS - 1, pass_count=1)
+        adj = compute_category_eval_adjustments([s], "standard")
+        self.assertNotIn("m/a", adj)
+
+    def test_multiple_models_independent(self):
+        good = _cat_stat(model="m/good", category="complex", run_count=2, pass_count=2)
+        bad = _cat_stat(model="m/bad", category="complex", run_count=4, pass_count=1)
+        adj = compute_category_eval_adjustments([good, bad], "complex")
+        self.assertAlmostEqual(adj["m/good"], _CAT_PASS_RATE_BONUS)
+        self.assertAlmostEqual(adj["m/bad"], _CAT_PASS_RATE_PENALTY)
+
+    def test_only_nonzero_returned(self):
+        s = _cat_stat(category="standard", run_count=3, pass_count=2)
+        adj = compute_category_eval_adjustments([s], "standard")
+        self.assertNotIn("m/a", adj)
+
+
+class TestComputeCategoryEvalAdjustmentReasons(unittest.TestCase):
+
+    def test_high_pass_rate_reason(self):
+        s = _cat_stat(category="security", run_count=2, pass_count=2)
+        reasons = compute_category_eval_adjustment_reasons([s], "security")
+        self.assertIn("high category pass rate", reasons["m/a"])
+
+    def test_low_pass_rate_reason(self):
+        s = _cat_stat(category="security", run_count=4, pass_count=1)
+        reasons = compute_category_eval_adjustment_reasons([s], "security")
+        self.assertIn("low category pass rate", reasons["m/a"])
+
+    def test_unsafe_reason(self):
+        s = _cat_stat(category="standard", run_count=3, pass_count=2, unsafe_file_count=1)
+        reasons = compute_category_eval_adjustment_reasons([s], "standard")
+        self.assertIn("unsafe files in evals", reasons["m/a"])
+
+    def test_cost_bonus_reason(self):
+        s = _cat_stat(category="standard", run_count=2, pass_count=2, cost_per_pass=0.0005)
+        reasons = compute_category_eval_adjustment_reasons([s], "standard")
+        self.assertIn("low cost per pass", reasons["m/a"])
+
+    def test_wrong_category_excluded(self):
+        s = _cat_stat(category="boilerplate")
+        reasons = compute_category_eval_adjustment_reasons([s], "security")
+        self.assertNotIn("m/a", reasons)
+
+    def test_below_min_runs_no_reason(self):
+        s = _cat_stat(category="standard", run_count=MIN_CATEGORY_EVAL_RUNS - 1, pass_count=1)
+        reasons = compute_category_eval_adjustment_reasons([s], "standard")
+        self.assertNotIn("m/a", reasons)

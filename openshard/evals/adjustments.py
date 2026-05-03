@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openshard.evals.stats import EvalStats
+from openshard.evals.stats import CategoryStats, EvalStats
 
 MIN_EVAL_RUNS = 3
 
@@ -92,5 +92,90 @@ def compute_eval_adjustment_reasons(stats: list[EvalStats]) -> dict[str, str]:
 
         if parts:
             reasons[model] = "; ".join(parts)
+
+    return reasons
+
+
+MIN_CATEGORY_EVAL_RUNS = 2
+
+_CAT_PASS_RATE_BONUS = 0.3
+_CAT_PASS_RATE_PENALTY = -0.3
+_CAT_UNSAFE_PENALTY = -0.2
+_CAT_COST_BONUS = 0.1
+_CAT_COST_BONUS_THRESHOLD = 0.001
+
+
+def compute_category_eval_adjustments(
+    category_stats: list[CategoryStats],
+    category: str,
+) -> dict[str, float]:
+    """Return per-model score overlays using category-filtered eval evidence.
+
+    Only applied when --eval-scoring is enabled. Falls back to no adjustment
+    when fewer than MIN_CATEGORY_EVAL_RUNS runs exist for the category.
+    """
+    adjustments: dict[str, float] = {}
+    for s in category_stats:
+        if s.category != category:
+            continue
+        if s.run_count < MIN_CATEGORY_EVAL_RUNS:
+            continue
+
+        adj = 0.0
+
+        if s.pass_rate >= _PASS_RATE_BONUS_THRESHOLD:
+            adj += _CAT_PASS_RATE_BONUS
+        elif s.pass_rate < _PASS_RATE_PENALTY_THRESHOLD:
+            adj += _CAT_PASS_RATE_PENALTY
+
+        if s.unsafe_file_count > 0:
+            adj += _CAT_UNSAFE_PENALTY
+
+        if (
+            s.pass_rate >= _PASS_RATE_BONUS_THRESHOLD
+            and s.cost_per_pass is not None
+            and s.cost_per_pass <= _CAT_COST_BONUS_THRESHOLD
+        ):
+            adj += _CAT_COST_BONUS
+
+        adj = max(_ADJ_MIN, min(_ADJ_MAX, adj))
+        if adj != 0.0:
+            adjustments[s.model] = adjustments.get(s.model, 0.0) + adj
+
+    return adjustments
+
+
+def compute_category_eval_adjustment_reasons(
+    category_stats: list[CategoryStats],
+    category: str,
+) -> dict[str, str]:
+    """Return human-readable reasons for category-specific eval adjustments."""
+    reasons: dict[str, str] = {}
+    for s in category_stats:
+        if s.category != category:
+            continue
+        if s.run_count < MIN_CATEGORY_EVAL_RUNS:
+            continue
+
+        parts: list[str] = []
+
+        if s.pass_rate >= _PASS_RATE_BONUS_THRESHOLD:
+            parts.append("high category pass rate")
+        elif s.pass_rate < _PASS_RATE_PENALTY_THRESHOLD:
+            parts.append("low category pass rate")
+
+        if s.unsafe_file_count > 0:
+            parts.append("unsafe files in evals")
+
+        if (
+            s.pass_rate >= _PASS_RATE_BONUS_THRESHOLD
+            and s.cost_per_pass is not None
+            and s.cost_per_pass <= _CAT_COST_BONUS_THRESHOLD
+        ):
+            parts.append("low cost per pass")
+
+        if parts:
+            existing = reasons.get(s.model)
+            reasons[s.model] = existing + "; " + "; ".join(parts) if existing else "; ".join(parts)
 
     return reasons
