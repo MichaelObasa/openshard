@@ -282,6 +282,9 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                     _runs = []
             _eval_adjustments: dict[str, float] = {}
             _eval_reasons: dict[str, str] = {}
+            _cat_adjustments: dict[str, float] = {}
+            _cat_reasons: dict[str, str] = {}
+            _eval_records: list[dict] = []
             if _use_eval_scoring:
                 try:
                     from openshard.evals.stats import EVAL_RUNS_PATH, compute_eval_stats, load_eval_runs
@@ -292,11 +295,41 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                     _eval_reasons = compute_eval_adjustment_reasons(_eval_stats_data)
                 except Exception:
                     pass
+                if routing_decision and routing_decision.category and _eval_records:
+                    try:
+                        from openshard.evals.registry import build_category_map
+                        from openshard.evals.stats import compute_category_stats
+                        from openshard.evals.adjustments import (
+                            compute_category_eval_adjustments,
+                            compute_category_eval_adjustment_reasons,
+                        )
+                        _suites = {r.get("suite") for r in _eval_records if r.get("suite")}
+                        _cat_maps: dict[str, dict[str, str]] = {}
+                        for _s in _suites:
+                            try:
+                                _cat_maps[str(_s)] = build_category_map(str(_s))
+                            except Exception:
+                                pass
+                        if _cat_maps:
+                            _cat_stats = compute_category_stats(_eval_records, _cat_maps)
+                            _cat_adjustments = compute_category_eval_adjustments(
+                                _cat_stats, routing_decision.category
+                            )
+                            _cat_reasons = compute_category_eval_adjustment_reasons(
+                                _cat_stats, routing_decision.category
+                            )
+                    except Exception:
+                        pass
             _merged_adjustments: dict[str, float] | None = None
-            if _hist_adjustments is not None or _eval_adjustments:
+            if _hist_adjustments is not None or _eval_adjustments or _cat_adjustments:
                 _merged_adjustments = dict(_hist_adjustments or {})
-                for _em, _ea in _eval_adjustments.items():
-                    _merged_adjustments[_em] = _merged_adjustments.get(_em, 0.0) + _ea
+                _all_eval_models = set(_eval_adjustments) | set(_cat_adjustments)
+                for _em in _all_eval_models:
+                    _combined = _eval_adjustments.get(_em, 0.0) + _cat_adjustments.get(_em, 0.0)
+                    from openshard.evals.adjustments import _ADJ_MIN, _ADJ_MAX
+                    _combined = max(_ADJ_MIN, min(_ADJ_MAX, _combined))
+                    if _combined != 0.0:
+                        _merged_adjustments[_em] = _merged_adjustments.get(_em, 0.0) + _combined
             _scored = select_with_info(_entries, _reqs, routing_decision.category, history_adjustments=_merged_adjustments)
             if (
                 _scored.selected_model is not None
@@ -422,6 +455,20 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
                 click.echo(f"  [routing] eval: {_model_label(_em)}: {_ea:+.1f}{_rsn_str}{_marker}")
             if not _eval_nonzero:
                 click.echo("  [routing] eval: no relevant stats (no adjustment)")
+            _cat_label = routing_decision.category if routing_decision else "?"
+            _cat_nonzero = [
+                (m, adj)
+                for m, adj in _cat_adjustments.items()
+                if m in set(_scored.candidates) and adj != 0.0
+            ]
+            if _cat_nonzero:
+                for _cm, _ca in _cat_nonzero:
+                    _rsn = _cat_reasons.get(_cm, "")
+                    _rsn_str = f" ({_rsn})" if _rsn else ""
+                    _marker = " <- selected" if _cm == _scored.selected_model else ""
+                    click.echo(f"  [routing] eval [{_cat_label}]: {_model_label(_cm)}: {_ca:+.1f}{_rsn_str}{_marker}")
+            else:
+                click.echo(f"  [routing] eval [{_cat_label}]: no category evidence (global only)")
 
     _matched_skills: list[MatchedSkill] = []
     if _repo_facts is not None and routing_decision is not None:
