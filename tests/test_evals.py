@@ -6,9 +6,9 @@ import pytest
 
 from click.testing import CliRunner
 
-from openshard.evals.registry import EvalTask, load_eval_tasks, validate_eval_task
+from openshard.evals.registry import EvalTask, build_category_map, load_eval_tasks, validate_eval_task
 from openshard.evals.runner import EvalResult, run_eval_task
-from openshard.evals.stats import compute_eval_stats, load_eval_runs, rank_models
+from openshard.evals.stats import compute_category_stats, compute_eval_stats, load_eval_runs, rank_models
 from openshard.cli.main import cli
 from openshard.execution.generator import ChangedFile, ExecutionResult
 from openshard.providers.base import UsageStats
@@ -1034,3 +1034,225 @@ def test_eval_compare_all_failing_models_shows_unavailable_message(tmp_path, mon
     assert "no passing runs" in ranking_section
     assert "unavailable" in ranking_section
     assert "1." not in ranking_section  # no numbered entries
+
+
+# ---------------------------------------------------------------------------
+# category-aware stats — unit tests for build_category_map and compute_category_stats
+# ---------------------------------------------------------------------------
+
+
+
+def _crec(
+    task_id: str = "t1",
+    model: str = "m1",
+    suite: str = "basic",
+    passed: bool = True,
+    duration: float = 1.0,
+    tokens: int = 100,
+    cost: float | None = None,
+    unsafe: list[str] | None = None,
+) -> dict:
+    return {
+        "timestamp": "2026-01-01T00:00:00Z",
+        "suite": suite,
+        "task_id": task_id,
+        "model": model,
+        "passed": passed,
+        "duration_seconds": duration,
+        "total_tokens": tokens,
+        "cost": cost,
+        "unsafe_files": unsafe or [],
+        "error": None,
+        "verification_attempted": True,
+        "verification_passed": passed,
+        "verification_returncode": 0 if passed else 1,
+        "verification_output": "",
+        "files_written": [],
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+    }
+
+
+def test_build_category_map_basic():
+    cmap = build_category_map("basic")
+    assert cmap["add_docstring"] == "boilerplate"
+    assert cmap["docs_update"] == "boilerplate"
+    assert cmap["bug_fix"] == "standard"
+    assert cmap["cli_flag"] == "standard"
+    assert len(cmap) == 10
+
+
+def test_build_category_map_unknown_suite():
+    import pytest
+    with pytest.raises(FileNotFoundError):
+        build_category_map("nonexistent_suite_xyz")
+
+
+def test_compute_category_stats_grouping():
+    cmap = {"s1": {"t1": "catA", "t2": "catB"}}
+    records = [
+        _crec(task_id="t1", model="m1", suite="s1", passed=True),
+        _crec(task_id="t1", model="m1", suite="s1", passed=False),
+        _crec(task_id="t2", model="m1", suite="s1", passed=True),
+        _crec(task_id="t1", model="m2", suite="s1", passed=True),
+    ]
+    rows = compute_category_stats(records, cmap)
+    assert len(rows) == 3
+    by_key = {(r.category, r.model): r for r in rows}
+    assert by_key[("catA", "m1")].run_count == 2
+    assert by_key[("catA", "m1")].pass_count == 1
+    assert by_key[("catA", "m2")].run_count == 1
+    assert by_key[("catB", "m1")].run_count == 1
+
+
+def test_compute_category_stats_unknown_task_uses_unknown():
+    cmap = {"s1": {"t1": "catA"}}
+    records = [_crec(task_id="deleted_task", model="m1", suite="s1")]
+    rows = compute_category_stats(records, cmap)
+    assert len(rows) == 1
+    assert rows[0].category == "unknown"
+
+
+def test_compute_category_stats_unknown_suite_uses_unknown():
+    cmap = {}  # no mapping for suite "s2"
+    records = [_crec(task_id="t1", model="m1", suite="s2")]
+    rows = compute_category_stats(records, cmap)
+    assert len(rows) == 1
+    assert rows[0].category == "unknown"
+
+
+def test_compute_category_stats_cost_per_pass_none_when_any_pass_missing_cost():
+    cmap = {"s1": {"t1": "catA"}}
+    records = [
+        _crec(task_id="t1", model="m1", suite="s1", passed=True, cost=0.005),
+        _crec(task_id="t1", model="m1", suite="s1", passed=True, cost=None),
+    ]
+    rows = compute_category_stats(records, cmap)
+    assert rows[0].cost_per_pass is None
+
+
+def test_compute_category_stats_cost_per_pass_computed_correctly():
+    cmap = {"s1": {"t1": "catA"}}
+    records = [
+        _crec(task_id="t1", model="m1", suite="s1", passed=True, cost=0.004),
+        _crec(task_id="t1", model="m1", suite="s1", passed=True, cost=0.006),
+        _crec(task_id="t1", model="m1", suite="s1", passed=False, cost=0.001),
+    ]
+    rows = compute_category_stats(records, cmap)
+    import pytest
+    assert rows[0].cost_per_pass == pytest.approx(0.005)
+
+
+def test_compute_category_stats_cost_per_pass_none_when_no_passes():
+    cmap = {"s1": {"t1": "catA"}}
+    records = [_crec(task_id="t1", model="m1", suite="s1", passed=False, cost=0.001)]
+    rows = compute_category_stats(records, cmap)
+    assert rows[0].cost_per_pass is None
+
+
+def test_compute_category_stats_suite_filter():
+    cmap = {"a": {"t1": "catA"}, "b": {"t1": "catA"}}
+    records = [_crec(suite="a"), _crec(suite="b")]
+    rows = compute_category_stats(records, cmap, suite="a")
+    assert all(r.suite == "a" for r in rows)
+    assert len(rows) == 1
+
+
+def test_compute_category_stats_model_filter():
+    cmap = {"s1": {"t1": "catA"}}
+    records = [_crec(model="m1"), _crec(model="m2")]
+    rows = compute_category_stats(records, cmap, model="m1")
+    assert all(r.model == "m1" for r in rows)
+    assert len(rows) == 1
+
+
+def test_compute_category_stats_task_filter():
+    cmap = {"s1": {"t1": "catA", "t2": "catB"}}
+    records = [
+        _crec(task_id="t1", suite="s1"),
+        _crec(task_id="t2", suite="s1"),
+    ]
+    rows = compute_category_stats(records, cmap, task="t1")
+    assert len(rows) == 1
+    assert rows[0].category == "catA"
+
+
+# ---------------------------------------------------------------------------
+# category-aware stats — CLI tests
+# ---------------------------------------------------------------------------
+
+def test_eval_stats_by_category_no_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "stats", "--by-category"])
+    assert result.exit_code == 0, result.output
+    assert "No eval results found" in result.output
+
+
+def test_eval_stats_by_category_output(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [
+        _crec(task_id="bug_fix", model="m1", suite="basic", passed=True),
+        _crec(task_id="add_docstring", model="m1", suite="basic", passed=True),
+    ])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "stats", "--by-category"])
+    assert result.exit_code == 0, result.output
+    assert "category" in result.output
+    assert "standard" in result.output
+    assert "boilerplate" in result.output
+    assert "[eval stats --by-category]" in result.output
+
+
+def test_eval_stats_by_category_cost_dash_when_missing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [
+        _crec(task_id="bug_fix", model="m1", suite="basic", passed=True, cost=None),
+    ])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "stats", "--by-category"])
+    assert result.exit_code == 0, result.output
+    assert "$0.0000" not in result.output
+    assert "cost/pass" in result.output
+
+
+def test_eval_stats_by_category_suite_filter(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [
+        _crec(task_id="bug_fix", model="m1", suite="basic", passed=True),
+        _crec(task_id="t1", model="m1", suite="other", passed=True),
+    ])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "stats", "--by-category", "--suite", "basic"])
+    assert result.exit_code == 0, result.output
+    assert "basic" in result.output
+    assert "other" not in result.output
+
+
+def test_eval_stats_by_category_task_filter(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [
+        _crec(task_id="bug_fix", model="m1", suite="basic"),
+        _crec(task_id="cli_flag", model="m1", suite="basic"),
+    ])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "stats", "--by-category", "--task", "bug_fix"])
+    assert result.exit_code == 0, result.output
+    assert "standard" in result.output
+    assert "total: 1 runs" in result.output
+
+
+def test_eval_stats_normal_unchanged_by_category_flag(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    log = tmp_path / ".openshard" / "eval-runs.jsonl"
+    _write_jsonl(log, [_rec(task_id="t1", model="m1", suite="basic")])
+    runner = CliRunner()
+    result = runner.invoke(cli, ["eval", "stats"])
+    assert result.exit_code == 0, result.output
+    assert "[eval stats]" in result.output
+    assert "task_id" in result.output
+    assert "category" not in result.output

@@ -60,3 +60,8 @@ def load_eval_tasks(suite: str = "basic") -> list[EvalTask]:
         for task_dir in sorted(suite_dir.iterdir())
         if task_dir.is_dir()
     ]
+
+
+def build_category_map(suite: str = "basic") -> dict[str, str]:
+    """Return {task_id: category} for all tasks in suite."""
+    return {task.id: task.category for task in load_eval_tasks(suite)}
