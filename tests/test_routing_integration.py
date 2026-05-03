@@ -67,12 +67,11 @@ def _make_manager_mock(entries: list[InventoryEntry], provider_names: list[str])
 class TestScoredRoutingIntegration(unittest.TestCase):
 
     def _run(self, args: list[str], manager_mock, generator_mock):
-        with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
-             patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
-             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager_mock), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
-             patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
-             patch("openshard.cli.main._log_run"):
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.run.pipeline._log_run"):
             runner = CliRunner()
             result = runner.invoke(cli, ["run"] + args)
         return result
@@ -140,11 +139,10 @@ class TestScoredRoutingIntegration(unittest.TestCase):
         manager = _make_manager_mock([entry], ["openrouter"])
         generator = _make_generator_mock()
 
-        with patch("openshard.cli.main.ProviderManager", return_value=manager), \
-             patch("openshard.cli.main.ExecutionGenerator", return_value=generator), \
-             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator), \
              patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
-             patch("openshard.cli.main._log_run") as mock_log:
+             patch("openshard.run.pipeline._log_run") as mock_log:
             runner = CliRunner()
             runner.invoke(cli, ["run", task])
 
@@ -161,12 +159,11 @@ class TestRoutingDisplayConsistency(unittest.TestCase):
     """Verify that the early [routing] line in --more output matches the final selected model."""
 
     def _run(self, args: list[str], manager_mock, generator_mock):
-        with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
-             patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
-             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager_mock), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
-             patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
-             patch("openshard.cli.main._log_run"):
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.run.pipeline._log_run"):
             runner = CliRunner()
             result = runner.invoke(cli, ["run"] + args)
         return result
@@ -238,13 +235,12 @@ class TestApprovalFlag(unittest.TestCase):
     def _run_with_write(self, args: list[str], generator_mock, approval_mode="smart",
                         repo=None, config_override=None):
         config = config_override if config_override is not None else {"approval_mode": approval_mode}
-        with patch("openshard.cli.main.ProviderManager"), \
-             patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
-             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+        with patch("openshard.run.pipeline.ProviderManager"), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.load_config", return_value=config), \
-             patch("openshard.cli.main.analyze_repo", return_value=repo or _PYTHON_REPO), \
-             patch("openshard.cli.main._log_run"), \
-             patch("openshard.cli.main._write_files"):
+             patch("openshard.run.pipeline.analyze_repo", return_value=repo or _PYTHON_REPO), \
+             patch("openshard.run.pipeline._log_run"), \
+             patch("openshard.run.pipeline._write_files"):
             runner = CliRunner()
             result = runner.invoke(cli, ["run"] + args, input="n\n")
         return result
@@ -321,15 +317,14 @@ class TestHistoryScoringDisplay(unittest.TestCase):
              adjustments=None, reasons=None):
         adjustments = adjustments or {}
         reasons = reasons or {}
-        with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
-             patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
-             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager_mock), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
-             patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
-             patch("openshard.cli.main._log_run"), \
-             patch("openshard.cli.main.load_runs", return_value=[]), \
-             patch("openshard.cli.main.compute_history_adjustments", return_value=adjustments), \
-             patch("openshard.cli.main.compute_history_adjustment_reasons", return_value=reasons):
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.run.pipeline._log_run"), \
+             patch("openshard.run.pipeline.load_runs", return_value=[]), \
+             patch("openshard.run.pipeline.compute_history_adjustments", return_value=adjustments), \
+             patch("openshard.run.pipeline.compute_history_adjustment_reasons", return_value=reasons):
             runner = CliRunner()
             result = runner.invoke(cli, ["run"] + args)
         return result
@@ -394,12 +389,11 @@ class TestExecutionProfileDisplay(unittest.TestCase):
     def _run(self, args: list[str]):
         manager = _make_manager_mock([], ["openrouter"])
         generator = _make_generator_mock()
-        with patch("openshard.cli.main.ProviderManager", return_value=manager), \
-             patch("openshard.cli.main.ExecutionGenerator", return_value=generator), \
-             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator), \
              patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
-             patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
-             patch("openshard.cli.main._log_run"):
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.run.pipeline._log_run"):
             runner = CliRunner()
             result = runner.invoke(cli, ["run"] + args)
         return result
@@ -441,13 +435,12 @@ class TestHistoryScoringProfileSelection(unittest.TestCase):
     def _run(self, args: list[str], runs: list[dict] | None = None):
         manager = _make_manager_mock([], ["openrouter"])
         generator = _make_generator_mock()
-        with patch("openshard.cli.main.ProviderManager", return_value=manager), \
-             patch("openshard.cli.main.ExecutionGenerator", return_value=generator), \
-             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator), \
              patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
-             patch("openshard.cli.main.analyze_repo", return_value=_PYTHON_REPO), \
-             patch("openshard.cli.main._log_run"), \
-             patch("openshard.cli.main.load_runs", return_value=runs or []):
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.run.pipeline._log_run"), \
+             patch("openshard.run.pipeline.load_runs", return_value=runs or []):
             runner = CliRunner()
             result = runner.invoke(cli, ["run"] + args)
         return result
@@ -490,12 +483,11 @@ class TestVerificationPlanDisplay(unittest.TestCase):
         generator_mock = _make_generator_mock()
         cfg = config if config is not None else _DEFAULT_CONFIG
         facts = repo_facts if repo_facts is not None else _PYTHON_REPO
-        with patch("openshard.cli.main.ProviderManager", return_value=manager_mock), \
-             patch("openshard.cli.main.ExecutionGenerator", return_value=generator_mock), \
-             patch("openshard.cli.main.get_api_key", return_value="test-key"), \
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager_mock), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator_mock), \
              patch("openshard.cli.main.load_config", return_value=cfg), \
-             patch("openshard.cli.main.analyze_repo", return_value=facts), \
-             patch("openshard.cli.main._log_run"):
+             patch("openshard.run.pipeline.analyze_repo", return_value=facts), \
+             patch("openshard.run.pipeline._log_run"):
             runner = CliRunner()
             result = runner.invoke(cli, ["run"] + args)
         return result

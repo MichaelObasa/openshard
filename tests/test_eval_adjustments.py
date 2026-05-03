@@ -311,9 +311,9 @@ class TestEvalScoringCLI(unittest.TestCase):
 
         runner = CliRunner()
         with patch("openshard.cli.main.load_config", return_value={"approval_mode": "smart", "eval_scoring": True}), \
-             patch("openshard.cli.main.ExecutionGenerator", return_value=mock_gen), \
-             patch("openshard.cli.main.ProviderManager"), \
-             patch("openshard.cli.main.analyze_repo", return_value=None):
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=mock_gen), \
+             patch("openshard.run.pipeline.ProviderManager"), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=None):
             result = runner.invoke(cli, ["run", "--more", "--dry-run", "hello"])
 
         self.assertIn("eval scoring: enabled", result.output)
