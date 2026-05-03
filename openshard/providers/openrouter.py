@@ -11,6 +11,7 @@ from openshard.providers.base import (
 
 # Re-export shared data types so existing imports from this module keep working.
 from openshard.providers.base import ChatResponse, ModelInfo, UsageStats
+from openshard.providers.cache import load_cache
 
 __all__ = [
     "OpenRouterClient",
@@ -78,15 +79,34 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
 }
 
 
+def _cost_from_cache(
+    model: str, prompt_tokens: int, completion_tokens: int
+) -> float | None:
+    """Return cost using per-token pricing from the local OpenRouter model cache."""
+    cache = load_cache()
+    if not cache:
+        return None
+    for entry in cache.get("models", {}).get("openrouter", []):
+        if entry.get("id") == model:
+            pricing = entry.get("pricing") or {}
+            try:
+                p = float(pricing["prompt"])
+                c = float(pricing["completion"])
+            except (KeyError, TypeError, ValueError):
+                return None
+            return prompt_tokens * p + completion_tokens * c
+    return None
+
+
 def compute_cost(
     model: str, prompt_tokens: int, completion_tokens: int
 ) -> float | None:
     """Return estimated cost in USD from token counts, or None if model unknown."""
     pricing = MODEL_PRICING.get(model)
-    if pricing is None:
-        return None
-    p_per_m, c_per_m = pricing
-    return (prompt_tokens * p_per_m + completion_tokens * c_per_m) / 1_000_000
+    if pricing is not None:
+        p_per_m, c_per_m = pricing
+        return (prompt_tokens * p_per_m + completion_tokens * c_per_m) / 1_000_000
+    return _cost_from_cache(model, prompt_tokens, completion_tokens)
 
 
 # ---------------------------------------------------------------------------
