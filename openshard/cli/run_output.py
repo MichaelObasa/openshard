@@ -1,0 +1,302 @@
+import re
+import sys
+import threading
+import time
+
+import click
+
+from openshard.analysis.repo import RepoFacts
+from openshard.execution.generator import ChangedFile, ExecutionGenerator
+from openshard.execution.stages import StageRun
+from openshard.routing.engine import MODEL_STRONG, RoutingDecision
+
+
+class _Spinner:
+    """Animated progress line: looping dots + elapsed time, updates in place."""
+
+    _DOTS = [".", "..", "..."]
+
+    def __init__(self) -> None:
+        self.phase: str = ""
+        self._t0: float = 0.0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self, phase: str) -> None:
+        self.phase = phase
+        self._t0 = time.time()
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        if self._thread is None:
+            return
+        self._stop.set()
+        self._thread.join()
+        self._thread = None
+        sys.stdout.write("\r" + " " * 82 + "\r")
+        sys.stdout.flush()
+
+    def _run(self) -> None:
+        i = 0
+        while not self._stop.wait(0.4):
+            elapsed = time.time() - self._t0
+            dots = self._DOTS[i % len(self._DOTS)]
+            line = f"  {self.phase}{dots}   {elapsed:.1f}s"
+            sys.stdout.write(f"\r{line:<82}")
+            sys.stdout.flush()
+            i += 1
+
+
+def _print_summary(
+    start: float,
+    generator: ExecutionGenerator,
+    retry_triggered: bool,
+    files: list[ChangedFile],
+    usage=None,
+    retry_usage=None,
+    detail: str = "default",
+    model: str | None = None,
+    stage_runs: list[StageRun] | None = None,
+) -> None:
+    elapsed = time.time() - start
+    cost_str = (
+        f"${usage.estimated_cost:.4f}"
+        if usage is not None and usage.estimated_cost is not None
+        else "-"
+    )
+
+    if detail == "default":
+        click.echo(f"\nTime: {elapsed:.1f}s   Cost: {cost_str}")
+        return
+
+    # more and full
+    if retry_triggered:
+        click.echo(f"Fixer model: {_model_label(generator.fixer_model)}")
+        click.echo("Retried: yes")
+    if usage is not None:
+        click.echo(
+            f"Tokens: {usage.prompt_tokens} prompt / "
+            f"{usage.completion_tokens} completion / "
+            f"{usage.total_tokens} total"
+        )
+    if detail == "full":
+        created = sum(1 for f in files if f.change_type == "create")
+        updated = sum(1 for f in files if f.change_type == "update")
+        deleted = sum(1 for f in files if f.change_type == "delete")
+        click.echo(f"Files: {created} created / {updated} updated / {deleted} deleted")
+        if retry_triggered and retry_usage is not None:
+            retry_cost_str = (
+                f"${retry_usage.estimated_cost:.4f}"
+                if retry_usage.estimated_cost is not None else "-"
+            )
+            click.echo(
+                f"Retry tokens: {retry_usage.prompt_tokens} prompt / "
+                f"{retry_usage.completion_tokens} completion / "
+                f"{retry_usage.total_tokens} total"
+            )
+            click.echo(f"Retry cost: {retry_cost_str}")
+    click.echo(f"\nTime: {elapsed:.1f}s   Cost: {cost_str}")
+
+
+def _render_repo_summary(facts: RepoFacts) -> None:
+    click.echo("\nRepo")
+    if facts.languages:
+        click.echo(f"  Languages: {', '.join(facts.languages)}")
+    if facts.package_files:
+        click.echo(f"  Packages: {', '.join(facts.package_files)}")
+    if facts.framework:
+        click.echo(f"  Framework: {facts.framework}")
+    if facts.test_command:
+        click.echo(f"  Tests: {facts.test_command}")
+    if facts.risky_paths:
+        n = len(facts.risky_paths)
+        sample = ", ".join(facts.risky_paths[:3])
+        suffix = f" + {n - 3} more" if n > 3 else ""
+        click.echo(f"  Risky: {n} paths  ({sample}{suffix})")
+    if facts.changed_files:
+        n = len(facts.changed_files)
+        sample = ", ".join(facts.changed_files[:3])
+        suffix = f" + {n - 3} more" if n > 3 else ""
+        click.echo(f"  Changed: {n} files  ({sample}{suffix})")
+
+
+_MODEL_SHORT: dict[str, str] = {
+    "deepseek/deepseek-v4-flash":      "DeepSeek V4 Flash",
+    "deepseek/deepseek-v4-pro":        "DeepSeek V4 Pro",
+    "z-ai/glm-5.1":                    "GLM-5.1",
+    "anthropic/claude-sonnet-4.6":     "Sonnet 4.6",
+    "anthropic/claude-opus-4.7":       "Opus 4.7",
+    "moonshotai/kimi-k2.5":            "Kimi K2.5",
+    "minimax/m2.7":                    "MiniMax M2.7",
+}
+
+_RATIONALE_SHORT: dict[str, str] = {
+    "security-sensitive code requires careful reasoning": "security-sensitive",
+    "UI or visual task routed to multimodal specialist":  "UI / visual",
+    "multi-file or long-horizon task":                    "complex task",
+    "low-risk boilerplate task":                          "boilerplate",
+    "standard feature implementation":                    "standard coding",
+}
+
+_ABBREV_WORDS = {"gpt", "llm", "ai", "api", "url", "id", "ui", "ml"}
+
+
+def _format_model_slug(raw: str) -> str:
+    """Format an unknown model ID into a readable label.
+
+    gpt-5.4-nano  -> GPT-5.4 Nano
+    gemini-2.0-flash -> Gemini 2.0 Flash
+    llama-3.3-70b -> Llama 3.3 70B
+    """
+    parts = [p for p in raw.split("/")[-1].split("-") if p]
+    tagged: list[tuple[str, str]] = []
+    for part in parts:
+        lower = part.lower()
+        if lower in _ABBREV_WORDS:
+            tagged.append(("abbrev", part.upper()))
+        elif re.match(r"^v\d", lower):
+            tagged.append(("version", part[0].upper() + part[1:]))
+        elif re.match(r"^\d+[a-z]+$", lower):
+            tagged.append(("version", re.sub(r"[a-z]+$", lambda m: m.group().upper(), part)))
+        elif part[0].isdigit():
+            tagged.append(("version", part))
+        else:
+            tagged.append(("word", part.capitalize()))
+    out = ""
+    for i, (kind, text) in enumerate(tagged):
+        if i == 0:
+            out = text
+        elif kind == "version" and tagged[i - 1][0] == "abbrev":
+            out += "-" + text
+        else:
+            out += " " + text
+    return out
+
+
+def _model_label(model: str) -> str:
+    return _MODEL_SHORT.get(model, _format_model_slug(model))
+
+
+def _build_routing_line(
+    routing_decision: RoutingDecision | None,
+    use_stages: bool,
+    actual_model: str | None = None,
+) -> str | None:
+    """One-line routing summary shown in default output before execution starts."""
+    if routing_decision is None:
+        return None
+    impl_label = _model_label(actual_model or routing_decision.model)
+    reason = _RATIONALE_SHORT.get(routing_decision.rationale, routing_decision.category)
+    if use_stages:
+        plan_label = _model_label(MODEL_STRONG)
+        if plan_label == impl_label:
+            return f"  Routing - {impl_label} for planning and {reason}"
+        return f"  Routing - {plan_label} for planning -> {impl_label} for {reason}"
+    return f"  Routing - {impl_label} for {reason}"
+
+
+def _exec_message(model: str, rationale: str) -> str:
+    """Human-readable spinner message for the execution phase."""
+    label = _model_label(model)
+    desc = {
+        "security-sensitive code requires careful reasoning": f"{label} handling security-sensitive logic",
+        "UI or visual task routed to multimodal specialist":  f"{label} handling UI work",
+        "multi-file or long-horizon task":                    f"{label} working through multi-file changes",
+        "low-risk boilerplate task":                          f"{label} generating boilerplate",
+        "standard feature implementation":                    f"{label} writing implementation",
+    }
+    return "Executing - " + desc.get(rationale, f"{label} running task")
+
+
+def _build_model_line(
+    routing_decision: RoutingDecision | None,
+    stage_runs: list[StageRun],
+    model: str | None = None,
+) -> str | None:
+    """Return a single 'Model: ...' or 'Models: ...' line for default output."""
+    if stage_runs:
+        seen: dict[str, list[str]] = {}
+        for sr in stage_runs:
+            label = _model_label(sr.model)
+            seen.setdefault(label, []).append(sr.stage.stage_type)
+        parts = []
+        for label, types in seen.items():
+            reason = " + ".join(types)
+            parts.append(f"{label} ({reason})")
+        prefix = "Model" if len(seen) == 1 else "Models"
+        return f"{prefix}: {', '.join(parts)}"
+
+    if routing_decision is not None:
+        label = _model_label(model or routing_decision.model)
+        reason = _RATIONALE_SHORT.get(routing_decision.rationale, "")
+        suffix = f" ({reason})" if reason else ""
+        return f"Model: {label}{suffix}"
+
+    return None
+
+
+def _truncate_note(text: str, limit: int = 200) -> str:
+    line = text.split("\n")[0]
+    if len(line) <= limit:
+        return line
+    cut = line.rfind(" ", 0, limit)
+    return line[:cut] + "..." if cut > 0 else line[:limit] + "..."
+
+
+_CHANGE_LABEL = {"create": "created", "update": "updated", "delete": "deleted"}
+
+_SHRINK_CHAR_THRESHOLD = 6_000
+_SHRINK_LINE_THRESHOLD = 1_500
+_SHRINK_ERROR_PATTERNS = ("error", "exception", "failed", "traceback")
+
+
+def _should_shrink(files: list[ChangedFile], no_shrink: bool) -> bool:
+    if no_shrink:
+        return False
+    total_chars = sum(len(f.content) for f in files)
+    total_lines = sum(f.content.count("\n") for f in files)
+    return total_chars > _SHRINK_CHAR_THRESHOLD or total_lines > _SHRINK_LINE_THRESHOLD
+
+
+def _print_shrunk(files: list[ChangedFile], result_summary: str) -> None:
+    total_chars = sum(len(f.content) for f in files)
+    click.echo(
+        f"\n  Output condensed: {len(files)} file(s), ~{total_chars} chars."
+        " Use --no-shrink to see full content."
+    )
+    click.echo(f"\n{result_summary}\n")
+    click.echo("Files")
+    for f in files[:5]:
+        click.echo(f"  {f.path} ({f.change_type}) - {f.summary}")
+    if len(files) > 5:
+        click.echo(f"  ... and {len(files) - 5} more")
+
+    error_lines: list[str] = []
+    for f in files:
+        for line in f.content.splitlines():
+            if any(pat in line.lower() for pat in _SHRINK_ERROR_PATTERNS):
+                error_lines.append(line.strip())
+                if len(error_lines) >= 5:
+                    break
+        if len(error_lines) >= 5:
+            break
+    if error_lines:
+        click.echo("\nErrors detected:")
+        for line in error_lines:
+            click.echo(f"  {line}")
+
+
+def _print_dry_run(files: list[ChangedFile]) -> None:
+    if not files:
+        click.echo("\n(no files to preview)")
+        return
+    click.echo("")
+    for f in files:
+        click.echo(f"--- {f.path} [{f.change_type}] ---")
+        if f.change_type == "delete" or not f.content:
+            click.echo("(no content, file will be deleted)")
+        else:
+            click.echo(f.content)
+        click.echo("")

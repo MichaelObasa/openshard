@@ -10,7 +10,7 @@ from openshard.cli.main import _run_verification
 class TestRunVerificationOutput(unittest.TestCase):
 
     def _patch(self, cmd, returncode=0, stdout=""):
-        detect = patch("openshard.cli.main._detect_command", return_value=cmd)
+        detect = patch("openshard.run.pipeline._detect_command", return_value=cmd)
         proc = MagicMock()
         proc.returncode = returncode
         proc.stdout = stdout
