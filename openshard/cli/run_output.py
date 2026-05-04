@@ -334,7 +334,13 @@ def _print_native_summary(native_meta: Any, detail: str = "default") -> None:
         click.echo(f"  warning: {warning}")
 
 
-def _render_native_demo_block(native_meta: Any) -> list[str]:
+def _loop_event_value(event: Any, key: str, default: Any = "") -> Any:
+    if isinstance(event, dict):
+        return event.get(key, default)
+    return getattr(event, key, default)
+
+
+def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list[str]:
     """Return ordered indented lines for the [native] block. Pure, no I/O."""
     if native_meta is None:
         return []
@@ -407,14 +413,38 @@ def _render_native_demo_block(native_meta: Any) -> list[str]:
         lines.append(f"  loop: {' -> '.join(loop_steps)}")
         has_content = True
 
+    if detail == "full":
+        loop_trace = getattr(native_meta, "native_loop_trace", None)
+        if loop_trace is None:
+            loop_trace = []
+        if isinstance(loop_trace, list):
+            trace_events = loop_trace
+        else:
+            trace_events = getattr(loop_trace, "events", [])
+        if trace_events:
+            lines.append("  loop trace:")
+            for event in trace_events:
+                phase = _loop_event_value(event, "phase", "")
+                status = _loop_event_value(event, "status", "completed")
+                meta = _loop_event_value(event, "metadata", {})
+                meta_str = ""
+                if isinstance(meta, dict) and meta:
+                    meta_str = " " + " ".join(f"{k}: {v}" for k, v in meta.items())
+                elif hasattr(meta, "__dict__"):
+                    d = {k: v for k, v in vars(meta).items() if not k.startswith("_")}
+                    if d:
+                        meta_str = " " + " ".join(f"{k}: {v}" for k, v in d.items())
+                lines.append(f"    {phase} [{status}]{meta_str}")
+            has_content = True
+
     return lines if has_content else []
 
 
-def _print_native_demo_block(native_meta: Any) -> None:
+def _print_native_demo_block(native_meta: Any, detail: str = "default") -> None:
     """Print the [native] demo block via click.echo."""
     if native_meta is None:
         return
-    body = _render_native_demo_block(native_meta)
+    body = _render_native_demo_block(native_meta, detail=detail)
     if not body:
         return
     click.echo("\n[native]")
@@ -448,6 +478,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "diff_review": entry.get("diff_review"),
         "final_report": entry.get("final_report"),
         "native_loop_steps": entry.get("native_loop_steps", []),
+        "native_loop_trace": entry.get("native_loop_trace", []),
         "native_backend": entry.get("native_backend", None),
         "native_backend_available": entry.get("native_backend_available", True),
         "native_backend_notes": entry.get("native_backend_notes", []),
@@ -460,7 +491,7 @@ def _render_native_inspection(entry: dict, detail: str) -> None:
     native_meta = _native_meta_from_entry(entry)
     if native_meta is None:
         return
-    _print_native_demo_block(native_meta)
+    _print_native_demo_block(native_meta, detail=detail)
     _print_native_summary(native_meta, detail)
 
 

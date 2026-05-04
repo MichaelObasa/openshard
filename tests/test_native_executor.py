@@ -3139,6 +3139,103 @@ class TestNativeLoopSteps(unittest.TestCase):
         self.assertIn("repo_context -> observation -> plan -> generation", out)
 
 
+class TestNativeLoopTrace(unittest.TestCase):
+    """Tests for NativeLoopTrace, NativeLoopEvent, and their integration with record_loop_step."""
+
+    def _make_executor(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor
+
+    # 1
+    def test_native_loop_trace_defaults_to_empty(self):
+        from openshard.native.loop import NativeLoopTrace
+        trace = NativeLoopTrace()
+        self.assertEqual(trace.events, [])
+        self.assertEqual(trace.phases(), [])
+
+    # 2
+    def test_record_preserves_order(self):
+        from openshard.native.loop import NativeLoopTrace
+        trace = NativeLoopTrace()
+        trace.record("repo_context")
+        trace.record("observation")
+        trace.record("plan")
+        self.assertEqual(trace.phases(), ["repo_context", "observation", "plan"])
+
+    # 3
+    def test_record_loop_step_still_updates_native_loop_steps(self):
+        executor = self._make_executor()
+        executor.record_loop_step("plan")
+        self.assertIn("plan", executor.native_meta.native_loop_steps)
+
+    # 4
+    def test_record_loop_step_records_trace_event(self):
+        executor = self._make_executor()
+        executor.record_loop_step("plan")
+        self.assertEqual(len(executor.native_meta.native_loop_trace.events), 1)
+        self.assertEqual(executor.native_meta.native_loop_trace.events[0].phase, "plan")
+
+    # 5
+    def test_trace_events_metadata_not_shared(self):
+        from openshard.native.loop import NativeLoopTrace
+        trace = NativeLoopTrace()
+        trace.record("write", metadata={"files": 1})
+        trace.record("verification", metadata={"passed": True})
+        trace.events[0].metadata["extra"] = "x"
+        self.assertNotIn("extra", trace.events[1].metadata)
+
+    # 6
+    def test_pipeline_serializes_native_loop_trace(self):
+        native_mock = _make_native_mock()
+        _, _, logged = TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertIn("native_loop_trace", logged)
+        self.assertIsInstance(logged["native_loop_trace"], list)
+
+    # 7
+    def test_trace_metadata_compact_labels_only(self):
+        from openshard.native.loop import NativeLoopTrace
+        trace = NativeLoopTrace()
+        trace.record("write", metadata={"files": 2})
+        trace.record("verification", metadata={"passed": True})
+        trace.record("diff_review", metadata={"added": 34, "removed": 8})
+        for event in trace.events:
+            for val in event.metadata.values():
+                self.assertIsInstance(val, (bool, int, str))
+                if isinstance(val, str):
+                    self.assertNotIn("\n", val)
+                    self.assertLess(len(val), 100)
+
+    # 8
+    def test_no_raw_content_in_trace(self):
+        executor = self._make_executor()
+        executor.record_loop_step("repo_context")
+        executor.record_loop_step("generation")
+        for event in executor.native_meta.native_loop_trace.events:
+            summary = event.summary
+            self.assertNotIn("diff --git", summary)
+            for val in event.metadata.values():
+                if isinstance(val, str):
+                    self.assertLess(len(val), 200, f"metadata value suspiciously long: {val!r}")
+
+    # 9 — NativeRunMeta has native_loop_trace field
+    def test_native_run_meta_has_loop_trace_field(self):
+        from openshard.native.loop import NativeLoopTrace
+        meta = NativeRunMeta()
+        self.assertIsInstance(meta.native_loop_trace, NativeLoopTrace)
+        self.assertEqual(meta.native_loop_trace.events, [])
+
+    # 10 — instances do not share trace
+    def test_native_run_meta_trace_instances_not_shared(self):
+        a = NativeRunMeta()
+        b = NativeRunMeta()
+        a.native_loop_trace.record("plan")
+        self.assertEqual(b.native_loop_trace.events, [])
+
+
 class TestNativeDemoBlock(unittest.TestCase):
     """Unit and integration tests for the [native] demo block renderer."""
 
