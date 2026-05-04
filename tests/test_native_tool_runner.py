@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from openshard.native.tool_runner import NativeToolRunner
 from openshard.native.tools import NativeToolCall
@@ -244,6 +245,106 @@ class TestNativeToolRunnerGitDiff(unittest.TestCase):
             result = runner.run(call)
         self.assertTrue(result.ok)
         self.assertTrue(result.metadata["truncated"])
+
+
+class TestNativeToolRunnerRunVerification(unittest.TestCase):
+    def _make_plan(self, safety=None):
+        from openshard.verification.plan import (
+            CommandSafety,
+            VerificationCommand,
+            VerificationKind,
+            VerificationPlan,
+            VerificationSource,
+        )
+        if safety is None:
+            return VerificationPlan(commands=[])
+        reason = "safe test runner" if safety == CommandSafety.safe else "requires review"
+        cmd = VerificationCommand(
+            name="tests",
+            argv=["python", "-m", "pytest"],
+            kind=VerificationKind.test,
+            source=VerificationSource.detected,
+            safety=safety,
+            reason=reason,
+        )
+        return VerificationPlan(commands=[cmd])
+
+    def _patches(self, plan, run_return=(0, "")):
+        fake_facts = MagicMock()
+        return (
+            patch("openshard.analysis.repo.analyze_repo", return_value=fake_facts),
+            patch("openshard.verification.plan.build_verification_plan", return_value=plan),
+            patch("openshard.verification.executor.run_verification_plan", return_value=run_return),
+        )
+
+    def test_no_command_detected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner = _make_runner(root)
+            plan = self._make_plan(safety=None)
+            p1, p2, p3 = self._patches(plan)
+            with p1, p2, p3:
+                result = runner.run(NativeToolCall("run_verification", {}))
+        self.assertFalse(result.ok)
+        self.assertIn("No verification command", result.error)
+
+    def test_safe_command_passes(self):
+        from openshard.verification.plan import CommandSafety
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner = _make_runner(root)
+            plan = self._make_plan(safety=CommandSafety.safe)
+            p1, p2, p3 = self._patches(plan, run_return=(0, "1 passed"))
+            with p1, p2, p3:
+                result = runner.run(NativeToolCall("run_verification", {}))
+        self.assertTrue(result.ok)
+
+    def test_limit_arg_passed_through(self):
+        from openshard.verification.plan import CommandSafety
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner = _make_runner(root)
+            plan = self._make_plan(safety=CommandSafety.safe)
+            big_output = "x" * 5000
+            p1, p2, p3 = self._patches(plan, run_return=(0, big_output))
+            with p1, p2, p3:
+                result = runner.run(NativeToolCall("run_verification", {"limit": 100}))
+        self.assertTrue(result.ok)
+        self.assertTrue(result.metadata["truncated"])
+
+    def test_invalid_limit_falls_back_to_default(self):
+        from openshard.verification.plan import CommandSafety
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner = _make_runner(root)
+            plan = self._make_plan(safety=CommandSafety.safe)
+            p1, p2, p3 = self._patches(plan, run_return=(0, "ok"))
+            with p1, p2, p3:
+                result = runner.run(NativeToolCall("run_verification", {"limit": -1}))
+        self.assertTrue(result.ok)
+
+    def test_needs_approval_without_approved_returns_error(self):
+        from openshard.verification.plan import CommandSafety
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner = _make_runner(root)
+            plan = self._make_plan(safety=CommandSafety.needs_approval)
+            p1, p2, _ = self._patches(plan)
+            with p1, p2:
+                result = runner.run(NativeToolCall("run_verification", {}, approved=False))
+        self.assertFalse(result.ok)
+        self.assertIn("requires approval", result.error)
+
+    def test_needs_approval_with_approved_executes(self):
+        from openshard.verification.plan import CommandSafety
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner = _make_runner(root)
+            plan = self._make_plan(safety=CommandSafety.needs_approval)
+            p1, p2, p3 = self._patches(plan, run_return=(0, "ok"))
+            with p1, p2, p3:
+                result = runner.run(NativeToolCall("run_verification", {}, approved=True))
+        self.assertTrue(result.ok)
 
 
 if __name__ == "__main__":
