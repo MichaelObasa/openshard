@@ -3127,3 +3127,19 @@ class TestNativeDemoBlock(unittest.TestCase):
         out = _render_native_demo_block_str(None)
         self.assertNotIn("[native]", out)
         self.assertEqual(out.strip(), "")
+
+    def test_no_block_when_no_useful_metadata(self):
+        from types import SimpleNamespace
+
+        native_meta = SimpleNamespace(
+            repo_context_summary=None,
+            observation=None,
+            plan=None,
+            write_path="pipeline",
+            verification_loop=None,
+            diff_review=None,
+            final_report=None,
+        )
+        out = _render_native_demo_block_str(native_meta)
+        self.assertNotIn("[native]", out)
+        self.assertEqual(out.strip(), "")

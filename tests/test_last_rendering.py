@@ -250,7 +250,25 @@ class TestLastNativeInspection(unittest.TestCase):
     def test_partial_native_metadata_no_crash(self):
         entry = {"task": "native run", "workflow": "native"}
         out = _render(entry, detail="more")
+        self.assertNotIn("[native]", out)  # no useful metadata → no block
+        self.assertNotIn("[native summary]", out)
+
+    def test_partial_real_metadata_shows_native_block(self):
+        entry = {
+            "task": "native run",
+            "workflow": "native",
+            "repo_context_summary": {
+                "likely_stack_markers": ["python"],
+                "test_markers": [],
+                "total_files": 10,
+                "top_level_dirs": ["src"],
+                "package_files": [],
+                "truncated": False,
+            },
+        }
+        out = _render(entry, detail="more")
         self.assertIn("[native]", out)
+        self.assertIn("repo:", out)
         self.assertNotIn("[native summary]", out)
 
     def test_raw_output_not_printed(self):
