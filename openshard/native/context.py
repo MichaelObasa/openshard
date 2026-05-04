@@ -41,6 +41,12 @@ class NativeObservation:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass
+class NativeEvidence:
+    search_results: list[str] = field(default_factory=list)
+    truncated: bool = False
+
+
 def build_initial_context_budget(
     context_window: int | None = None,
 ) -> NativeContextBudget:
@@ -68,6 +74,25 @@ def render_native_observation(
     if observation.warnings:
         shown = observation.warnings[:3]
         lines.append(f"warnings: {', '.join(shown)}")
+
+    rendered = "\n".join(lines)
+
+    suffix = "\n[truncated]"
+    if len(rendered) <= limit:
+        return rendered
+    return (rendered[: max(0, limit - len(suffix))].rstrip() + suffix)[:limit]
+
+
+def render_native_evidence(evidence: NativeEvidence, *, limit: int = 600) -> str:
+    lines = ["[evidence]"]
+
+    if evidence.search_results:
+        lines.append("search:")
+        for item in evidence.search_results[:3]:
+            lines.append(f"- {item}")
+
+    if evidence.truncated:
+        lines.append("[truncated]")
 
     rendered = "\n".join(lines)
 
