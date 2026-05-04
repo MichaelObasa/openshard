@@ -35,6 +35,7 @@ from openshard.execution.generator import (
     check_stack_mismatch,
 )
 from openshard.execution.opencode_executor import OpenCodeExecutor
+from openshard.native.executor import NativeAgentExecutor
 from openshard.execution.stages import StageRun, split_task, route_stage, run_planning_stage
 from openshard.history.adjustments import (
     compute_history_adjustments,
@@ -88,6 +89,7 @@ class RunResult:
     workspace: Any = None
     result_summary: str = ""
     result_notes: list = field(default_factory=list)
+    native_meta: Any = None
 
 
 class RunPipeline:
@@ -162,10 +164,10 @@ class RunPipeline:
             _show_executor_deprecation = False
             if workflow is not None:
                 _wf = workflow.lower()
-                if _wf in ("native", "claude-code", "codex"):
+                if _wf in ("claude-code", "codex"):
                     raise click.ClickException(
                         f"--workflow {_wf!r} is not yet available. "
-                        "Use: auto, direct, staged, or opencode."
+                        "Use: auto, direct, staged, opencode, or native."
                     )
                 effective_workflow = _wf
                 _policy_reason = ""
@@ -174,10 +176,10 @@ class RunPipeline:
                 effective_workflow = executor.lower()
                 _policy_reason = ""
             elif _cfg_workflow:
-                if _cfg_workflow in ("native", "claude-code", "codex"):
+                if _cfg_workflow in ("claude-code", "codex"):
                     raise click.ClickException(
                         f"config.workflow: {_cfg_workflow!r} is not yet available. "
-                        "Use: auto, direct, staged, or opencode."
+                        "Use: auto, direct, staged, opencode, or native."
                     )
                 effective_workflow = _cfg_workflow
                 _policy_reason = ""
@@ -209,6 +211,10 @@ class RunPipeline:
                 effective_executor = "opencode"
                 _force_stages = False
                 _policy_reason = ""
+            elif effective_workflow == "native":
+                effective_executor = "native"
+                _force_stages = False
+                _policy_reason = ""
             else:
                 # Fallback (shouldn't reach here after earlier validation)
                 effective_executor = "direct"
@@ -225,7 +231,9 @@ class RunPipeline:
                     _provider_instance = OpenAIProvider(get_openai_api_key())
 
             if effective_executor == "opencode":
-                generator: ExecutionGenerator | OpenCodeExecutor = OpenCodeExecutor()
+                generator: ExecutionGenerator | OpenCodeExecutor | NativeAgentExecutor = OpenCodeExecutor()
+            elif effective_executor == "native":
+                generator = NativeAgentExecutor(provider=_provider_instance)
             else:
                 generator = ExecutionGenerator(provider=_provider_instance)
         except (ValueError, RuntimeError) as exc:
@@ -856,6 +864,17 @@ class RunPipeline:
 
         _print_summary(start, generator, retry_triggered, final_files,
                        usage=usage, retry_usage=retry_usage, detail=detail, model=_routed_model, stage_runs=stage_runs)
+        _native_meta = generator.native_meta if effective_executor == "native" else None
+        _extra_metadata: dict | None = None
+        if _native_meta is not None:
+            _extra_metadata = {
+                "workflow": _native_meta.workflow,
+                "executor": _native_meta.executor,
+                "execution_depth": _native_meta.execution_depth,
+                "selected_skills": _native_meta.selected_skills,
+                "context_budget": _native_meta.context_budget,
+                "tool_trace": _native_meta.tool_trace,
+            }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
                      verification_attempted=(write and verify),
@@ -866,7 +885,8 @@ class RunPipeline:
                      _scored=_scored, repo_facts=_repo_facts,
                      matched_skills=_matched_skills,
                      profile_decision=_profile_decision,
-                     verification_plan=_verification_plan)
+                     verification_plan=_verification_plan,
+                     extra_metadata=_extra_metadata)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
 
@@ -889,6 +909,7 @@ class RunPipeline:
         result_obj.workspace = workspace
         result_obj.result_summary = exec_result.summary
         result_obj.result_notes = exec_result.notes or []
+        result_obj.native_meta = _native_meta
         return result_obj
 
 
@@ -978,6 +999,7 @@ def _log_run(
     matched_skills: list[MatchedSkill] | None = None,
     profile_decision: ProfileDecision | None = None,
     verification_plan: VerificationPlan | None = None,
+    extra_metadata: dict | None = None,
 ) -> None:
     entry: dict = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -1060,6 +1082,9 @@ def _log_run(
 
     if verification_plan is not None and verification_plan.has_commands:
         entry["verification_plan"] = _serialize_verification_plan(verification_plan)
+
+    if extra_metadata:
+        entry.update(extra_metadata)
 
     log_path = Path.cwd() / _LOG_PATH
     log_path.parent.mkdir(parents=True, exist_ok=True)
