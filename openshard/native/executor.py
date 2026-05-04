@@ -41,6 +41,7 @@ class NativeRunMeta:
     observation: NativeObservation | None = None
     evidence: NativeEvidence | None = None
     plan: NativePlan | None = None
+    write_path: str = "pipeline"
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({

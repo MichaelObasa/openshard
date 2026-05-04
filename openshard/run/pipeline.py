@@ -233,7 +233,10 @@ class RunPipeline:
             if effective_executor == "opencode":
                 generator: ExecutionGenerator | OpenCodeExecutor | NativeAgentExecutor = OpenCodeExecutor()
             elif effective_executor == "native":
-                generator = NativeAgentExecutor(provider=_provider_instance)
+                generator = NativeAgentExecutor(
+                    provider=_provider_instance,
+                    repo_root=Path.cwd(),
+                )
             else:
                 generator = ExecutionGenerator(provider=_provider_instance)
         except (ValueError, RuntimeError) as exc:
@@ -880,6 +883,7 @@ class RunPipeline:
                 "observation": asdict(_native_meta.observation) if _native_meta.observation is not None else None,
                 "evidence": asdict(_native_meta.evidence) if _native_meta.evidence is not None else None,
                 "plan": asdict(_native_meta.plan) if _native_meta.plan is not None else None,
+                "write_path": _native_meta.write_path,
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,

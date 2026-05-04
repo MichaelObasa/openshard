@@ -577,6 +577,127 @@ class TestNativeWorkflowIntegration(unittest.TestCase):
         self.assertNotIn("workflow", logged)
         self.assertNotIn("execution_depth", logged)
 
+    def test_native_cli_passes_repo_root_to_executor(self):
+        """pipeline passes repo_root=Path.cwd() when instantiating NativeAgentExecutor."""
+        captured = {}
+
+        def _capture(provider=None, repo_root=None):
+            captured["repo_root"] = repo_root
+            return _make_native_mock()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_cwd = Path(tmp)
+            with patch("openshard.run.pipeline.NativeAgentExecutor", side_effect=_capture), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.Path.cwd", return_value=fake_cwd):
+                runner = CliRunner()
+                runner.invoke(cli, ["run", "--workflow", "native", "create hello file"])
+
+        self.assertEqual(captured.get("repo_root"), fake_cwd)
+
+    def test_native_write_uses_existing_pipeline_write_path(self):
+        """--write with native workflow writes files via existing _write_files, not a native tool."""
+        from openshard.execution.generator import ChangedFile
+
+        safe_file = ChangedFile(
+            path="hello.txt", content="hello world", change_type="create", summary="created"
+        )
+        fake_result = MagicMock()
+        fake_result.files = [safe_file]
+        fake_result.summary = "done"
+        fake_result.notes = []
+        fake_result.usage = None
+
+        native_mock = _make_native_mock()
+        native_mock.generate.return_value = fake_result
+
+        with tempfile.TemporaryDirectory() as workspace_dir:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=workspace_dir):
+                runner = CliRunner()
+                result = runner.invoke(
+                    cli, ["run", "--workflow", "native", "--write", "create hello file"]
+                )
+
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertTrue((Path(workspace_dir) / "hello.txt").exists())
+            self.assertEqual((Path(workspace_dir) / "hello.txt").read_text(), "hello world")
+            tool_trace = native_mock.native_meta.tool_trace
+            write_file_calls = [e for e in tool_trace if e.get("tool") == "write_file"]
+            self.assertEqual(write_file_calls, [])
+
+    def test_native_write_rejects_unsafe_path(self):
+        """--write with native workflow rejects dotdot paths via existing _write_files safety."""
+        from openshard.execution.generator import ChangedFile
+
+        unsafe_file = ChangedFile(
+            path="../escape.txt", content="evil", change_type="create", summary=""
+        )
+        fake_result = MagicMock()
+        fake_result.files = [unsafe_file]
+        fake_result.summary = "done"
+        fake_result.notes = []
+        fake_result.usage = None
+
+        native_mock = _make_native_mock()
+        native_mock.generate.return_value = fake_result
+
+        with CliRunner().isolated_filesystem():
+            parent = Path("..").resolve()
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run"):
+                runner = CliRunner()
+                result = runner.invoke(
+                    cli, ["run", "--workflow", "native", "--write", "do something"]
+                )
+
+            self.assertFalse((parent / "escape.txt").exists())
+            self.assertIn("[skip] unsafe path rejected", result.output)
+
+    def test_native_dry_run_does_not_write(self):
+        """--dry-run with native workflow does not write files to disk."""
+        from openshard.execution.generator import ChangedFile
+
+        safe_file = ChangedFile(
+            path="hello.txt", content="hello world", change_type="create", summary="created"
+        )
+        fake_result = MagicMock()
+        fake_result.files = [safe_file]
+        fake_result.summary = "done"
+        fake_result.notes = []
+        fake_result.usage = None
+
+        native_mock = _make_native_mock()
+        native_mock.generate.return_value = fake_result
+
+        with CliRunner().isolated_filesystem():
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run"):
+                runner = CliRunner()
+                result = runner.invoke(
+                    cli, ["run", "--workflow", "native", "--dry-run", "create hello file"]
+                )
+
+            self.assertFalse(Path("hello.txt").exists())
+            self.assertEqual(result.exit_code, 0, result.output)
+
 
 class TestNativeObservePhase(unittest.TestCase):
     """Tests for NativeAgentExecutor._run_observe_phase()."""
