@@ -11,11 +11,13 @@ from openshard.native.context import (
     NativeDiffReview,
     NativeEvidence,
     NativeFileSnippet,
+    NativeFinalReport,
     NativeObservation,
     NativePlan,
     NativeVerificationLoop,
     build_initial_context_budget,
     build_native_diff_review,
+    build_native_final_report,
     render_native_evidence,
     render_native_observation,
     render_native_plan,
@@ -47,6 +49,7 @@ class NativeRunMeta:
     diff_review: NativeDiffReview | None = None
     write_path: str = "pipeline"
     verification_loop: NativeVerificationLoop | None = None
+    final_report: NativeFinalReport | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -272,6 +275,18 @@ class NativeAgentExecutor:
         )
         self.native_meta.diff_review = review
         return review
+
+    def build_final_report(self) -> NativeFinalReport:
+        report = build_native_final_report(
+            selected_skills=self.native_meta.selected_skills,
+            observation=self.native_meta.observation,
+            evidence=self.native_meta.evidence,
+            plan=self.native_meta.plan,
+            verification_loop=self.native_meta.verification_loop,
+            diff_review=self.native_meta.diff_review,
+        )
+        self.native_meta.final_report = report
+        return report
 
     def generate(
         self,

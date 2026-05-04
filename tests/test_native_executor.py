@@ -16,11 +16,14 @@ from openshard.native.context import (
     NativeDiffReview,
     NativeEvidence,
     NativeFileSnippet,
+    NativeFinalReport,
     NativeObservation,
     NativePlan,
+    NativeVerificationLoop,
     build_compact_run_state,
     build_initial_context_budget,
     build_native_diff_review,
+    build_native_final_report,
     render_native_evidence,
     render_native_observation,
     render_native_plan,
@@ -2411,6 +2414,22 @@ class TestNativeVerificationLoop(unittest.TestCase):
         self.assertNotIn("[truncated]", result)
         self.assertIn("short", result)
 
+    def test_native_write_calls_build_final_report(self):
+        native_mock = _make_native_mock()
+        result, native_mock, logged = self._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        native_mock.build_final_report.assert_called_once()
+
+    def test_native_write_final_report_in_logged_metadata(self):
+        native_mock = _make_native_mock()
+        result, _, logged = self._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("final_report", logged)
+
     def test_native_verification_loop_metadata_final_state_after_retry(self):
         from openshard.execution.generator import ChangedFile
 
@@ -2443,3 +2462,329 @@ class TestNativeVerificationLoop(unittest.TestCase):
         self.assertIsNotNone(vl)
         self.assertTrue(vl["retried"])
         self.assertTrue(vl["passed"])
+
+
+class TestNativeFinalReportBuilder(unittest.TestCase):
+    """Unit tests for build_native_final_report() in isolation."""
+
+    def _build(self, **kw):
+        defaults = dict(
+            selected_skills=[],
+            observation=None,
+            evidence=None,
+            plan=None,
+            verification_loop=None,
+            diff_review=None,
+        )
+        defaults.update(kw)
+        return build_native_final_report(**defaults)
+
+    def test_empty_inputs_produce_defaults(self):
+        r = self._build()
+        self.assertIsInstance(r, NativeFinalReport)
+        self.assertFalse(r.used_native_context)
+        self.assertEqual(r.observed_tools, [])
+        self.assertEqual(r.selected_skills, [])
+        self.assertIsNone(r.plan_intent)
+        self.assertIsNone(r.plan_risk)
+        self.assertEqual(r.evidence_items, 0)
+        self.assertEqual(r.snippet_files, 0)
+        self.assertFalse(r.verification_attempted)
+        self.assertFalse(r.verification_passed)
+        self.assertFalse(r.verification_retried)
+        self.assertEqual(r.diff_files, [])
+        self.assertEqual(r.added_lines, 0)
+        self.assertEqual(r.removed_lines, 0)
+        self.assertEqual(r.warnings, [])
+
+    def test_selected_skills_copied(self):
+        r = self._build(selected_skills=["python", "testing"])
+        self.assertEqual(r.selected_skills, ["python", "testing"])
+
+    def test_observation_tools_copied(self):
+        obs = NativeObservation(observed_tools=["get_git_diff", "search_repo"])
+        r = self._build(observation=obs)
+        self.assertEqual(r.observed_tools, ["get_git_diff", "search_repo"])
+
+    def test_dirty_diff_adds_warning(self):
+        obs = NativeObservation(dirty_diff_present=True)
+        r = self._build(observation=obs)
+        self.assertIn("dirty working tree detected", r.warnings)
+
+    def test_observation_warnings_included(self):
+        obs = NativeObservation(warnings=["some warning"])
+        r = self._build(observation=obs)
+        self.assertIn("some warning", r.warnings)
+
+    def test_evidence_counts_search_results(self):
+        ev = NativeEvidence(search_results=["a", "b", "c"])
+        r = self._build(evidence=ev)
+        self.assertEqual(r.evidence_items, 3)
+
+    def test_evidence_counts_file_snippets(self):
+        ev = NativeEvidence(file_snippets=[NativeFileSnippet(path="a.py"), NativeFileSnippet(path="b.py")])
+        r = self._build(evidence=ev)
+        self.assertEqual(r.snippet_files, 2)
+
+    def test_plan_intent_and_risk_copied(self):
+        plan = NativePlan(intent="debug", risk="medium")
+        r = self._build(plan=plan)
+        self.assertEqual(r.plan_intent, "debug")
+        self.assertEqual(r.plan_risk, "medium")
+
+    def test_plan_warnings_included(self):
+        plan = NativePlan(warnings=["security-sensitive task"])
+        r = self._build(plan=plan)
+        self.assertIn("security-sensitive task", r.warnings)
+
+    def test_verification_fields_copied(self):
+        vl = NativeVerificationLoop(attempted=True, passed=True, retried=False)
+        r = self._build(verification_loop=vl)
+        self.assertTrue(r.verification_attempted)
+        self.assertTrue(r.verification_passed)
+        self.assertFalse(r.verification_retried)
+
+    def test_verification_retried_copied(self):
+        vl = NativeVerificationLoop(attempted=True, passed=True, retried=True)
+        r = self._build(verification_loop=vl)
+        self.assertTrue(r.verification_retried)
+
+    def test_failed_verification_adds_warning(self):
+        vl = NativeVerificationLoop(attempted=True, passed=False)
+        r = self._build(verification_loop=vl)
+        self.assertIn("verification failed", r.warnings)
+
+    def test_passed_verification_no_warning(self):
+        vl = NativeVerificationLoop(attempted=True, passed=True)
+        r = self._build(verification_loop=vl)
+        self.assertNotIn("verification failed", r.warnings)
+
+    def test_diff_review_fields_copied(self):
+        dr = NativeDiffReview(changed_files=["src/a.py", "src/b.py"], added_lines=10, removed_lines=3)
+        r = self._build(diff_review=dr)
+        self.assertEqual(r.diff_files, ["src/a.py", "src/b.py"])
+        self.assertEqual(r.added_lines, 10)
+        self.assertEqual(r.removed_lines, 3)
+
+    def test_warnings_deduplicated_and_sorted(self):
+        obs = NativeObservation(warnings=["b warning", "a warning", "b warning"])
+        r = self._build(observation=obs)
+        self.assertEqual(r.warnings, sorted(set(r.warnings)))
+        self.assertEqual(len(r.warnings), len(set(r.warnings)))
+
+    def test_used_native_context_true_when_observation_present(self):
+        r = self._build(observation=NativeObservation())
+        self.assertTrue(r.used_native_context)
+
+    def test_used_native_context_true_when_evidence_present(self):
+        r = self._build(evidence=NativeEvidence())
+        self.assertTrue(r.used_native_context)
+
+    def test_used_native_context_true_when_plan_present(self):
+        r = self._build(plan=NativePlan())
+        self.assertTrue(r.used_native_context)
+
+    def test_no_raw_content_in_report_fields(self):
+        obs = NativeObservation(observed_tools=["get_git_diff"])
+        ev = NativeEvidence(search_results=["src/foo.py:10: def bar()"], file_snippets=[])
+        dr = NativeDiffReview(changed_files=["src/foo.py"], added_lines=5, removed_lines=2)
+        r = self._build(observation=obs, evidence=ev, diff_review=dr)
+        all_str_fields = [r.plan_intent, r.plan_risk] + r.observed_tools + r.selected_skills + r.diff_files + r.warnings
+        for field_val in all_str_fields:
+            if field_val is not None:
+                self.assertNotIn("def bar()", field_val)
+                self.assertNotIn("diff --git", field_val)
+
+
+class TestNativeFinalReportExecutor(unittest.TestCase):
+    """Unit tests for NativeAgentExecutor.build_final_report()."""
+
+    def _make_executor(self):
+        executor = NativeAgentExecutor.__new__(NativeAgentExecutor)
+        executor.native_meta = NativeRunMeta()
+        executor._runner = None
+        return executor
+
+    def test_returns_native_final_report(self):
+        executor = self._make_executor()
+        result = executor.build_final_report()
+        self.assertIsInstance(result, NativeFinalReport)
+
+    def test_stores_in_native_meta(self):
+        executor = self._make_executor()
+        report = executor.build_final_report()
+        self.assertIs(executor.native_meta.final_report, report)
+
+    def test_selected_skills_flow_through(self):
+        executor = self._make_executor()
+        executor.native_meta.selected_skills = ["python", "security-sensitive-change"]
+        report = executor.build_final_report()
+        self.assertEqual(report.selected_skills, ["python", "security-sensitive-change"])
+
+    def test_diff_review_values_reflected(self):
+        executor = self._make_executor()
+        executor.native_meta.diff_review = NativeDiffReview(
+            changed_files=["main.py"], added_lines=4, removed_lines=1
+        )
+        report = executor.build_final_report()
+        self.assertEqual(report.diff_files, ["main.py"])
+        self.assertEqual(report.added_lines, 4)
+        self.assertEqual(report.removed_lines, 1)
+
+    def test_all_optional_fields_none_returns_defaults(self):
+        executor = self._make_executor()
+        executor.native_meta.observation = None
+        executor.native_meta.evidence = None
+        executor.native_meta.plan = None
+        executor.native_meta.verification_loop = None
+        executor.native_meta.diff_review = None
+        report = executor.build_final_report()
+        self.assertFalse(report.used_native_context)
+        self.assertEqual(report.warnings, [])
+
+
+class TestNativeFinalReportPipeline(unittest.TestCase):
+    """Pipeline integration tests for NativeFinalReport serialization."""
+
+    def _run_write_simple(self, native_mock, plan=None, verify_returns=None):
+        from openshard.execution.generator import ChangedFile
+        safe_file = ChangedFile(
+            path="out.txt", content="ok", change_type="create", summary="created"
+        )
+        if not native_mock.generate.side_effect:
+            r = MagicMock()
+            r.files = [safe_file]
+            r.summary = "done"
+            r.notes = []
+            r.usage = None
+            native_mock.generate.return_value = r
+
+        plan = plan if plan is not None else _safe_plan()
+        verify_returns = verify_returns if verify_returns is not None else [(0, "")]
+        logged = {}
+
+        def _capture_log(*a, **kw):
+            logged.update(kw.get("extra_metadata") or {})
+
+        verify_iter = iter(verify_returns)
+
+        def _verify_side(*a, **kw):
+            return next(verify_iter)
+
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run", side_effect=_capture_log), \
+                 patch("openshard.run.pipeline.build_verification_plan", return_value=plan), \
+                 patch("openshard.run.pipeline._run_verification_plan", side_effect=_verify_side), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                result = runner.invoke(cli, ["run", "--workflow", "native", "--write", "fix the bug"])
+        return result, native_mock, logged
+
+    def test_native_workflow_calls_build_final_report(self):
+        native_mock = _make_native_mock()
+        result, native_mock, _ = self._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        native_mock.build_final_report.assert_called_once()
+
+    def test_non_native_workflow_does_not_call_build_final_report(self):
+        from openshard.execution.generator import ChangedFile
+        safe_file = ChangedFile(path="out.txt", content="ok", change_type="create", summary="created")
+        fake_result = MagicMock()
+        fake_result.files = [safe_file]
+        fake_result.summary = "done"
+        fake_result.notes = []
+        fake_result.usage = None
+
+        generator_mock = _make_generator_mock()
+        generator_mock.generate.return_value = fake_result
+
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor") as native_cls, \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator_mock), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                runner.invoke(cli, ["run", "--workflow", "direct", "--write", "fix the bug"])
+        native_cls.assert_not_called()
+
+    def test_final_report_key_in_logged_metadata(self):
+        native_mock = _make_native_mock()
+        result, _, logged = self._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("final_report", logged)
+
+    def test_final_report_serialized_as_dict(self):
+        native_mock = _make_native_mock()
+
+        def _set_report():
+            native_mock.native_meta.final_report = NativeFinalReport()
+
+        native_mock.build_final_report.side_effect = _set_report
+        result, _, logged = self._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        fr = logged.get("final_report")
+        self.assertIsNotNone(fr)
+        self.assertIsInstance(fr, dict)
+
+    def test_final_report_contains_expected_keys(self):
+        native_mock = _make_native_mock()
+
+        def _set_report():
+            native_mock.native_meta.final_report = NativeFinalReport()
+
+        native_mock.build_final_report.side_effect = _set_report
+        result, _, logged = self._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        fr = logged["final_report"]
+        self.assertIsNotNone(fr)
+        for key in (
+            "used_native_context", "observed_tools", "selected_skills",
+            "plan_intent", "plan_risk", "evidence_items", "snippet_files",
+            "verification_attempted", "verification_passed", "verification_retried",
+            "diff_files", "added_lines", "removed_lines", "warnings",
+        ):
+            self.assertIn(key, fr)
+
+    def test_final_report_captures_verification_retried(self):
+        from openshard.execution.generator import ChangedFile
+
+        first_result = MagicMock()
+        first_result.files = [ChangedFile(path="out.txt", content="x", change_type="create", summary="")]
+        first_result.summary = "done"
+        first_result.notes = []
+        first_result.usage = None
+
+        retry_result = MagicMock()
+        retry_result.files = []
+        retry_result.summary = "done"
+        retry_result.notes = []
+        retry_result.usage = None
+
+        native_mock = _make_native_mock()
+        native_mock.generate.side_effect = [first_result, retry_result]
+
+        result, native_mock, _ = self._run_write_simple(
+            native_mock,
+            plan=_safe_plan(),
+            verify_returns=[(1, "failed"), (0, "passed")],
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        loop = native_mock.native_meta.verification_loop
+        self.assertTrue(loop.retried)
+        native_mock.build_final_report.assert_called_once()
