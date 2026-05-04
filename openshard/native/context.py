@@ -32,6 +32,15 @@ class CompactRunState:
     next_step: str = ""
 
 
+@dataclass
+class NativeObservation:
+    observed_tools: list[str] = field(default_factory=list)
+    dirty_diff_present: bool = False
+    search_matches_count: int = 0
+    verification_available: bool = False
+    warnings: list[str] = field(default_factory=list)
+
+
 def build_initial_context_budget(
     context_window: int | None = None,
 ) -> NativeContextBudget:
