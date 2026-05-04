@@ -10,6 +10,7 @@ from openshard.native.context import (
     NativeContextBudget,
     NativeObservation,
     build_initial_context_budget,
+    render_native_observation,
 )
 from openshard.native.repo_context import (
     NativeRepoContextSummary,
@@ -140,16 +141,25 @@ class NativeAgentExecutor:
         matches = match_builtin_skills(task, repo_facts=repo_facts)
         self.native_meta.selected_skills = selected_skill_names(matches)
 
-        combined_context = skills_context
+        context_parts = []
+
         summary = self.native_meta.repo_context_summary
         if summary is not None:
-            repo_ctx = render_repo_context_summary(summary)
-            parts = [p for p in [repo_ctx, skills_context] if p]
-            combined_context = "\n\n".join(parts)
-            if self.native_meta.context_budget is not None:
-                self.native_meta.context_budget.estimated_tokens_used += (
-                    len(combined_context) // 4
-                )
+            context_parts.append(render_repo_context_summary(summary))
+
+        observation = self.native_meta.observation
+        if observation is not None:
+            context_parts.append(render_native_observation(observation))
+
+        if skills_context:
+            context_parts.append(skills_context)
+
+        combined_context = "\n\n".join(context_parts) if context_parts else skills_context
+
+        if context_parts and self.native_meta.context_budget is not None:
+            self.native_meta.context_budget.estimated_tokens_used += (
+                len(combined_context) // 4
+            )
 
         return self._gen.generate(
             task, model=model, repo_facts=repo_facts, skills_context=combined_context

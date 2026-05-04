@@ -51,6 +51,32 @@ def build_initial_context_budget(
     )
 
 
+def render_native_observation(
+    observation: NativeObservation, *, limit: int = 600
+) -> str:
+    lines = ["[observation]"]
+
+    if observation.observed_tools:
+        lines.append(f"tools: {', '.join(observation.observed_tools)}")
+
+    lines.append(f"dirty diff: {'yes' if observation.dirty_diff_present else 'no'}")
+    lines.append(f"search matches: {observation.search_matches_count}")
+    lines.append(
+        f"verification available: {'yes' if observation.verification_available else 'no'}"
+    )
+
+    if observation.warnings:
+        shown = observation.warnings[:3]
+        lines.append(f"warnings: {', '.join(shown)}")
+
+    rendered = "\n".join(lines)
+
+    suffix = "\n[truncated]"
+    if len(rendered) <= limit:
+        return rendered
+    return (rendered[: max(0, limit - len(suffix))].rstrip() + suffix)[:limit]
+
+
 def build_compact_run_state(
     task_goal: str,
     repo_facts_summary: str = "",
