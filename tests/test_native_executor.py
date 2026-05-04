@@ -14,6 +14,7 @@ from openshard.native.context import (
     build_initial_context_budget,
 )
 from openshard.native.executor import NativeAgentExecutor, NativeRunMeta
+from openshard.native.skills import NativeSkill, NativeSkillMatch
 
 _DEFAULT_CONFIG = {"approval_mode": "smart"}
 
@@ -178,6 +179,22 @@ class TestNativeAgentExecutor(unittest.TestCase):
         fake_gen.generate.assert_called_once_with(
             "task", model=None, repo_facts=_PYTHON_REPO, skills_context="hint"
         )
+
+    def test_generate_updates_selected_skills(self):
+        executor, _ = self._make_executor()
+        fake_skill = NativeSkill(
+            name="test-discovery",
+            description="test",
+            categories=["testing"],
+            triggers=["test"],
+        )
+        fake_match = NativeSkillMatch(skill=fake_skill, reason="task matches: test", score=1.0)
+        with patch(
+            "openshard.native.executor.match_builtin_skills",
+            return_value=[fake_match],
+        ):
+            executor.generate("run the tests")
+        self.assertEqual(executor.native_meta.selected_skills, ["test-discovery"])
 
 
 class TestNativeWorkflowIntegration(unittest.TestCase):

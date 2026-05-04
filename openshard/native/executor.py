@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from openshard.analysis.repo import RepoFacts
 from openshard.execution.generator import ExecutionGenerator, ExecutionResult
 from openshard.native.context import CompactRunState, NativeContextBudget
+from openshard.native.skills import match_builtin_skills, selected_skill_names
 
 
 @dataclass
@@ -35,6 +36,8 @@ class NativeAgentExecutor:
         repo_facts: RepoFacts | None = None,
         skills_context: str = "",
     ) -> ExecutionResult:
+        matches = match_builtin_skills(task, repo_facts=repo_facts)
+        self.native_meta.selected_skills = selected_skill_names(matches)
         return self._gen.generate(
             task, model=model, repo_facts=repo_facts, skills_context=skills_context
         )
