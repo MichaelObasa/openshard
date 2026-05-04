@@ -879,6 +879,7 @@ class RunPipeline:
                 "repo_context_summary": asdict(_native_meta.repo_context_summary) if _native_meta.repo_context_summary is not None else None,
                 "observation": asdict(_native_meta.observation) if _native_meta.observation is not None else None,
                 "evidence": asdict(_native_meta.evidence) if _native_meta.evidence is not None else None,
+                "plan": asdict(_native_meta.plan) if _native_meta.plan is not None else None,
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,

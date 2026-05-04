@@ -47,6 +47,14 @@ class NativeEvidence:
     truncated: bool = False
 
 
+@dataclass
+class NativePlan:
+    intent: str = "standard"
+    risk: str = "low"
+    suggested_steps: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
 def build_initial_context_budget(
     context_window: int | None = None,
 ) -> NativeContextBudget:
@@ -96,6 +104,28 @@ def render_native_evidence(evidence: NativeEvidence, *, limit: int = 600) -> str
 
     rendered = "\n".join(lines)
 
+    suffix = "\n[truncated]"
+    if len(rendered) <= limit:
+        return rendered
+    return (rendered[: max(0, limit - len(suffix))].rstrip() + suffix)[:limit]
+
+
+def render_native_plan(plan: NativePlan, *, limit: int = 600) -> str:
+    lines = ["[native plan]"]
+    lines.append(f"intent: {plan.intent}")
+    lines.append(f"risk: {plan.risk}")
+
+    if plan.suggested_steps:
+        lines.append("suggested steps:")
+        for step in plan.suggested_steps[:5]:
+            lines.append(f"- {step}")
+
+    if plan.warnings:
+        lines.append("warnings:")
+        for warning in plan.warnings[:3]:
+            lines.append(f"- {warning}")
+
+    rendered = "\n".join(lines)
     suffix = "\n[truncated]"
     if len(rendered) <= limit:
         return rendered
