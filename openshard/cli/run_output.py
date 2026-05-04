@@ -2,6 +2,7 @@ import re
 import sys
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any
 
 import click
@@ -396,6 +397,43 @@ def _print_native_demo_block(native_meta: Any) -> None:
     click.echo("\n[native]")
     for line in body:
         click.echo(line)
+
+
+def _dict_to_ns(obj: Any) -> Any:
+    """Recursively convert nested dicts to SimpleNamespace for attribute access."""
+    if isinstance(obj, dict):
+        return SimpleNamespace(**{k: _dict_to_ns(v) for k, v in obj.items()})
+    if isinstance(obj, list):
+        return [_dict_to_ns(item) for item in obj]
+    return obj
+
+
+def _native_meta_from_entry(entry: dict) -> Any | None:
+    """Extract native metadata from a history entry dict, or None if not a native run."""
+    is_native = (
+        entry.get("workflow") == "native"
+        or entry.get("executor") == "native"
+    )
+    if not is_native:
+        return None
+    return _dict_to_ns({
+        "repo_context_summary": entry.get("repo_context_summary"),
+        "observation": entry.get("observation"),
+        "plan": entry.get("plan"),
+        "write_path": entry.get("write_path", "pipeline"),
+        "verification_loop": entry.get("verification_loop"),
+        "diff_review": entry.get("diff_review"),
+        "final_report": entry.get("final_report"),
+    })
+
+
+def _render_native_inspection(entry: dict, detail: str) -> None:
+    """Render stored native [native] and [native summary] blocks for openshard last."""
+    native_meta = _native_meta_from_entry(entry)
+    if native_meta is None:
+        return
+    _print_native_demo_block(native_meta)
+    _print_native_summary(native_meta, detail)
 
 
 def _print_dry_run(files: list[ChangedFile]) -> None:
