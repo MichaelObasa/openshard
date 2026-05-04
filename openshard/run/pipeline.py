@@ -973,6 +973,19 @@ class RunPipeline:
                     else None
                 ),
                 "native_loop_steps": list(_native_meta.native_loop_steps),
+                "native_loop_trace": (
+                    [
+                        {
+                            "phase": event.phase,
+                            "status": event.status,
+                            "summary": event.summary,
+                            "metadata": event.metadata,
+                        }
+                        for event in getattr(_native_meta.native_loop_trace, "events", [])
+                    ]
+                    if _native_meta is not None
+                    else []
+                ),
                 "native_backend": getattr(_native_meta, "native_backend", "builtin"),
                 "native_backend_available": getattr(_native_meta, "native_backend_available", True),
                 "native_backend_notes": list(getattr(_native_meta, "native_backend_notes", [])),

@@ -28,6 +28,7 @@ from openshard.native.repo_context import (
     build_repo_context_summary,
     render_repo_context_summary,
 )
+from openshard.native.loop import NativeLoopTrace
 from openshard.native.skills import match_builtin_skills, selected_skill_names
 from openshard.native.tool_runner import NativeToolRunner
 from openshard.native.tools import NativeToolCall, NativeToolResult
@@ -52,6 +53,7 @@ class NativeRunMeta:
     verification_loop: NativeVerificationLoop | None = None
     final_report: NativeFinalReport | None = None
     native_loop_steps: list[str] = field(default_factory=list)
+    native_loop_trace: NativeLoopTrace = field(default_factory=NativeLoopTrace)
     native_backend: str = "builtin"
     native_backend_available: bool = True
     native_backend_notes: list[str] = field(default_factory=list)
@@ -209,9 +211,16 @@ class NativeAgentExecutor:
                 "Install deepagents to enable this experimental backend."
             ]
 
-    def record_loop_step(self, step: str) -> None:
+    def record_loop_step(
+        self,
+        step: str,
+        *,
+        summary: str = "",
+        metadata: dict | None = None,
+    ) -> None:
         if step not in self.native_meta.native_loop_steps:
             self.native_meta.native_loop_steps.append(step)
+        self.native_meta.native_loop_trace.record(step, summary=summary, metadata=metadata or {})
 
     def run_tool(self, call: NativeToolCall) -> NativeToolResult:
         if self._runner is None:

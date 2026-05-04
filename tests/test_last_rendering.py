@@ -420,5 +420,83 @@ class TestLastNativeInspection(unittest.TestCase):
         self.assertEqual(meta.native_backend_proof.mode, "readonly_agent_proof")
 
 
+class TestNativeLoopTraceRendering(unittest.TestCase):
+    """Tests for native_loop_trace extraction and rendering in saved-run inspection."""
+
+    def _entry_with_trace(self, trace_events=None):
+        entry = _native_entry()
+        entry["native_loop_steps"] = ["repo_context", "observation", "plan", "generation"]
+        if trace_events is not None:
+            entry["native_loop_trace"] = trace_events
+        return entry
+
+    # 1
+    def test_saved_run_tolerates_missing_native_loop_trace(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+        entry = _native_entry()
+        # no native_loop_trace key
+        meta = _native_meta_from_entry(entry)
+        self.assertIsNotNone(meta)
+        trace = getattr(meta, "native_loop_trace", None)
+        self.assertIsNotNone(trace)
+        # Should be an empty list (raw, before _dict_to_ns promotion)
+        if isinstance(trace, list):
+            self.assertEqual(trace, [])
+        else:
+            self.assertEqual(getattr(trace, "events", []), [])
+
+    # 2
+    def test_saved_run_with_empty_native_loop_trace_no_trace_section(self):
+        entry = self._entry_with_trace(trace_events=[])
+        out = _render(entry, detail="full")
+        self.assertNotIn("loop trace:", out)
+
+    # 3
+    def test_full_detail_renders_loop_trace(self):
+        events = [
+            {"phase": "repo_context", "status": "completed", "summary": "", "metadata": {}},
+            {"phase": "observation", "status": "completed", "summary": "", "metadata": {"files": 12}},
+            {"phase": "write", "status": "completed", "summary": "", "metadata": {"files": 2}},
+        ]
+        entry = self._entry_with_trace(trace_events=events)
+        out = _render(entry, detail="full")
+        self.assertIn("loop trace:", out)
+        self.assertIn("repo_context [completed]", out)
+        self.assertIn("observation [completed]", out)
+        self.assertIn("write [completed]", out)
+
+    # 4
+    def test_default_detail_hides_loop_trace(self):
+        events = [
+            {"phase": "repo_context", "status": "completed", "summary": "", "metadata": {}},
+        ]
+        entry = self._entry_with_trace(trace_events=events)
+        out = _render(entry, detail="default")
+        self.assertNotIn("loop trace:", out)
+
+    # 5
+    def test_more_detail_hides_loop_trace(self):
+        events = [
+            {"phase": "plan", "status": "completed", "summary": "", "metadata": {}},
+        ]
+        entry = self._entry_with_trace(trace_events=events)
+        out = _render(entry, detail="more")
+        self.assertNotIn("loop trace:", out)
+
+    # 6
+    def test_native_meta_from_entry_extracts_loop_trace(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+        events = [{"phase": "plan", "status": "completed", "summary": "", "metadata": {}}]
+        entry = self._entry_with_trace(trace_events=events)
+        meta = _native_meta_from_entry(entry)
+        raw_trace = getattr(meta, "native_loop_trace", None)
+        self.assertIsNotNone(raw_trace)
+        # After _dict_to_ns, items may be SimpleNamespace
+        if isinstance(raw_trace, list):
+            self.assertEqual(len(raw_trace), 1)
+        else:
+            self.assertEqual(len(getattr(raw_trace, "events", [])), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
