@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from openshard.analysis.repo import RepoFacts
 from openshard.execution.generator import ExecutionGenerator, ExecutionResult
 from openshard.native.context import CompactRunState, NativeContextBudget
 from openshard.native.skills import match_builtin_skills, selected_skill_names
+from openshard.native.tool_runner import NativeToolRunner
+from openshard.native.tools import NativeToolCall, NativeToolResult
 
 
 @dataclass
@@ -23,11 +26,33 @@ class NativeRunMeta:
 class NativeAgentExecutor:
     """Fast-path native executor. Delegates generation to ExecutionGenerator."""
 
-    def __init__(self, provider=None) -> None:
+    def __init__(self, provider=None, repo_root: Path | None = None) -> None:
         self._gen = ExecutionGenerator(provider=provider)
         self.model = self._gen.model
         self.fixer_model = self._gen.fixer_model
         self.native_meta = NativeRunMeta()
+        self._runner = NativeToolRunner(repo_root) if repo_root is not None else None
+
+    def run_tool(self, call: NativeToolCall) -> NativeToolResult:
+        if self._runner is None:
+            result = NativeToolResult(
+                tool_name=call.tool_name,
+                ok=False,
+                error="No repo_root configured for tool execution.",
+            )
+            self.native_meta.tool_trace.append({
+                "tool": call.tool_name,
+                "ok": False,
+                "approved": call.approved,
+                "output_chars": 0,
+                "error": result.error,
+            })
+            return result
+        result = self._runner.run(call)
+        self.native_meta.tool_trace.append(
+            self._runner.trace_entry(call, result)
+        )
+        return result
 
     def generate(
         self,
