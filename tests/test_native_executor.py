@@ -587,7 +587,7 @@ class TestNativeWorkflowIntegration(unittest.TestCase):
         """pipeline passes repo_root=Path.cwd() when instantiating NativeAgentExecutor."""
         captured = {}
 
-        def _capture(provider=None, repo_root=None, backend_name="builtin"):
+        def _capture(provider=None, repo_root=None, backend_name="builtin", **kwargs):
             captured["repo_root"] = repo_root
             return _make_native_mock()
 
@@ -3379,3 +3379,157 @@ class TestNativeAgentExecutorBackend(unittest.TestCase):
         result = executor.generate("fix bug", model="some-model")
         fake_gen.generate.assert_called_once()
         self.assertIs(result, fake_gen.generate.return_value)
+
+
+class TestDeepAgentsReadonlyProof(unittest.TestCase):
+    """Tests for the minimal read-only DeepAgents proof invocation."""
+
+    def test_missing_deepagents_returns_unavailable(self):
+        import sys
+        from openshard.native.backends import _default_deepagents_proof
+        with patch.dict(sys.modules, {"deepagents": None}):
+            result = _default_deepagents_proof("fix bug")
+        self.assertFalse(result["available"])
+        self.assertEqual(result["mode"], "unavailable")
+
+    def test_installed_no_model_returns_unconfigured(self):
+        # No deepagents_model in context → unconfigured without calling create_deep_agent
+        import sys
+        from openshard.native.backends import _default_deepagents_proof
+        mock_create = MagicMock()
+        fake_da = MagicMock()
+        fake_da.create_deep_agent = mock_create
+        with patch.dict(sys.modules, {"deepagents": fake_da}):
+            with patch("openshard.native.backends._import_deepagents_create", return_value=mock_create):
+                result = _default_deepagents_proof("fix bug", context={})
+        self.assertTrue(result["available"])
+        self.assertEqual(result["mode"], "readonly_agent_unconfigured")
+        mock_create.assert_not_called()
+
+    def test_create_deep_agent_called_only_with_experimental_flag(self):
+        import sys
+        # Inject deepagents_model so the model guard passes and create_deep_agent is called
+        mock_agent = MagicMock()
+        mock_agent.invoke.return_value = "ok"
+        mock_create = MagicMock(return_value=mock_agent)
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            with patch.dict(sys.modules, {"deepagents": MagicMock()}):
+                with patch("openshard.native.backends._import_deepagents_create", return_value=mock_create):
+                    executor = NativeAgentExecutor(
+                        provider=MagicMock(),
+                        backend_name="deepagents",
+                        experimental_deepagents_run=True,
+                        deepagents_model="mock-model",
+                    )
+                    executor.generate("fix bug")
+        mock_create.assert_called_once()
+
+    def test_create_deep_agent_not_called_without_flag(self):
+        import sys
+        mock_create = MagicMock()
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            with patch.dict(sys.modules, {"deepagents": MagicMock()}):
+                with patch("openshard.native.backends._import_deepagents_create", return_value=mock_create):
+                    executor = NativeAgentExecutor(
+                        provider=MagicMock(),
+                        backend_name="deepagents",
+                        experimental_deepagents_run=False,
+                    )
+                    executor.generate("fix bug")
+        mock_create.assert_not_called()
+
+    def test_no_write_edit_shell_tools_passed(self):
+        # Pass deepagents_model so model guard passes, then verify tools=[]
+        mock_agent = MagicMock()
+        mock_agent.invoke.return_value = "ok"
+        mock_create = MagicMock(return_value=mock_agent)
+        with patch("openshard.native.backends._import_deepagents_create", return_value=mock_create):
+            from openshard.native.backends import _default_deepagents_proof
+            _default_deepagents_proof("fix bug", context={"deepagents_model": "mock-model"})
+        _, kwargs = mock_create.call_args
+        self.assertEqual(kwargs.get("tools", []), [])
+
+    def test_long_output_truncated(self):
+        mock_agent = MagicMock()
+        mock_agent.invoke.return_value = "x" * 1000
+        mock_create = MagicMock(return_value=mock_agent)
+        with patch("openshard.native.backends._import_deepagents_create", return_value=mock_create):
+            from openshard.native.backends import _default_deepagents_proof
+            result = _default_deepagents_proof(
+                "fix bug", context={"deepagents_model": "mock-model"}
+            )
+        self.assertLessEqual(len(result["summary"]), 300)
+
+    def test_default_builtin_path_unchanged(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        executor.generate("fix bug")
+        self.assertIsNone(executor.native_meta.native_backend_proof)
+
+    def test_deepagents_backend_without_experimental_flag_no_call(self):
+        import sys
+        mock_create = MagicMock()
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            with patch.dict(sys.modules, {"deepagents": MagicMock()}):
+                with patch("openshard.native.backends._import_deepagents_create", return_value=mock_create):
+                    executor = NativeAgentExecutor(
+                        provider=MagicMock(),
+                        backend_name="deepagents",
+                        experimental_deepagents_run=False,
+                    )
+                    executor.generate("fix bug")
+        mock_create.assert_not_called()
+
+    def test_proof_metadata_stored_on_native_meta(self):
+        import sys
+        mock_agent = MagicMock()
+        mock_agent.invoke.return_value = "summary text"
+        mock_create = MagicMock(return_value=mock_agent)
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            with patch.dict(sys.modules, {"deepagents": MagicMock()}):
+                with patch("openshard.native.backends._import_deepagents_create", return_value=mock_create):
+                    executor = NativeAgentExecutor(
+                        provider=MagicMock(),
+                        backend_name="deepagents",
+                        experimental_deepagents_run=True,
+                        deepagents_model="mock-model",
+                    )
+                    executor.generate("fix bug")
+        proof = executor.native_meta.native_backend_proof
+        self.assertIsNotNone(proof)
+        self.assertIn("mode", proof)
+        self.assertIn("summary", proof)
+        self.assertIn("backend", proof)
+
+    def test_deepagents_default_tools_warning_path(self):
+        import sys
+        # Production code returns readonly_agent_unconfigured when deepagents_model is not
+        # injected — proves accidental live invocation with default built-in tools cannot happen
+        mock_create = MagicMock()
+        fake_da = MagicMock()
+        fake_da.create_deep_agent = mock_create
+        with patch.dict(sys.modules, {"deepagents": fake_da}):
+            with patch("openshard.native.backends._import_deepagents_create", return_value=mock_create):
+                from openshard.native.backends import _default_deepagents_proof
+                result = _default_deepagents_proof("fix bug", context={})
+        mock_create.assert_not_called()
+        self.assertEqual(result["mode"], "readonly_agent_unconfigured")
+
+    def test_proof_metadata_compact_shape(self):
+        mock_agent = MagicMock()
+        mock_agent.invoke.return_value = "short"
+        mock_create = MagicMock(return_value=mock_agent)
+        with patch("openshard.native.backends._import_deepagents_create", return_value=mock_create):
+            from openshard.native.backends import _default_deepagents_proof
+            result = _default_deepagents_proof(
+                "fix bug", context={"deepagents_model": "mock-model"}
+            )
+        for key in ("backend", "available", "mode", "summary", "notes"):
+            self.assertIn(key, result)
+        self.assertIsInstance(result["summary"], str)
+        self.assertIsInstance(result["notes"], list)

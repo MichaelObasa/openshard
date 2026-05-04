@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from openshard.analysis.repo import RepoFacts
 from openshard.execution.generator import ExecutionGenerator, ExecutionResult
@@ -54,6 +55,7 @@ class NativeRunMeta:
     native_backend: str = "builtin"
     native_backend_available: bool = True
     native_backend_notes: list[str] = field(default_factory=list)
+    native_backend_proof: dict | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -181,7 +183,14 @@ def _build_native_plan(
 class NativeAgentExecutor:
     """Fast-path native executor. Delegates generation to ExecutionGenerator."""
 
-    def __init__(self, provider=None, repo_root: Path | None = None, backend_name: str = "builtin") -> None:
+    def __init__(
+        self,
+        provider=None,
+        repo_root: Path | None = None,
+        backend_name: str = "builtin",
+        experimental_deepagents_run: bool = False,
+        deepagents_model: str | None = None,
+    ) -> None:
         from openshard.native.backends import get_backend
 
         self._gen = ExecutionGenerator(provider=provider)
@@ -193,6 +202,8 @@ class NativeAgentExecutor:
         _available = self._backend.available()
         self.native_meta.native_backend = self._backend.name
         self.native_meta.native_backend_available = _available
+        self._experimental_deepagents_run = experimental_deepagents_run
+        self._deepagents_model = deepagents_model  # None in production; injectable for tests
         if backend_name == "deepagents" and not _available:
             self.native_meta.native_backend_notes = [
                 "Install deepagents to enable this experimental backend."
@@ -279,6 +290,25 @@ class NativeAgentExecutor:
         self.native_meta.observation = observation
         self.record_loop_step("observation")
 
+    def _run_backend_proof_phase(self, task: str) -> None:
+        if self._backend.name != "deepagents":
+            return
+        context: dict[str, Any] = {"experimental_deepagents_run": True}
+        if self._deepagents_model:
+            context["deepagents_model"] = self._deepagents_model
+        rcs = self.native_meta.repo_context_summary
+        if rcs is not None:
+            context["repo_context_summary"] = " ".join(
+                getattr(rcs, "likely_stack_markers", [])
+            )
+        result = self._backend.run(task=task, context=context)
+        proof = result.metadata.get("proof")
+        if proof:
+            self.native_meta.native_backend_proof = proof
+        if result.notes:
+            self.native_meta.native_backend_notes.extend(result.notes)
+        self.record_loop_step("backend_proof")
+
     def review_diff(self) -> NativeDiffReview | None:
         if self._runner is None:
             return None
@@ -319,6 +349,8 @@ class NativeAgentExecutor:
         skills_context: str = "",
     ) -> ExecutionResult:
         self._run_preflight()
+        if self._experimental_deepagents_run:
+            self._run_backend_proof_phase(task)
         self._run_observe_phase(task, repo_facts=repo_facts)
         matches = match_builtin_skills(task, repo_facts=repo_facts)
         self.native_meta.selected_skills = selected_skill_names(matches)

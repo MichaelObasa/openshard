@@ -359,6 +359,13 @@ def _render_native_demo_block(native_meta: Any) -> list[str]:
         lines.append(f"  backend: {native_backend}{_backend_suffix}")
         has_content = True
 
+    backend_proof = getattr(native_meta, "native_backend_proof", None)
+    if backend_proof:
+        proof_mode = backend_proof.get("mode", "unknown")
+        readable = proof_mode.replace("_", " ")
+        lines.append(f"  proof: {readable}")
+        has_content = True
+
     observation = getattr(native_meta, "observation", None)
     if observation is not None:
         has_content = True
@@ -444,6 +451,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "native_backend": entry.get("native_backend", None),
         "native_backend_available": entry.get("native_backend_available", True),
         "native_backend_notes": entry.get("native_backend_notes", []),
+        "native_backend_proof": entry.get("native_backend_proof"),
     })
 
 
