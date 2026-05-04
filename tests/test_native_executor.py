@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
@@ -15,6 +17,7 @@ from openshard.native.context import (
 )
 from openshard.native.executor import NativeAgentExecutor, NativeRunMeta
 from openshard.native.skills import NativeSkill, NativeSkillMatch
+from openshard.native.tools import NativeToolCall
 
 _DEFAULT_CONFIG = {"approval_mode": "smart"}
 
@@ -195,6 +198,79 @@ class TestNativeAgentExecutor(unittest.TestCase):
         ):
             executor.generate("run the tests")
         self.assertEqual(executor.native_meta.selected_skills, ["test-discovery"])
+
+
+class TestNativeAgentExecutorRunTool(unittest.TestCase):
+    """Tests for NativeAgentExecutor.run_tool() and tool_trace population."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor
+
+    def _make_executor_no_repo(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor
+
+    def test_run_tool_appends_trace_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.py").write_text("x = 1")
+            executor = self._make_executor_with_repo(root)
+            call = NativeToolCall(tool_name="list_files", args={})
+            executor.run_tool(call)
+        self.assertEqual(len(executor.native_meta.tool_trace), 1)
+
+    def test_run_tool_trace_has_no_output_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "b.py").write_text("y = 2")
+            executor = self._make_executor_with_repo(root)
+            call = NativeToolCall(tool_name="list_files", args={})
+            executor.run_tool(call)
+        entry = executor.native_meta.tool_trace[0]
+        self.assertNotIn("output", entry)
+
+    def test_run_tool_trace_entry_structure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            call = NativeToolCall(tool_name="list_files", args={})
+            executor.run_tool(call)
+        entry = executor.native_meta.tool_trace[0]
+        self.assertIn("tool", entry)
+        self.assertIn("ok", entry)
+        self.assertIn("approved", entry)
+        self.assertIn("output_chars", entry)
+        self.assertIn("error", entry)
+
+    def test_run_tool_no_repo_root_returns_error_and_appends_trace(self):
+        executor = self._make_executor_no_repo()
+        call = NativeToolCall(tool_name="list_files", args={})
+        result = executor.run_tool(call)
+        self.assertFalse(result.ok)
+        self.assertIsNotNone(result.error)
+        self.assertEqual(len(executor.native_meta.tool_trace), 1)
+        self.assertFalse(executor.native_meta.tool_trace[0]["ok"])
+
+    def test_generate_leaves_tool_trace_unchanged(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        executor.generate("do something")
+        self.assertEqual(executor.native_meta.tool_trace, [])
+
+    def test_multiple_run_tool_calls_accumulate_trace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "c.py").write_text("z = 3")
+            executor = self._make_executor_with_repo(root)
+            executor.run_tool(NativeToolCall(tool_name="list_files", args={}))
+            executor.run_tool(NativeToolCall(tool_name="run_command", args={}))
+        self.assertEqual(len(executor.native_meta.tool_trace), 2)
 
 
 class TestNativeWorkflowIntegration(unittest.TestCase):
