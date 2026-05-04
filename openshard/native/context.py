@@ -82,6 +82,24 @@ class NativeVerificationLoop:
     truncated: bool = False
 
 
+@dataclass
+class NativeFinalReport:
+    used_native_context: bool = False
+    observed_tools: list[str] = field(default_factory=list)
+    selected_skills: list[str] = field(default_factory=list)
+    plan_intent: str | None = None
+    plan_risk: str | None = None
+    evidence_items: int = 0
+    snippet_files: int = 0
+    verification_attempted: bool = False
+    verification_passed: bool = False
+    verification_retried: bool = False
+    diff_files: list[str] = field(default_factory=list)
+    added_lines: int = 0
+    removed_lines: int = 0
+    warnings: list[str] = field(default_factory=list)
+
+
 def build_initial_context_budget(
     context_window: int | None = None,
 ) -> NativeContextBudget:
@@ -89,6 +107,46 @@ def build_initial_context_budget(
     return NativeContextBudget(
         context_window=context_window,
         estimated_tokens_remaining=context_window,
+    )
+
+
+def build_native_final_report(
+    *,
+    selected_skills: list[str],
+    observation: NativeObservation | None,
+    evidence: NativeEvidence | None,
+    plan: NativePlan | None,
+    verification_loop: NativeVerificationLoop | None,
+    diff_review: NativeDiffReview | None,
+) -> NativeFinalReport:
+    warnings: list[str] = []
+
+    if observation is not None:
+        warnings.extend(observation.warnings)
+        if observation.dirty_diff_present:
+            warnings.append("dirty working tree detected")
+
+    if plan is not None:
+        warnings.extend(plan.warnings)
+
+    if verification_loop is not None and verification_loop.attempted and not verification_loop.passed:
+        warnings.append("verification failed")
+
+    return NativeFinalReport(
+        used_native_context=observation is not None or evidence is not None or plan is not None,
+        observed_tools=observation.observed_tools if observation is not None else [],
+        selected_skills=list(selected_skills),
+        plan_intent=plan.intent if plan is not None else None,
+        plan_risk=plan.risk if plan is not None else None,
+        evidence_items=len(evidence.search_results) if evidence is not None else 0,
+        snippet_files=len(evidence.file_snippets) if evidence is not None else 0,
+        verification_attempted=verification_loop.attempted if verification_loop is not None else False,
+        verification_passed=verification_loop.passed if verification_loop is not None else False,
+        verification_retried=verification_loop.retried if verification_loop is not None else False,
+        diff_files=diff_review.changed_files if diff_review is not None else [],
+        added_lines=diff_review.added_lines if diff_review is not None else 0,
+        removed_lines=diff_review.removed_lines if diff_review is not None else 0,
+        warnings=sorted(set(warnings)),
     )
 
 
