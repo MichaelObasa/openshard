@@ -35,6 +35,7 @@ from openshard.execution.generator import (
     check_stack_mismatch,
 )
 from openshard.execution.opencode_executor import OpenCodeExecutor
+from openshard.native.context import NativeVerificationLoop, render_verification_failure_context
 from openshard.native.executor import NativeAgentExecutor
 from openshard.execution.stages import StageRun, split_task, route_stage, run_planning_stage
 from openshard.history.adjustments import (
@@ -773,6 +774,62 @@ class RunPipeline:
                 _write_files(exec_result.files, workspace)
             # OpenCode: workspace already created and populated before generate().
 
+        # Native controlled verification loop — one retry, safe commands only, no --verify flag required
+        if effective_executor == "native" and write and not dry_run and not verify:
+            _loop_meta = NativeVerificationLoop()
+            generator.native_meta.verification_loop = _loop_meta
+            if (
+                _verification_plan.has_commands
+                and all(cmd.safety == CommandSafety.safe for cmd in _verification_plan.commands)
+            ):
+                _loop_meta.attempted = True
+                _loop_code, _loop_output = _run_verification_plan(
+                    _verification_plan, workspace, capture=True
+                )
+                _loop_meta.exit_code = _loop_code
+                _loop_meta.output_chars = len(_loop_output)
+                _loop_meta.truncated = len(_loop_output) > 1200
+                _loop_meta.passed = _loop_code == 0
+                if _loop_code != 0:
+                    _failure_ctx = render_verification_failure_context(
+                        _loop_output, exit_code=_loop_code
+                    )
+                    _retry_skills_ctx = "\n\n".join(
+                        p for p in [_skills_ctx, _failure_ctx] if p
+                    )
+                    spinner.start("Retrying - native verification failed, regenerating")
+                    try:
+                        _retry_result = generator.generate(
+                            task,
+                            model=_routed_model,
+                            repo_facts=_repo_facts,
+                            skills_context=_retry_skills_ctx,
+                        )
+                    except RuntimeError as exc:
+                        raise click.ClickException(str(exc))
+                    except ProviderAuthError:
+                        raise click.ClickException(
+                            "Authentication failed. Check that your provider API key is valid."
+                        )
+                    except ProviderRateLimitError:
+                        raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
+                    except ProviderError as exc:
+                        raise click.ClickException(f"API error: {exc}")
+                    finally:
+                        spinner.stop()
+                    _loop_meta.retried = True
+                    exec_result = _retry_result
+                    final_files = _retry_result.files
+                    _write_files(_retry_result.files, workspace)
+                    # Run verification once more after retry — update metadata with final result
+                    _loop_code2, _loop_output2 = _run_verification_plan(
+                        _verification_plan, workspace, capture=True
+                    )
+                    _loop_meta.exit_code = _loop_code2
+                    _loop_meta.output_chars = len(_loop_output2)
+                    _loop_meta.truncated = len(_loop_output2) > 1200
+                    _loop_meta.passed = _loop_code2 == 0
+
         if write and verify:
             click.echo("")
             code = _run_verification_plan(_verification_plan, workspace, gate=gate, detail=detail)
@@ -884,6 +941,11 @@ class RunPipeline:
                 "evidence": asdict(_native_meta.evidence) if _native_meta.evidence is not None else None,
                 "plan": asdict(_native_meta.plan) if _native_meta.plan is not None else None,
                 "write_path": _native_meta.write_path,
+                "verification_loop": (
+                    asdict(_native_meta.verification_loop)
+                    if _native_meta.verification_loop is not None
+                    else None
+                ),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,

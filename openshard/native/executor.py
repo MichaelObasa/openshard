@@ -12,6 +12,7 @@ from openshard.native.context import (
     NativeFileSnippet,
     NativeObservation,
     NativePlan,
+    NativeVerificationLoop,
     build_initial_context_budget,
     render_native_evidence,
     render_native_observation,
@@ -42,6 +43,7 @@ class NativeRunMeta:
     evidence: NativeEvidence | None = None
     plan: NativePlan | None = None
     write_path: str = "pipeline"
+    verification_loop: NativeVerificationLoop | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
