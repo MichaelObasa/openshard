@@ -117,6 +117,13 @@ def plan(task: str):
     default=None,
     help="Native workflow backend (default: builtin). deepagents is experimental/stub only. Ignored for non-native workflows.",
 )
+@click.option(
+    "--experimental-deepagents-run",
+    "experimental_deepagents_run",
+    is_flag=True,
+    default=False,
+    help="Enable experimental DeepAgents proof metadata path. Requires --native-backend deepagents.",
+)
 @click.option("--plan", "plan_flag", is_flag=True, default=False, help="Show execution plan and prompt for approval before running.")
 @click.option(
     "--approval",
@@ -132,7 +139,7 @@ def plan(task: str):
 )
 @click.option("--history-scoring", "history_scoring", is_flag=True, default=False, help="Apply run-history bonuses/penalties to model scoring (opt-in).")
 @click.option("--eval-scoring", "eval_scoring", is_flag=True, default=False, help="Apply eval-run bonuses/penalties to model scoring (opt-in).")
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, native_backend: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool):
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, native_backend: str | None, experimental_deepagents_run: bool, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool):
     """Execute TASK and return a structured result."""
     try:
         config = load_config()
@@ -155,6 +162,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         eval_scoring=eval_scoring,
         detail=detail,
         native_backend=native_backend,
+        experimental_deepagents_run=experimental_deepagents_run,
     )
     result = pipeline.run(task)
     if result.exit_code != 0:

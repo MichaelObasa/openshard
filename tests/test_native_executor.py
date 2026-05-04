@@ -3379,3 +3379,175 @@ class TestNativeAgentExecutorBackend(unittest.TestCase):
         result = executor.generate("fix bug", model="some-model")
         fake_gen.generate.assert_called_once()
         self.assertIs(result, fake_gen.generate.return_value)
+
+
+class TestDeepAgentsSandboxProof(unittest.TestCase):
+    """Tests for the experimental DeepAgents proof metadata path."""
+
+    def _make_executor(self, backend_name="builtin", deepagents_available=False):
+        fake_gen = _make_generator_mock()
+        modules = {"deepagents": MagicMock() if deepagents_available else None}
+        import sys
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen), \
+             patch.dict(sys.modules, modules):
+            executor = NativeAgentExecutor(provider=MagicMock(), backend_name=backend_name)
+        return executor
+
+    def test_proof_not_triggered_without_experimental_flag(self):
+        executor = self._make_executor(backend_name="deepagents", deepagents_available=True)
+        executor.try_backend_proof("fix bug", {}, experimental=False)
+        self.assertIsNone(executor.native_meta.native_backend_proof)
+
+    def test_proof_not_triggered_for_builtin_backend(self):
+        executor = self._make_executor(backend_name="builtin")
+        executor.try_backend_proof("fix bug", {}, experimental=True)
+        self.assertIsNone(executor.native_meta.native_backend_proof)
+
+    def test_proof_not_triggered_when_deepagents_unavailable(self):
+        import sys
+        with patch.dict(sys.modules, {"deepagents": None}):
+            executor = self._make_executor(backend_name="deepagents", deepagents_available=False)
+        executor.try_backend_proof("fix bug", {}, experimental=True)
+        self.assertIsNone(executor.native_meta.native_backend_proof)
+
+    def test_proof_triggered_with_mocked_deepagents(self):
+        import sys
+        import openshard.native.backends as _backends
+
+        called_with = {}
+
+        def _fake_proof(task, context):
+            called_with["task"] = task
+            called_with["context"] = context
+            return {"mode": "sandbox_proof", "summary": "proof ok", "notes": []}
+
+        original = _backends._deepagents_proof_fn
+        _backends._deepagents_proof_fn = _fake_proof
+        fake_gen = _make_generator_mock()
+        try:
+            with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen), \
+                 patch.dict(sys.modules, {"deepagents": MagicMock()}):
+                executor = NativeAgentExecutor(provider=MagicMock(), backend_name="deepagents")
+                executor.try_backend_proof("fix bug", {}, experimental=True)
+        finally:
+            _backends._deepagents_proof_fn = original
+
+        self.assertIsNotNone(executor.native_meta.native_backend_proof)
+        self.assertEqual(called_with["task"], "fix bug")
+
+    def test_proof_metadata_stored_in_native_meta(self):
+        import sys
+        import openshard.native.backends as _backends
+
+        def _fake_proof(task, context):
+            return {"mode": "sandbox_proof", "summary": "proof ok", "notes": []}
+
+        original = _backends._deepagents_proof_fn
+        _backends._deepagents_proof_fn = _fake_proof
+        fake_gen = _make_generator_mock()
+        try:
+            with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen), \
+                 patch.dict(sys.modules, {"deepagents": MagicMock()}):
+                executor = NativeAgentExecutor(provider=MagicMock(), backend_name="deepagents")
+                executor.try_backend_proof("fix bug", {}, experimental=True)
+        finally:
+            _backends._deepagents_proof_fn = original
+
+        proof = executor.native_meta.native_backend_proof
+        self.assertIsNotNone(proof)
+        self.assertEqual(proof["backend"], "deepagents")
+        self.assertTrue(proof["available"])
+        self.assertEqual(proof["mode"], "sandbox_proof")
+        self.assertNotIn("raw_files", proof)
+        self.assertNotIn("shell", proof)
+
+    def test_proof_payload_has_no_raw_files_or_shell_keys(self):
+        import sys
+        import openshard.native.backends as _backends
+
+        received_context = {}
+
+        def _fake_proof(task, context):
+            received_context.update(context)
+            return {"mode": "sandbox_proof", "summary": "", "notes": []}
+
+        original = _backends._deepagents_proof_fn
+        _backends._deepagents_proof_fn = _fake_proof
+        fake_gen = _make_generator_mock()
+        try:
+            with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen), \
+                 patch.dict(sys.modules, {"deepagents": MagicMock()}):
+                executor = NativeAgentExecutor(provider=MagicMock(), backend_name="deepagents")
+                executor.try_backend_proof("fix bug", {}, experimental=True)
+        finally:
+            _backends._deepagents_proof_fn = original
+
+        forbidden = {"write_file", "edit_file", "run_command", "shell", "raw_files", "snippets", "diff"}
+        for key in forbidden:
+            self.assertNotIn(key, received_context, f"Forbidden key '{key}' found in proof payload")
+
+    def test_deepagents_run_without_flag_stays_stub(self):
+        import sys
+        from openshard.native.backends import DeepAgentsNativeBackend
+
+        with patch.dict(sys.modules, {"deepagents": MagicMock()}):
+            backend = DeepAgentsNativeBackend()
+            result = backend.run(task="t", context={})
+
+        self.assertEqual(result.metadata["mode"], "stub")
+
+    def test_deepagents_run_with_flag_returns_sandbox_proof(self):
+        import sys
+        import openshard.native.backends as _backends
+        from openshard.native.backends import DeepAgentsNativeBackend
+
+        def _fake_proof(task, context):
+            return {"mode": "sandbox_proof", "summary": "proof", "notes": []}
+
+        original = _backends._deepagents_proof_fn
+        _backends._deepagents_proof_fn = _fake_proof
+        try:
+            with patch.dict(sys.modules, {"deepagents": MagicMock()}):
+                backend = DeepAgentsNativeBackend()
+                result = backend.run(task="t", context={"experimental_run": True})
+                self.assertEqual(result.metadata["mode"], "sandbox_proof")
+                self.assertEqual(result.metadata["backend"], "deepagents")
+                self.assertTrue(result.metadata["available"])
+        finally:
+            _backends._deepagents_proof_fn = original
+
+    def test_proof_metadata_serialized_in_log(self):
+        import sys
+        import openshard.native.backends as _backends
+        from openshard.cli.main import cli
+
+        def _fake_proof(task, context):
+            return {"mode": "sandbox_proof", "summary": "proof", "notes": []}
+
+        original = _backends._deepagents_proof_fn
+        _backends._deepagents_proof_fn = _fake_proof
+        runner = CliRunner()
+        try:
+            with patch.dict(sys.modules, {"deepagents": MagicMock()}), \
+                 patch("openshard.run.pipeline.RunPipeline.run") as mock_run:
+                from openshard.run.pipeline import RunResult
+                mr = RunResult()
+                mr.exit_code = 0
+                mr.result_summary = "done"
+                mock_run.return_value = mr
+                _result = runner.invoke(
+                    cli,
+                    ["run", "fix bug", "--workflow", "native",
+                     "--native-backend", "deepagents",
+                     "--experimental-deepagents-run"],
+                )
+        finally:
+            _backends._deepagents_proof_fn = original
+
+        mock_run.assert_called_once()
+
+    def test_default_builtin_run_has_no_backend_proof(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), backend_name="builtin")
+        self.assertIsNone(executor.native_meta.native_backend_proof)

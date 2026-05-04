@@ -114,6 +114,7 @@ class RunPipeline:
         eval_scoring: bool,
         detail: str,
         native_backend: str | None = None,
+        experimental_deepagents_run: bool = False,
     ) -> None:
         self._config = config
         self._write = write
@@ -130,6 +131,7 @@ class RunPipeline:
         self._eval_scoring = eval_scoring
         self._detail = detail
         self._native_backend = native_backend or "builtin"
+        self._experimental_deepagents_run = experimental_deepagents_run
 
     def run(self, task: str) -> RunResult:  # noqa: C901
         result_obj = RunResult()
@@ -241,6 +243,12 @@ class RunPipeline:
                     repo_root=Path.cwd(),
                     backend_name=self._native_backend,
                 )
+                if hasattr(generator, "try_backend_proof"):
+                    generator.try_backend_proof(
+                        task,
+                        {},
+                        experimental=self._experimental_deepagents_run,
+                    )
             else:
                 generator = ExecutionGenerator(provider=_provider_instance)
         except (ValueError, RuntimeError) as exc:
@@ -973,6 +981,7 @@ class RunPipeline:
                 "native_backend": getattr(_native_meta, "native_backend", "builtin"),
                 "native_backend_available": getattr(_native_meta, "native_backend_available", True),
                 "native_backend_notes": list(getattr(_native_meta, "native_backend_notes", [])),
+                "native_backend_proof": getattr(_native_meta, "native_backend_proof", None),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,

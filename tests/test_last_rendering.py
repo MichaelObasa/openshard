@@ -384,6 +384,61 @@ class TestLastNativeInspection(unittest.TestCase):
         out = _render(entry, detail="more")
         self.assertIn("backend: deepagents unavailable", out)
 
+    def test_render_native_demo_block_shows_backend_proof_line(self):
+        from types import SimpleNamespace
+        from openshard.cli.run_output import _render_native_demo_block
+
+        meta = SimpleNamespace(
+            repo_context_summary=SimpleNamespace(likely_stack_markers=["python"], test_markers=[]),
+            native_backend="deepagents",
+            native_backend_available=True,
+            native_backend_notes=[],
+            native_backend_proof={"mode": "sandbox_proof", "summary": "proof ok", "notes": []},
+            observation=None,
+            plan=None,
+            write_path="pipeline",
+            verification_loop=None,
+            diff_review=None,
+            native_loop_steps=[],
+        )
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertIn("backend proof: sandbox proof, available", joined)
+
+    def test_render_native_demo_block_no_proof_when_absent(self):
+        from types import SimpleNamespace
+        from openshard.cli.run_output import _render_native_demo_block
+
+        meta = SimpleNamespace(
+            repo_context_summary=SimpleNamespace(likely_stack_markers=["python"], test_markers=[]),
+            native_backend="deepagents",
+            native_backend_available=True,
+            native_backend_notes=[],
+            native_backend_proof=None,
+            observation=None,
+            plan=None,
+            write_path="pipeline",
+            verification_loop=None,
+            diff_review=None,
+            native_loop_steps=[],
+        )
+        lines = _render_native_demo_block(meta)
+        self.assertNotIn("backend proof", "\n".join(lines))
+
+    def test_native_meta_from_entry_passes_backend_proof(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+
+        entry = _native_entry()
+        entry["native_backend"] = "deepagents"
+        entry["native_backend_available"] = True
+        entry["native_backend_proof"] = {"mode": "sandbox_proof", "summary": "proof ok"}
+        ns = _native_meta_from_entry(entry)
+        self.assertIsNotNone(ns)
+        proof = ns.native_backend_proof
+        self.assertIsNotNone(proof)
+        mode = proof["mode"] if isinstance(proof, dict) else proof.mode
+        self.assertEqual(mode, "sandbox_proof")
+
 
 if __name__ == "__main__":
     unittest.main()

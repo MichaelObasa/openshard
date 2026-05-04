@@ -54,6 +54,7 @@ class NativeRunMeta:
     native_backend: str = "builtin"
     native_backend_available: bool = True
     native_backend_notes: list[str] = field(default_factory=list)
+    native_backend_proof: dict | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -197,6 +198,22 @@ class NativeAgentExecutor:
             self.native_meta.native_backend_notes = [
                 "Install deepagents to enable this experimental backend."
             ]
+
+    def try_backend_proof(
+        self,
+        task: str,
+        context: dict,
+        *,
+        experimental: bool = False,
+    ) -> None:
+        if not experimental:
+            return
+        if self._backend.name != "deepagents":
+            return
+        if not self._backend.available():
+            return
+        result = self._backend.run(task=task, context={**context, "experimental_run": True})
+        self.native_meta.native_backend_proof = result.metadata
 
     def record_loop_step(self, step: str) -> None:
         if step not in self.native_meta.native_loop_steps:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -50,6 +51,28 @@ class DeepAgentsNativeBackend:
                 notes=["Install deepagents to enable this experimental backend."],
                 metadata={"backend": self.name, "available": False},
             )
+        if context.get("experimental_run"):
+            _payload = {
+                "task": task,
+                "experimental_run": True,
+                "repo_context_summary": context.get("repo_context_summary"),
+                "native_backend": self.name,
+            }
+            _t0 = time.monotonic()
+            proof = _deepagents_proof_fn(task, _payload)
+            _duration_ms = int((time.monotonic() - _t0) * 1000)
+            return NativeBackendResult(
+                summary=proof.get("summary", "deepagents sandbox proof completed"),
+                notes=list(proof.get("notes", [])),
+                metadata={
+                    "backend": self.name,
+                    "available": True,
+                    "mode": proof.get("mode", "sandbox_proof"),
+                    "summary": proof.get("summary", ""),
+                    "notes": list(proof.get("notes", [])),
+                    "duration_ms": _duration_ms,
+                },
+            )
         return NativeBackendResult(
             summary="deepagents backend available",
             notes=[
@@ -58,6 +81,17 @@ class DeepAgentsNativeBackend:
             ],
             metadata={"backend": self.name, "available": True, "mode": "stub"},
         )
+
+
+def _default_deepagents_proof(task: str, context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "mode": "sandbox_proof",
+        "summary": "deepagents sandbox proof completed",
+        "notes": [],
+    }
+
+
+_deepagents_proof_fn = _default_deepagents_proof
 
 
 def get_backend(name: str) -> NativeAgentBackend:
