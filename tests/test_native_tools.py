@@ -1,0 +1,249 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+from openshard.native.executor import NativeAgentExecutor, NativeRunMeta
+from openshard.native.tools import (
+    NativeTool,
+    NativeToolCall,
+    NativeToolResult,
+    _exec_list_files,
+    _exec_read_file,
+    classify_native_tool,
+    compact_tool_result,
+    get_native_tool,
+    list_native_tools,
+)
+
+_EXPECTED_BUILTIN_NAMES = {
+    "list_files",
+    "read_file",
+    "search_repo",
+    "get_git_diff",
+    "write_file",
+    "run_verification",
+    "run_command",
+}
+
+
+class TestListNativeTools(unittest.TestCase):
+    def test_returns_all_builtins(self):
+        tools = list_native_tools()
+        names = {t.name for t in tools}
+        self.assertEqual(names, _EXPECTED_BUILTIN_NAMES)
+
+    def test_returns_copy(self):
+        tools = list_native_tools()
+        tools.clear()
+        self.assertEqual(len(list_native_tools()), len(_EXPECTED_BUILTIN_NAMES))
+
+    def test_each_entry_is_native_tool(self):
+        for tool in list_native_tools():
+            self.assertIsInstance(tool, NativeTool)
+
+    def test_each_tool_has_non_empty_description(self):
+        for tool in list_native_tools():
+            self.assertTrue(tool.description.strip(), f"{tool.name} has empty description")
+
+    def test_each_tool_has_valid_risk(self):
+        valid = {"safe", "needs_approval", "blocked"}
+        for tool in list_native_tools():
+            self.assertIn(tool.risk, valid, f"{tool.name} has invalid risk: {tool.risk!r}")
+
+    def test_each_tool_has_at_least_one_category(self):
+        for tool in list_native_tools():
+            self.assertTrue(tool.categories, f"{tool.name} has no categories")
+
+
+class TestGetNativeTool(unittest.TestCase):
+    def test_found_known_tool(self):
+        tool = get_native_tool("list_files")
+        self.assertIsNotNone(tool)
+        assert tool is not None
+        self.assertEqual(tool.name, "list_files")
+        self.assertEqual(tool.risk, "safe")
+
+    def test_not_found_unknown_tool(self):
+        self.assertIsNone(get_native_tool("nonexistent_tool"))
+
+    def test_not_found_empty_string(self):
+        self.assertIsNone(get_native_tool(""))
+
+
+class TestClassifyNativeTool(unittest.TestCase):
+    def test_safe_tools(self):
+        for name in ("list_files", "read_file", "search_repo", "get_git_diff", "run_verification"):
+            with self.subTest(name=name):
+                self.assertEqual(classify_native_tool(name), "safe")
+
+    def test_needs_approval_tool(self):
+        self.assertEqual(classify_native_tool("write_file"), "needs_approval")
+
+    def test_blocked_tool(self):
+        self.assertEqual(classify_native_tool("run_command"), "blocked")
+
+    def test_unknown_tool_is_blocked(self):
+        self.assertEqual(classify_native_tool("rm_rf"), "blocked")
+        self.assertEqual(classify_native_tool(""), "blocked")
+
+
+class TestCompactToolResult(unittest.TestCase):
+    def test_short_output_unchanged(self):
+        text = "hello world"
+        self.assertEqual(compact_tool_result(text), text)
+
+    def test_empty_output_unchanged(self):
+        self.assertEqual(compact_tool_result(""), "")
+
+    def test_exact_limit_unchanged(self):
+        text = "x" * 4000
+        self.assertEqual(compact_tool_result(text, limit=4000), text)
+
+    def test_over_limit_truncated(self):
+        text = "a" * 5000
+        result = compact_tool_result(text, limit=4000)
+        self.assertTrue(result.startswith("a" * 4000))
+        self.assertIn("[truncated:", result)
+        self.assertIn("4000", result)
+
+    def test_custom_limit(self):
+        text = "b" * 200
+        result = compact_tool_result(text, limit=100)
+        self.assertTrue(result.startswith("b" * 100))
+        self.assertIn("[truncated:", result)
+
+
+class TestNativeToolDataclasses(unittest.TestCase):
+    def test_native_tool_call_defaults(self):
+        call = NativeToolCall(tool_name="list_files", args={"subdir": "."})
+        self.assertFalse(call.approved)
+
+    def test_native_tool_result_defaults(self):
+        result = NativeToolResult(tool_name="list_files", ok=True)
+        self.assertEqual(result.output, "")
+        self.assertIsNone(result.error)
+        self.assertEqual(result.metadata, {})
+
+    def test_native_tool_result_metadata_not_shared(self):
+        r1 = NativeToolResult(tool_name="list_files", ok=True)
+        r2 = NativeToolResult(tool_name="read_file", ok=True)
+        r1.metadata["key"] = "value"
+        self.assertNotIn("key", r2.metadata)
+
+
+class TestExecListFiles(unittest.TestCase):
+    def test_lists_files_in_tmp(self, tmp_path=None):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "foo.py").write_text("# foo")
+            (root / "bar.txt").write_text("bar")
+            subdir = root / "pkg"
+            subdir.mkdir()
+            (subdir / "mod.py").write_text("# mod")
+
+            result = _exec_list_files(root)
+            self.assertTrue(result.ok)
+            self.assertIsNone(result.error)
+            lines = result.output.splitlines()
+            names = {Path(p).name for p in lines}
+            self.assertIn("foo.py", names)
+            self.assertIn("bar.txt", names)
+            self.assertIn("mod.py", names)
+
+    def test_ignores_git_dir(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            git_dir = root / ".git"
+            git_dir.mkdir()
+            (git_dir / "HEAD").write_text("ref: refs/heads/main")
+            (root / "real.py").write_text("# real")
+
+            result = _exec_list_files(root)
+            self.assertTrue(result.ok)
+            lines = result.output.splitlines()
+            self.assertFalse(any(".git" in p for p in lines))
+
+    def test_ignores_pyc_files(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "module.py").write_text("# module")
+            (root / "module.pyc").write_bytes(b"\x00\x00\x00\x00")
+
+            result = _exec_list_files(root)
+            self.assertTrue(result.ok)
+            lines = result.output.splitlines()
+            self.assertFalse(any(p.endswith(".pyc") for p in lines))
+
+    def test_unsafe_subdir_returns_error(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            result = _exec_list_files(root, subdir="../escape")
+            self.assertFalse(result.ok)
+            self.assertIsNotNone(result.error)
+
+
+class TestExecReadFile(unittest.TestCase):
+    def test_reads_safe_file(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "hello.txt").write_text("hello content")
+
+            result = _exec_read_file(root, "hello.txt")
+            self.assertTrue(result.ok)
+            self.assertEqual(result.output, "hello content")
+            self.assertIsNone(result.error)
+
+    def test_unsafe_path_returns_error(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            result = _exec_read_file(root, "../escape")
+            self.assertFalse(result.ok)
+            self.assertIsNotNone(result.error)
+
+    def test_missing_file_returns_error(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            result = _exec_read_file(root, "nonexistent.txt")
+            self.assertFalse(result.ok)
+            self.assertIsNotNone(result.error)
+
+    def test_large_file_truncated(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            big = "z" * 5000
+            (root / "big.txt").write_text(big)
+
+            result = _exec_read_file(root, "big.txt")
+            self.assertTrue(result.ok)
+            self.assertIn("[truncated:", result.output)
+            self.assertLessEqual(len(result.output), 5000)
+
+
+class TestNativeFastPathToolTrace(unittest.TestCase):
+    """Importing native tools must not pollute tool_trace on NativeRunMeta."""
+
+    def test_tool_trace_empty_by_default(self):
+        meta = NativeRunMeta()
+        self.assertEqual(meta.tool_trace, [])
+
+    def test_tool_trace_empty_after_generate(self):
+        fake_gen = MagicMock()
+        fake_gen.generate.return_value = MagicMock(usage=None, files=[], summary="ok", notes=[])
+        fake_gen.model = "mock"
+        fake_gen.fixer_model = "mock-fixer"
+
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+
+        executor.generate("add a feature")
+        self.assertEqual(executor.native_meta.tool_trace, [])
