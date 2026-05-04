@@ -10,6 +10,10 @@ from openshard.native.context import (
     NativeContextBudget,
     build_initial_context_budget,
 )
+from openshard.native.repo_context import (
+    NativeRepoContextSummary,
+    build_repo_context_summary,
+)
 from openshard.native.skills import match_builtin_skills, selected_skill_names
 from openshard.native.tool_runner import NativeToolRunner
 from openshard.native.tools import NativeToolCall, NativeToolResult
@@ -25,6 +29,7 @@ class NativeRunMeta:
     context_state: CompactRunState | None = None
     context_warnings: list[str] = field(default_factory=list)
     tool_trace: list[dict] = field(default_factory=list)
+    repo_context_summary: NativeRepoContextSummary | None = None
 
 
 class NativeAgentExecutor:
@@ -44,30 +49,34 @@ class NativeAgentExecutor:
                 ok=False,
                 error="No repo_root configured for tool execution.",
             )
-            self.native_meta.tool_trace.append({
-                "tool": call.tool_name,
-                "ok": False,
-                "approved": call.approved,
-                "output_chars": 0,
-                "error": result.error,
-            })
+            self.native_meta.tool_trace.append(
+                {
+                    "tool": call.tool_name,
+                    "ok": False,
+                    "approved": call.approved,
+                    "output_chars": 0,
+                    "error": result.error,
+                }
+            )
             return result
+
         result = self._runner.run(call)
-        self.native_meta.tool_trace.append(
-            self._runner.trace_entry(call, result)
-        )
+        self.native_meta.tool_trace.append(self._runner.trace_entry(call, result))
         return result
 
     def _run_preflight(self) -> None:
         if self._runner is None:
             return
+
         call = NativeToolCall(tool_name="list_files", args={"subdir": "."})
         result = self._runner.run(call)
         self.native_meta.tool_trace.append(self._runner.trace_entry(call, result))
+
         if result.ok:
             if self.native_meta.context_budget is None:
                 self.native_meta.context_budget = build_initial_context_budget()
             self.native_meta.context_budget.repo_map_built = True
+            self.native_meta.repo_context_summary = build_repo_context_summary(result.output)
 
     def generate(
         self,
