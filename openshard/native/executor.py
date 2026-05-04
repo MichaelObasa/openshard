@@ -9,6 +9,7 @@ from openshard.native.context import (
     CompactRunState,
     NativeContextBudget,
     NativeEvidence,
+    NativeFileSnippet,
     NativeObservation,
     NativePlan,
     build_initial_context_budget,
@@ -50,6 +51,58 @@ _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
 })
 
 _SEARCH_TRIGGER_WORDS: frozenset[str] = frozenset({"where", "find", "search", "locate"})
+
+
+def _parse_search_result_line(line: str) -> tuple[str, int] | None:
+    parts = line.split(":", 2)
+    if len(parts) < 3:
+        return None
+    path, lineno_raw, _ = parts
+    try:
+        return path, int(lineno_raw)
+    except ValueError:
+        return None
+
+
+def _extract_snippet_lines(content: str, lineno: int, *, radius: int = 2, max_lines: int = 8) -> list[str]:
+    all_lines = content.splitlines()
+    if not all_lines:
+        return []
+    idx = max(0, lineno - 1)
+    start = max(0, idx - radius)
+    end = min(len(all_lines), idx + radius + 1)
+    selected = all_lines[start:end][:max_lines]
+    return [f"{start + i + 1}: {line}" for i, line in enumerate(selected)]
+
+
+def _build_file_snippets_from_search(
+    runner,
+    search_lines: list[str],
+) -> tuple[list[NativeFileSnippet], list[dict]]:
+    snippets: list[NativeFileSnippet] = []
+    traces: list[dict] = []
+    seen: list[str] = []
+
+    for line in search_lines:
+        parsed = _parse_search_result_line(line)
+        if parsed is None:
+            continue
+        path, lineno = parsed
+        if path in seen:
+            continue
+        seen.append(path)
+        if len(seen) > 2:
+            break
+
+        call = NativeToolCall(tool_name="read_file", args={"path": path})
+        result = runner.run(call)
+        traces.append(runner.trace_entry(call, result))
+        if not result.ok:
+            continue
+        snippet_lines = _extract_snippet_lines(result.output, lineno)
+        snippets.append(NativeFileSnippet(path=path, lines=snippet_lines))
+
+    return snippets, traces
 
 
 def _extract_search_query(task: str) -> str | None:
@@ -183,8 +236,14 @@ class NativeAgentExecutor:
                     observation.search_matches_count = search_result.metadata.get("matches", 0)
                     raw_lines = [ln for ln in search_result.output.splitlines() if ln.strip()]
                     truncated = search_result.metadata.get("truncated", False) or len(raw_lines) > 3
+                    file_snippets, read_traces = _build_file_snippets_from_search(
+                        self._runner,
+                        raw_lines[:3],
+                    )
+                    self.native_meta.tool_trace.extend(read_traces)
                     self.native_meta.evidence = NativeEvidence(
                         search_results=raw_lines[:3],
+                        file_snippets=file_snippets,
                         truncated=truncated,
                     )
 
