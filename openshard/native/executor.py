@@ -5,7 +5,8 @@ from pathlib import Path
 
 from openshard.analysis.repo import RepoFacts
 from openshard.execution.generator import ExecutionGenerator, ExecutionResult
-from openshard.native.context import CompactRunState, NativeContextBudget
+from openshard.native.context import CompactRunState, NativeContextBudget, build_initial_context_budget
+from openshard.native.repo_context import NativeRepoContextSummary, build_repo_context_summary
 from openshard.native.skills import match_builtin_skills, selected_skill_names
 from openshard.native.tool_runner import NativeToolRunner
 from openshard.native.tools import NativeToolCall, NativeToolResult
@@ -21,6 +22,7 @@ class NativeRunMeta:
     context_state: CompactRunState | None = None
     context_warnings: list[str] = field(default_factory=list)
     tool_trace: list[dict] = field(default_factory=list)
+    repo_context_summary: NativeRepoContextSummary | None = None
 
 
 class NativeAgentExecutor:
@@ -54,6 +56,16 @@ class NativeAgentExecutor:
         )
         return result
 
+    def _run_preflight(self) -> None:
+        if self._runner is None:
+            return
+        call = NativeToolCall(tool_name="list_files", args={}, approved=True)
+        result = self.run_tool(call)
+        self.native_meta.context_budget = build_initial_context_budget()
+        self.native_meta.context_budget.repo_map_built = True
+        if result.ok:
+            self.native_meta.repo_context_summary = build_repo_context_summary(result.output)
+
     def generate(
         self,
         task: str,
@@ -61,6 +73,7 @@ class NativeAgentExecutor:
         repo_facts: RepoFacts | None = None,
         skills_context: str = "",
     ) -> ExecutionResult:
+        self._run_preflight()
         matches = match_builtin_skills(task, repo_facts=repo_facts)
         self.native_meta.selected_skills = selected_skill_names(matches)
         return self._gen.generate(

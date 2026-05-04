@@ -16,6 +16,7 @@ from openshard.native.context import (
     build_initial_context_budget,
 )
 from openshard.native.executor import NativeAgentExecutor, NativeRunMeta
+from openshard.native.repo_context import NativeRepoContextSummary
 from openshard.native.skills import NativeSkill, NativeSkillMatch
 from openshard.native.tools import NativeToolCall
 
@@ -75,6 +76,7 @@ class TestNativeRunMeta(unittest.TestCase):
         self.assertIsNone(meta.context_state)
         self.assertEqual(meta.context_warnings, [])
         self.assertEqual(meta.tool_trace, [])
+        self.assertIsNone(meta.repo_context_summary)
 
 
 class TestNativeContextBudget(unittest.TestCase):
@@ -263,6 +265,27 @@ class TestNativeAgentExecutorRunTool(unittest.TestCase):
         executor.generate("do something")
         self.assertEqual(executor.native_meta.tool_trace, [])
 
+    def test_preflight_stores_repo_context_summary_when_repo_root_set(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            (root / "utils.py").write_text("y = 2")
+            fake_gen = _make_generator_mock()
+            with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+                executor = NativeAgentExecutor(provider=MagicMock(), repo_root=root)
+            executor.generate("fix bug")
+        self.assertIsInstance(executor.native_meta.repo_context_summary, NativeRepoContextSummary)
+        self.assertGreater(executor.native_meta.repo_context_summary.total_files, 0)
+        self.assertTrue(executor.native_meta.context_budget.repo_map_built)
+
+    def test_preflight_not_called_without_repo_root(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        executor.generate("fix bug")
+        self.assertIsNone(executor.native_meta.repo_context_summary)
+        self.assertIsNone(executor.native_meta.context_budget)
+
     def test_multiple_run_tool_calls_accumulate_trace(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -323,6 +346,12 @@ class TestNativeWorkflowIntegration(unittest.TestCase):
         self.assertIsNone(logged.get("context_state"))
         self.assertEqual(logged.get("context_warnings"), [])
         self.assertEqual(logged.get("tool_trace"), [])
+        self.assertIn("repo_context_summary", logged)
+
+    def test_native_log_repo_context_summary_is_none_without_repo_root(self):
+        result, _, logged = self._run(["--workflow", "native", "add a feature"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIsNone(logged.get("repo_context_summary"))
 
     def test_native_dry_run(self):
         """--workflow native --dry-run exits 0 without writing files."""

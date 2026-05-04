@@ -876,6 +876,7 @@ class RunPipeline:
                 "context_state": asdict(_native_meta.context_state) if _native_meta.context_state is not None else None,
                 "context_warnings": _native_meta.context_warnings,
                 "tool_trace": _native_meta.tool_trace,
+                "repo_context_summary": asdict(_native_meta.repo_context_summary) if _native_meta.repo_context_summary is not None else None,
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
