@@ -773,6 +773,8 @@ class RunPipeline:
                     confirm_or_abort(_rp_dec.reason)
                 _write_files(exec_result.files, workspace)
                 if effective_executor == "native":
+                    if hasattr(generator, "record_loop_step"):
+                        generator.record_loop_step("write")
                     generator.review_diff()
             # OpenCode: workspace already created and populated before generate().
 
@@ -785,6 +787,8 @@ class RunPipeline:
                 and all(cmd.safety == CommandSafety.safe for cmd in _verification_plan.commands)
             ):
                 _loop_meta.attempted = True
+                if hasattr(generator, "record_loop_step"):
+                    generator.record_loop_step("verification")
                 _loop_code, _loop_output = _run_verification_plan(
                     _verification_plan, workspace, capture=True
                 )
@@ -962,6 +966,7 @@ class RunPipeline:
                     if _native_meta.final_report is not None
                     else None
                 ),
+                "native_loop_steps": list(_native_meta.native_loop_steps),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,

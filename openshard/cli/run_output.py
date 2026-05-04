@@ -388,6 +388,11 @@ def _render_native_demo_block(native_meta: Any) -> list[str]:
         removed = getattr(diff_review, "removed_lines", 0)
         lines.append(f"  diff: {n} {file_word}, +{added} / -{removed}")
 
+    loop_steps = getattr(native_meta, "native_loop_steps", None)
+    if loop_steps:
+        lines.append(f"  loop: {' -> '.join(loop_steps)}")
+        has_content = True
+
     return lines if has_content else []
 
 
@@ -428,6 +433,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "verification_loop": entry.get("verification_loop"),
         "diff_review": entry.get("diff_review"),
         "final_report": entry.get("final_report"),
+        "native_loop_steps": entry.get("native_loop_steps", []),
     })
 
 

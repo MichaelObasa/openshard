@@ -279,6 +279,24 @@ class TestLastNativeInspection(unittest.TestCase):
         self.assertNotIn("b.py", out)
         self.assertIn("2 files", out)
 
+    def test_loop_steps_rendered_in_native_block(self):
+        entry = _native_entry()
+        entry["native_loop_steps"] = ["repo_context", "observation", "plan", "generation"]
+        out = _render(entry, detail="more")
+        self.assertIn("loop:", out)
+        self.assertIn("repo_context -> observation -> plan -> generation", out)
+
+    def test_empty_loop_steps_no_loop_line(self):
+        entry = _native_entry()
+        entry["native_loop_steps"] = []
+        out = _render(entry, detail="more")
+        self.assertNotIn("loop:", out)
+
+    def test_non_native_entry_no_loop_steps_rendered(self):
+        entry = {"task": "standard run", "workflow": "standard", "native_loop_steps": ["plan"]}
+        out = _render(entry, detail="more")
+        self.assertNotIn("loop:", out)
+
 
 if __name__ == "__main__":
     unittest.main()

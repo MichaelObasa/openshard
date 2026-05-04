@@ -3002,6 +3002,143 @@ class TestNativeSummaryRenderer(unittest.TestCase):
         self.assertEqual(result.output.strip(), "")
 
 
+class TestNativeLoopSteps(unittest.TestCase):
+    """Tests for native_loop_steps field and record_loop_step method."""
+
+    def _make_executor(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor
+
+    # 1
+    def test_native_loop_steps_defaults_to_empty_list(self):
+        meta = NativeRunMeta()
+        self.assertEqual(meta.native_loop_steps, [])
+
+    # 2
+    def test_native_loop_steps_instances_not_shared(self):
+        a = NativeRunMeta()
+        b = NativeRunMeta()
+        a.native_loop_steps.append("repo_context")
+        self.assertEqual(b.native_loop_steps, [])
+
+    # 3
+    def test_record_loop_step_appends_in_order(self):
+        executor = self._make_executor()
+        executor.record_loop_step("repo_context")
+        executor.record_loop_step("observation")
+        executor.record_loop_step("plan")
+        self.assertEqual(
+            executor.native_meta.native_loop_steps,
+            ["repo_context", "observation", "plan"],
+        )
+
+    # 4
+    def test_record_loop_step_no_duplicates(self):
+        executor = self._make_executor()
+        executor.record_loop_step("plan")
+        executor.record_loop_step("plan")
+        self.assertEqual(executor.native_meta.native_loop_steps, ["plan"])
+
+    # 5
+    def test_preflight_records_repo_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            executor = self._make_executor_with_repo(Path(tmp))
+            executor._run_preflight()
+        self.assertIn("repo_context", executor.native_meta.native_loop_steps)
+
+    # 6
+    def test_observe_phase_records_observation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            executor = self._make_executor_with_repo(Path(tmp))
+            executor._run_observe_phase("fix the bug")
+        self.assertIn("observation", executor.native_meta.native_loop_steps)
+
+    # 7
+    def test_observe_phase_records_evidence_for_search_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config.py").write_text("DATABASE_URL = 'sqlite:///db'\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("where is the database config")
+        if executor.native_meta.evidence is not None:
+            self.assertIn("evidence", executor.native_meta.native_loop_steps)
+
+    # 8
+    def test_generate_records_plan_and_generation(self):
+        executor = self._make_executor()
+        executor.generate("fix the bug")
+        self.assertIn("plan", executor.native_meta.native_loop_steps)
+        self.assertIn("generation", executor.native_meta.native_loop_steps)
+
+    # 9
+    def test_review_diff_records_diff_review(self):
+        from openshard.native.tools import NativeToolResult
+        executor = self._make_executor()
+        runner_mock = MagicMock()
+        runner_mock.run.return_value = NativeToolResult(tool_name="get_git_diff", ok=True, output="diff --git a/x\n+line")
+        runner_mock.trace_entry.return_value = {"tool": "get_git_diff", "ok": True, "output_chars": 10}
+        executor._runner = runner_mock
+        executor.review_diff()
+        self.assertIn("diff_review", executor.native_meta.native_loop_steps)
+
+    # 10
+    def test_build_final_report_records_final_report(self):
+        executor = self._make_executor()
+        executor.build_final_report()
+        self.assertIn("final_report", executor.native_meta.native_loop_steps)
+
+    # 11
+    def test_pipeline_serializes_native_loop_steps(self):
+        native_mock = _make_native_mock()
+        _, _, logged = TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertIn("native_loop_steps", logged)
+        self.assertIsInstance(logged["native_loop_steps"], list)
+
+    # 12
+    def test_pipeline_records_write_and_verification_steps(self):
+        native_mock = _make_native_mock()
+        native_mock.record_loop_step.side_effect = lambda step: (
+            native_mock.native_meta.native_loop_steps.append(step)
+            if step not in native_mock.native_meta.native_loop_steps
+            else None
+        )
+        TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertIn("write", native_mock.native_meta.native_loop_steps)
+        self.assertIn("verification", native_mock.native_meta.native_loop_steps)
+
+    # 13
+    def test_native_loop_steps_labels_only_no_raw_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            executor = self._make_executor_with_repo(Path(tmp))
+            executor._run_preflight()
+            executor._run_observe_phase("fix the bug")
+        for step in executor.native_meta.native_loop_steps:
+            self.assertIsInstance(step, str)
+            self.assertLess(len(step), 30, f"step label unexpectedly long: {step!r}")
+            self.assertNotIn("\n", step)
+
+    # 14
+    def test_live_native_output_renders_loop_line(self):
+        meta = NativeRunMeta()
+        meta.native_loop_steps = ["repo_context", "observation", "plan", "generation"]
+        meta.plan = NativePlan(intent="standard", risk="low")
+        out = _render_native_demo_block_str(meta)
+        self.assertIn("loop:", out)
+        self.assertIn("repo_context -> observation -> plan -> generation", out)
+
+
 class TestNativeDemoBlock(unittest.TestCase):
     """Unit and integration tests for the [native] demo block renderer."""
 
