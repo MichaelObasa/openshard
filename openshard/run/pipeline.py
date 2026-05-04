@@ -932,7 +932,8 @@ class RunPipeline:
             generator.build_final_report()
         _native_meta = generator.native_meta if effective_executor == "native" else None
         if _native_meta is not None:
-            from openshard.cli.run_output import _print_native_summary
+            from openshard.cli.run_output import _print_native_demo_block, _print_native_summary
+            _print_native_demo_block(_native_meta)
             _print_native_summary(_native_meta)
         _extra_metadata: dict | None = None
         if _native_meta is not None:
