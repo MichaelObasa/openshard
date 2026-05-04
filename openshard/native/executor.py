@@ -5,8 +5,16 @@ from pathlib import Path
 
 from openshard.analysis.repo import RepoFacts
 from openshard.execution.generator import ExecutionGenerator, ExecutionResult
+<<<<<<< HEAD
 from openshard.native.context import CompactRunState, NativeContextBudget, build_initial_context_budget
 from openshard.native.repo_context import NativeRepoContextSummary, build_repo_context_summary
+=======
+from openshard.native.context import (
+    CompactRunState,
+    NativeContextBudget,
+    build_initial_context_budget,
+)
+>>>>>>> 8951699cb4553cc9e5796a06d8a6e39dfe9047db
 from openshard.native.skills import match_builtin_skills, selected_skill_names
 from openshard.native.tool_runner import NativeToolRunner
 from openshard.native.tools import NativeToolCall, NativeToolResult
@@ -59,12 +67,22 @@ class NativeAgentExecutor:
     def _run_preflight(self) -> None:
         if self._runner is None:
             return
+<<<<<<< HEAD
         call = NativeToolCall(tool_name="list_files", args={}, approved=True)
         result = self.run_tool(call)
         self.native_meta.context_budget = build_initial_context_budget()
         self.native_meta.context_budget.repo_map_built = True
         if result.ok:
             self.native_meta.repo_context_summary = build_repo_context_summary(result.output)
+=======
+        call = NativeToolCall(tool_name="list_files", args={"subdir": "."})
+        result = self._runner.run(call)
+        self.native_meta.tool_trace.append(self._runner.trace_entry(call, result))
+        if result.ok:
+            if self.native_meta.context_budget is None:
+                self.native_meta.context_budget = build_initial_context_budget()
+            self.native_meta.context_budget.repo_map_built = True
+>>>>>>> 8951699cb4553cc9e5796a06d8a6e39dfe9047db
 
     def generate(
         self,
