@@ -86,6 +86,64 @@ class TestNativeToolRunnerBlockedAndUnknown(unittest.TestCase):
         self.assertIsInstance(result.ok, bool)
 
 
+class TestNativeToolRunnerSearchRepo(unittest.TestCase):
+    def test_run_search_repo_ok(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "greet.py").write_text("def hello():\n    pass\n")
+            runner = _make_runner(root)
+            call = NativeToolCall(tool_name="search_repo", args={"query": "hello"})
+            result = runner.run(call)
+        self.assertTrue(result.ok)
+        self.assertIn("greet.py", result.output)
+        self.assertIsNone(result.error)
+
+    def test_run_search_repo_empty_query_returns_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner = _make_runner(root)
+            call = NativeToolCall(tool_name="search_repo", args={"query": ""})
+            result = runner.run(call)
+        self.assertFalse(result.ok)
+        self.assertIsNotNone(result.error)
+
+    def test_run_search_repo_missing_query_key_returns_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner = _make_runner(root)
+            call = NativeToolCall(tool_name="search_repo", args={})
+            result = runner.run(call)
+        self.assertFalse(result.ok)
+
+    def test_run_search_repo_respects_max_matches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "many.py").write_text("\n".join(["hit"] * 30))
+            runner = _make_runner(root)
+            call = NativeToolCall(
+                tool_name="search_repo",
+                args={"query": "hit", "max_matches": 5},
+            )
+            result = runner.run(call)
+        self.assertTrue(result.ok)
+        self.assertLessEqual(result.metadata["matches"], 5)
+        self.assertTrue(result.metadata["truncated"])
+
+    def test_trace_entry_search_repo_no_full_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "sample.py").write_text("find me here\n")
+            runner = _make_runner(root)
+            call = NativeToolCall(tool_name="search_repo", args={"query": "find me"})
+            result = runner.run(call)
+            entry = runner.trace_entry(call, result)
+        self.assertIn("tool", entry)
+        self.assertIn("ok", entry)
+        self.assertIn("output_chars", entry)
+        self.assertNotIn("output", entry)
+        self.assertEqual(entry["output_chars"], len(result.output))
+
+
 class TestNativeToolRunnerTraceEntry(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
