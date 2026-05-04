@@ -160,5 +160,107 @@ class TestLastVerificationDisplay(unittest.TestCase):
         self.assertIn("pytest", out)
 
 
+def _native_entry() -> dict:
+    return {
+        "task": "add feature",
+        "workflow": "native",
+        "executor": "native",
+        "repo_context_summary": {
+            "likely_stack_markers": ["python"],
+            "test_markers": ["pytest"],
+            "total_files": 30,
+            "top_level_dirs": ["openshard"],
+            "package_files": ["pyproject.toml"],
+            "truncated": False,
+        },
+        "observation": {
+            "dirty_diff_present": False,
+            "search_matches_count": 3,
+            "observed_tools": [],
+            "verification_available": True,
+            "warnings": [],
+        },
+        "plan": {"intent": "implementation", "risk": "medium", "suggested_steps": [], "warnings": []},
+        "write_path": "pipeline",
+        "verification_loop": {
+            "attempted": True,
+            "passed": True,
+            "retried": True,
+            "exit_code": 0,
+            "output_chars": 200,
+            "truncated": False,
+        },
+        "diff_review": {
+            "has_diff": True,
+            "changed_files": ["a.py", "b.py"],
+            "added_lines": 34,
+            "removed_lines": 8,
+            "output_chars": 500,
+            "truncated": False,
+        },
+        "final_report": {
+            "used_native_context": True,
+            "observed_tools": [],
+            "selected_skills": ["repo mapping", "safe file editing"],
+            "plan_intent": "implementation",
+            "plan_risk": "medium",
+            "evidence_items": 3,
+            "snippet_files": 2,
+            "verification_attempted": True,
+            "verification_passed": True,
+            "verification_retried": True,
+            "diff_files": ["a.py", "b.py"],
+            "added_lines": 34,
+            "removed_lines": 8,
+            "warnings": [],
+        },
+    }
+
+
+class TestLastNativeInspection(unittest.TestCase):
+
+    def test_more_renders_native_block(self):
+        out = _render(_native_entry(), detail="more")
+        self.assertIn("[native]", out)
+        self.assertIn("repo:", out)
+        self.assertIn("python", out)
+
+    def test_more_renders_native_summary(self):
+        out = _render(_native_entry(), detail="more")
+        self.assertIn("[native summary]", out)
+        self.assertIn("context: yes", out)
+        self.assertIn("repo mapping", out)
+
+    def test_full_renders_native_blocks(self):
+        out = _render(_native_entry(), detail="full")
+        self.assertIn("[native]", out)
+        self.assertIn("[native summary]", out)
+
+    def test_default_hides_native_blocks(self):
+        out = _render(_native_entry(), detail="default")
+        self.assertNotIn("[native]", out)
+        self.assertNotIn("[native summary]", out)
+
+    def test_non_native_entry_no_native_blocks(self):
+        entry = {"task": "standard run", "workflow": "standard"}
+        out = _render(entry, detail="more")
+        self.assertNotIn("[native]", out)
+        self.assertNotIn("[native summary]", out)
+
+    def test_partial_native_metadata_no_crash(self):
+        entry = {"task": "native run", "workflow": "native"}
+        out = _render(entry, detail="more")
+        self.assertIn("[native]", out)
+        self.assertNotIn("[native summary]", out)
+
+    def test_raw_output_not_printed(self):
+        entry = _native_entry()
+        entry["diff_review"]["output_chars"] = 9999
+        out = _render(entry, detail="full")
+        self.assertNotIn("a.py", out)
+        self.assertNotIn("b.py", out)
+        self.assertIn("2 files", out)
+
+
 if __name__ == "__main__":
     unittest.main()

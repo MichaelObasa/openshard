@@ -37,6 +37,7 @@ from openshard.cli.run_output import (
     _should_shrink as _should_shrink,
     _print_shrunk as _print_shrunk,
     _print_dry_run as _print_dry_run,
+    _render_native_inspection,
     _RATIONALE_SHORT,
 )
 from openshard.evals.registry import load_eval_tasks
@@ -697,6 +698,10 @@ def _render_log_entry(entry: dict, detail: str) -> None:
             ws = entry.get("workspace_path")
             if ws:
                 click.echo(f"Workspace: {ws}")
+
+    # Native inspection (--more / --full)
+    if detail != "default":
+        _render_native_inspection(entry, detail)
 
     duration = entry.get("duration_seconds", 0)
     cost = entry.get("estimated_cost")
