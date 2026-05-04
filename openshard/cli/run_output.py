@@ -2,6 +2,7 @@ import re
 import sys
 import threading
 import time
+from typing import Any
 
 import click
 
@@ -286,6 +287,50 @@ def _print_shrunk(files: list[ChangedFile], result_summary: str) -> None:
         click.echo("\nErrors detected:")
         for line in error_lines:
             click.echo(f"  {line}")
+
+
+def _print_native_summary(native_meta: Any, detail: str = "default") -> None:
+    """Render compact native execution summary."""
+    report = getattr(native_meta, "final_report", None)
+    if report is None:
+        return
+
+    click.echo("\n[native summary]")
+
+    ctx = "yes" if report.used_native_context else "no"
+    click.echo(f"  context: {ctx}")
+
+    if report.selected_skills:
+        click.echo(f"  skills: {', '.join(report.selected_skills)}")
+
+    if report.plan_intent or report.plan_risk:
+        parts = [p for p in [report.plan_intent, report.plan_risk] if p]
+        click.echo(f"  plan: {' / '.join(parts)}")
+
+    evidence_parts = []
+    if report.evidence_items:
+        evidence_parts.append(f"{report.evidence_items} items")
+    if report.snippet_files:
+        evidence_parts.append(f"{report.snippet_files} snippets")
+    if evidence_parts:
+        click.echo(f"  evidence: {', '.join(evidence_parts)}")
+
+    if report.verification_attempted:
+        v_parts = []
+        if report.verification_retried:
+            v_parts.append("retried")
+        v_parts.append("passed" if report.verification_passed else "failed")
+        click.echo(f"  verification: {', '.join(v_parts)}")
+
+    if report.diff_files:
+        n = len(report.diff_files)
+        file_word = "file" if n == 1 else "files"
+        click.echo(
+            f"  diff: {n} {file_word}, +{report.added_lines} / -{report.removed_lines}"
+        )
+
+    for warning in report.warnings:
+        click.echo(f"  warning: {warning}")
 
 
 def _print_dry_run(files: list[ChangedFile]) -> None:
