@@ -14,6 +14,7 @@ from openshard.native.context import (
     CompactRunState,
     NativeContextBudget,
     NativeEvidence,
+    NativeFileSnippet,
     NativeObservation,
     NativePlan,
     build_compact_run_state,
@@ -22,7 +23,14 @@ from openshard.native.context import (
     render_native_observation,
     render_native_plan,
 )
-from openshard.native.executor import NativeAgentExecutor, NativeRunMeta, _build_native_plan, _extract_search_query
+from openshard.native.executor import (
+    NativeAgentExecutor,
+    NativeRunMeta,
+    _build_native_plan,
+    _extract_search_query,
+    _extract_snippet_lines,
+    _parse_search_result_line,
+)
 from openshard.native.repo_context import NativeRepoContextSummary
 from openshard.native.skills import NativeSkill, NativeSkillMatch
 from openshard.native.tools import NativeToolCall
@@ -1397,3 +1405,253 @@ class TestNativePlanMetaSerialization(unittest.TestCase):
         self.assertIn("risk", d)
         self.assertIn("suggested_steps", d)
         self.assertIn("warnings", d)
+
+
+class TestRenderNativeEvidenceSnippets(unittest.TestCase):
+    """Tests for snippet rendering in render_native_evidence()."""
+
+    def _ev(self, **kwargs):
+        defaults = dict(search_results=[], file_snippets=[], truncated=False)
+        defaults.update(kwargs)
+        return NativeEvidence(**defaults)
+
+    def test_snippets_section_rendered_when_present(self):
+        snippet = NativeFileSnippet(path="src/auth.py", lines=["12: def login_user():"])
+        result = render_native_evidence(self._ev(file_snippets=[snippet]))
+        self.assertIn("snippets:", result)
+        self.assertIn("src/auth.py:", result)
+        self.assertIn("12: def login_user():", result)
+
+    def test_no_snippets_section_when_empty(self):
+        result = render_native_evidence(self._ev(file_snippets=[]))
+        self.assertNotIn("snippets:", result)
+
+    def test_capped_at_2_files(self):
+        snippets = [
+            NativeFileSnippet(path=f"file{i}.py", lines=[f"{i}: line"])
+            for i in range(4)
+        ]
+        result = render_native_evidence(self._ev(file_snippets=snippets))
+        self.assertIn("file0.py:", result)
+        self.assertIn("file1.py:", result)
+        self.assertNotIn("file2.py:", result)
+        self.assertNotIn("file3.py:", result)
+
+    def test_snippet_lines_capped_at_8(self):
+        lines = [f"{i}: x = {i}" for i in range(12)]
+        snippet = NativeFileSnippet(path="big.py", lines=lines)
+        result = render_native_evidence(self._ev(file_snippets=[snippet]))
+        self.assertIn("7: x = 7", result)
+        self.assertNotIn("8: x = 8", result)
+
+    def test_output_bounded_by_limit_with_snippets(self):
+        lines = ["x" * 100 for _ in range(8)]
+        snippet = NativeFileSnippet(path="big.py", lines=lines)
+        result = render_native_evidence(self._ev(file_snippets=[snippet]), limit=100)
+        self.assertLessEqual(len(result), 100)
+        self.assertIn("[truncated]", result)
+
+    def test_default_limit_is_1000(self):
+        import inspect
+        sig = inspect.signature(render_native_evidence)
+        self.assertEqual(sig.parameters["limit"].default, 1000)
+
+
+class TestSearchResultParsing(unittest.TestCase):
+    """Unit tests for _parse_search_result_line() and _extract_snippet_lines()."""
+
+    def test_valid_line_returns_path_and_lineno(self):
+        result = _parse_search_result_line("src/auth.py:42:def login_user():")
+        self.assertEqual(result, ("src/auth.py", 42))
+
+    def test_two_part_line_returns_none(self):
+        self.assertIsNone(_parse_search_result_line("src/auth.py:content"))
+
+    def test_non_integer_lineno_returns_none(self):
+        self.assertIsNone(_parse_search_result_line("src/auth.py:abc:content"))
+
+    def test_empty_string_returns_none(self):
+        self.assertIsNone(_parse_search_result_line(""))
+
+    def test_extract_snippet_includes_target_line(self):
+        content = "\n".join(f"line {i}" for i in range(1, 11))
+        lines = _extract_snippet_lines(content, lineno=5)
+        joined = "\n".join(lines)
+        self.assertIn("5: line 5", joined)
+
+    def test_extract_snippet_lines_are_prefixed_with_line_numbers(self):
+        content = "alpha\nbeta\ngamma\ndelta\nepsilon"
+        lines = _extract_snippet_lines(content, lineno=3)
+        for line in lines:
+            parts = line.split(": ", 1)
+            self.assertEqual(len(parts), 2)
+            self.assertTrue(parts[0].isdigit())
+
+    def test_extract_snippet_handles_first_line(self):
+        content = "first\nsecond\nthird"
+        lines = _extract_snippet_lines(content, lineno=1)
+        self.assertTrue(len(lines) > 0)
+        self.assertIn("1: first", lines[0])
+
+    def test_extract_snippet_handles_last_line(self):
+        content = "alpha\nbeta\ngamma"
+        lines = _extract_snippet_lines(content, lineno=3)
+        self.assertTrue(len(lines) > 0)
+        joined = "\n".join(lines)
+        self.assertIn("3: gamma", joined)
+
+    def test_extract_snippet_empty_content_returns_empty(self):
+        self.assertEqual(_extract_snippet_lines("", lineno=1), [])
+
+    def test_extract_snippet_respects_max_lines(self):
+        content = "\n".join(f"line {i}" for i in range(1, 20))
+        lines = _extract_snippet_lines(content, lineno=10, radius=10, max_lines=4)
+        self.assertLessEqual(len(lines), 4)
+
+
+class TestFileSnippetsObservePhase(unittest.TestCase):
+    """Tests for file_snippets population in _run_observe_phase()."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor
+
+    def test_search_task_stores_file_snippets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login_user(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("where is the login function")
+        self.assertIsNotNone(executor.native_meta.evidence)
+        self.assertIsInstance(executor.native_meta.evidence.file_snippets, list)
+
+    def test_at_most_2_files_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for i in range(5):
+                (root / f"mod{i}.py").write_text(f"def login_{i}(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("where is the login function")
+        if executor.native_meta.evidence is not None:
+            self.assertLessEqual(len(executor.native_meta.evidence.file_snippets), 2)
+
+    def test_read_file_traces_appended(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login_user(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("where is the login function")
+        read_traces = [t for t in executor.native_meta.tool_trace if t["tool"] == "read_file"]
+        if executor.native_meta.evidence and executor.native_meta.evidence.file_snippets:
+            self.assertGreater(len(read_traces), 0)
+
+    def test_snippets_do_not_contain_full_file_content(self):
+        big_content = "\n".join(f"line_{i} = {i}" for i in range(200))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "big.py").write_text(big_content)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("where is the line function")
+        if executor.native_meta.evidence:
+            for snippet in executor.native_meta.evidence.file_snippets:
+                self.assertLessEqual(len(snippet.lines), 8)
+
+    def test_non_search_task_has_no_file_snippets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("fix the bug")
+        self.assertIsNone(executor.native_meta.evidence)
+
+    def test_read_failure_silently_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login_user(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            original_run = executor._runner.run
+
+            def patched_run(call):
+                if call.tool_name == "read_file":
+                    from openshard.native.tools import NativeToolResult
+                    return NativeToolResult(tool_name="read_file", ok=False, error="read error")
+                return original_run(call)
+
+            executor._runner.run = patched_run
+            executor._run_observe_phase("where is the login function")
+        self.assertIsNotNone(executor.native_meta.evidence)
+        self.assertEqual(executor.native_meta.evidence.file_snippets, [])
+
+
+class TestFileSnippetsInjection(unittest.TestCase):
+    """Tests that file snippets are injected into generate() context."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor, fake_gen
+
+    def test_evidence_block_includes_snippets_when_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login_user(): pass\n")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("where is the login function")
+        _, kwargs = fake_gen.generate.call_args
+        ctx = kwargs["skills_context"]
+        if executor.native_meta.evidence and executor.native_meta.evidence.file_snippets:
+            self.assertIn("snippets:", ctx)
+            self.assertIn("auth.py:", ctx)
+
+    def test_context_order_unchanged_with_snippets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login_user(): pass\n")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("where is the login function", skills_context="user-skills")
+        _, kwargs = fake_gen.generate.call_args
+        ctx = kwargs["skills_context"]
+        repo_pos = ctx.index("[repo context]")
+        obs_pos = ctx.index("[observation]")
+        ev_pos = ctx.index("[evidence]")
+        plan_pos = ctx.index("[native plan]")
+        skills_pos = ctx.index("user-skills")
+        self.assertLess(repo_pos, obs_pos)
+        self.assertLess(obs_pos, ev_pos)
+        self.assertLess(ev_pos, plan_pos)
+        self.assertLess(plan_pos, skills_pos)
+
+    def test_no_raw_full_file_in_context(self):
+        big_content = "\n".join(f"x_{i} = {i}" for i in range(200))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "big.py").write_text(big_content)
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("where is the x function")
+        _, kwargs = fake_gen.generate.call_args
+        ctx = kwargs["skills_context"]
+        self.assertNotIn("x_100 = 100", ctx)
+
+
+class TestNativeEvidenceMetaSerialization(unittest.TestCase):
+    """Tests that NativeEvidence serializes correctly with file_snippets."""
+
+    def test_asdict_includes_file_snippets(self):
+        from dataclasses import asdict
+        snippet = NativeFileSnippet(path="src/auth.py", lines=["1: def f():"])
+        ev = NativeEvidence(search_results=["src/auth.py:1: def f():"], file_snippets=[snippet])
+        d = asdict(ev)
+        self.assertIn("file_snippets", d)
+        self.assertEqual(len(d["file_snippets"]), 1)
+        self.assertEqual(d["file_snippets"][0]["path"], "src/auth.py")
+        self.assertEqual(d["file_snippets"][0]["lines"], ["1: def f():"])
+
+    def test_asdict_empty_file_snippets(self):
+        from dataclasses import asdict
+        ev = NativeEvidence()
+        d = asdict(ev)
+        self.assertIn("file_snippets", d)
+        self.assertEqual(d["file_snippets"], [])

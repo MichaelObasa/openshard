@@ -42,8 +42,15 @@ class NativeObservation:
 
 
 @dataclass
+class NativeFileSnippet:
+    path: str
+    lines: list[str] = field(default_factory=list)
+
+
+@dataclass
 class NativeEvidence:
     search_results: list[str] = field(default_factory=list)
+    file_snippets: list[NativeFileSnippet] = field(default_factory=list)
     truncated: bool = False
 
 
@@ -91,7 +98,7 @@ def render_native_observation(
     return (rendered[: max(0, limit - len(suffix))].rstrip() + suffix)[:limit]
 
 
-def render_native_evidence(evidence: NativeEvidence, *, limit: int = 600) -> str:
+def render_native_evidence(evidence: NativeEvidence, *, limit: int = 1000) -> str:
     lines = ["[evidence]"]
 
     if evidence.search_results:
@@ -101,6 +108,13 @@ def render_native_evidence(evidence: NativeEvidence, *, limit: int = 600) -> str
 
     if evidence.truncated:
         lines.append("[truncated]")
+
+    if evidence.file_snippets:
+        lines.append("snippets:")
+        for snippet in evidence.file_snippets[:2]:
+            lines.append(f"{snippet.path}:")
+            for line in snippet.lines[:8]:
+                lines.append(f"  {line}")
 
     rendered = "\n".join(lines)
 
