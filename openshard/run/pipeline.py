@@ -772,6 +772,8 @@ class RunPipeline:
                 elif _rp_dec.required:
                     confirm_or_abort(_rp_dec.reason)
                 _write_files(exec_result.files, workspace)
+                if effective_executor == "native":
+                    generator.review_diff()
             # OpenCode: workspace already created and populated before generate().
 
         # Native controlled verification loop — one retry, safe commands only, no --verify flag required
@@ -881,6 +883,8 @@ class RunPipeline:
                     final_files = _last_attempt.files
                     if not opencode_mode:
                         _write_files(_last_attempt.files, workspace)
+                        if effective_executor == "native":
+                            generator.review_diff()
                     code = _run_verification_plan(
                         _verification_plan, workspace, gate=None,
                         label=f"[retry/{_esc_label}]", detail=detail,
@@ -940,6 +944,7 @@ class RunPipeline:
                 "observation": asdict(_native_meta.observation) if _native_meta.observation is not None else None,
                 "evidence": asdict(_native_meta.evidence) if _native_meta.evidence is not None else None,
                 "plan": asdict(_native_meta.plan) if _native_meta.plan is not None else None,
+                "diff_review": asdict(_native_meta.diff_review) if _native_meta.diff_review is not None else None,
                 "write_path": _native_meta.write_path,
                 "verification_loop": (
                     asdict(_native_meta.verification_loop)

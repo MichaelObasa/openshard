@@ -55,6 +55,16 @@ class NativeEvidence:
 
 
 @dataclass
+class NativeDiffReview:
+    has_diff: bool = False
+    changed_files: list[str] = field(default_factory=list)
+    added_lines: int = 0
+    removed_lines: int = 0
+    output_chars: int = 0
+    truncated: bool = False
+
+
+@dataclass
 class NativePlan:
     intent: str = "standard"
     risk: str = "low"
@@ -79,6 +89,42 @@ def build_initial_context_budget(
     return NativeContextBudget(
         context_window=context_window,
         estimated_tokens_remaining=context_window,
+    )
+
+
+def build_native_diff_review(
+    diff_output: str,
+    *,
+    truncated: bool = False,
+) -> NativeDiffReview:
+    changed_files: set[str] = set()
+    added = 0
+    removed = 0
+
+    for line in diff_output.splitlines():
+        if line.startswith("diff --git "):
+            parts = line.split()
+            if len(parts) >= 4:
+                path = parts[3]
+                if path.startswith("b/"):
+                    path = path[2:]
+                changed_files.add(path)
+        elif line.startswith("+++ b/"):
+            changed_files.add(line[len("+++ b/"):])
+        elif line.startswith("--- a/"):
+            changed_files.add(line[len("--- a/"):])
+        elif line.startswith("+") and not line.startswith("+++"):
+            added += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            removed += 1
+
+    return NativeDiffReview(
+        has_diff=bool(diff_output.strip()),
+        changed_files=sorted(changed_files)[:20],
+        added_lines=added,
+        removed_lines=removed,
+        output_chars=len(diff_output),
+        truncated=truncated,
     )
 
 

@@ -8,12 +8,14 @@ from openshard.execution.generator import ExecutionGenerator, ExecutionResult
 from openshard.native.context import (
     CompactRunState,
     NativeContextBudget,
+    NativeDiffReview,
     NativeEvidence,
     NativeFileSnippet,
     NativeObservation,
     NativePlan,
     NativeVerificationLoop,
     build_initial_context_budget,
+    build_native_diff_review,
     render_native_evidence,
     render_native_observation,
     render_native_plan,
@@ -42,6 +44,7 @@ class NativeRunMeta:
     observation: NativeObservation | None = None
     evidence: NativeEvidence | None = None
     plan: NativePlan | None = None
+    diff_review: NativeDiffReview | None = None
     write_path: str = "pipeline"
     verification_loop: NativeVerificationLoop | None = None
 
@@ -251,6 +254,24 @@ class NativeAgentExecutor:
                     )
 
         self.native_meta.observation = observation
+
+    def review_diff(self) -> NativeDiffReview | None:
+        if self._runner is None:
+            return None
+
+        call = NativeToolCall(tool_name="get_git_diff", args={})
+        result = self._runner.run(call)
+        self.native_meta.tool_trace.append(self._runner.trace_entry(call, result))
+
+        if not result.ok:
+            return None
+
+        review = build_native_diff_review(
+            result.output,
+            truncated=bool(result.metadata.get("truncated", False)),
+        )
+        self.native_meta.diff_review = review
+        return review
 
     def generate(
         self,
