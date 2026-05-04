@@ -587,7 +587,7 @@ class TestNativeWorkflowIntegration(unittest.TestCase):
         """pipeline passes repo_root=Path.cwd() when instantiating NativeAgentExecutor."""
         captured = {}
 
-        def _capture(provider=None, repo_root=None):
+        def _capture(provider=None, repo_root=None, backend_name="builtin"):
             captured["repo_root"] = repo_root
             return _make_native_mock()
 
@@ -3280,3 +3280,102 @@ class TestNativeDemoBlock(unittest.TestCase):
         out = _render_native_demo_block_str(native_meta)
         self.assertNotIn("[native]", out)
         self.assertEqual(out.strip(), "")
+
+
+class TestNativeBackends(unittest.TestCase):
+    """Tests for the backend seam in openshard.native.backends."""
+
+    def test_builtin_available(self):
+        from openshard.native.backends import BuiltinNativeBackend
+        self.assertTrue(BuiltinNativeBackend().available())
+
+    def test_builtin_run_returns_result(self):
+        from openshard.native.backends import BuiltinNativeBackend
+        result = BuiltinNativeBackend().run(task="t", context={})
+        self.assertIsInstance(result.summary, str)
+        self.assertEqual(result.metadata["backend"], "builtin")
+
+    def test_deepagents_unavailable_when_not_installed(self):
+        import sys
+        from openshard.native.backends import DeepAgentsNativeBackend
+
+        with patch.dict(sys.modules, {"deepagents": None}):
+            backend = DeepAgentsNativeBackend()
+            self.assertFalse(backend.available())
+            result = backend.run(task="t", context={})
+            self.assertIn("unavailable", result.summary)
+            self.assertEqual(result.metadata["available"], False)
+            self.assertTrue(len(result.notes) > 0)
+
+    def test_deepagents_available_when_installed(self):
+        import sys
+        from openshard.native.backends import DeepAgentsNativeBackend
+
+        with patch.dict(sys.modules, {"deepagents": MagicMock()}):
+            backend = DeepAgentsNativeBackend()
+            self.assertTrue(backend.available())
+            result = backend.run(task="t", context={})
+            self.assertEqual(result.metadata["available"], True)
+            self.assertEqual(result.metadata["mode"], "stub")
+
+    def test_get_backend_returns_builtin_by_default(self):
+        from openshard.native.backends import BuiltinNativeBackend, get_backend
+        self.assertIsInstance(get_backend("builtin"), BuiltinNativeBackend)
+
+    def test_get_backend_unknown_name_returns_builtin(self):
+        from openshard.native.backends import BuiltinNativeBackend, get_backend
+        self.assertIsInstance(get_backend("unknown"), BuiltinNativeBackend)
+
+    def test_get_backend_returns_deepagents(self):
+        from openshard.native.backends import DeepAgentsNativeBackend, get_backend
+        self.assertIsInstance(get_backend("deepagents"), DeepAgentsNativeBackend)
+
+
+class TestNativeRunMetaBackendDefaults(unittest.TestCase):
+    def test_native_backend_defaults(self):
+        meta = NativeRunMeta()
+        self.assertEqual(meta.native_backend, "builtin")
+        self.assertTrue(meta.native_backend_available)
+        self.assertEqual(meta.native_backend_notes, [])
+
+
+class TestNativeAgentExecutorBackend(unittest.TestCase):
+    def _make_executor(self, backend_name="builtin"):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), backend_name=backend_name)
+        return executor
+
+    def test_executor_records_builtin_backend_in_meta(self):
+        executor = self._make_executor()
+        self.assertEqual(executor.native_meta.native_backend, "builtin")
+        self.assertTrue(executor.native_meta.native_backend_available)
+        self.assertEqual(executor.native_meta.native_backend_notes, [])
+
+    def test_executor_deepagents_unavailable_records_note(self):
+        import sys
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen), \
+             patch.dict(sys.modules, {"deepagents": None}):
+            executor = NativeAgentExecutor(provider=MagicMock(), backend_name="deepagents")
+        self.assertEqual(executor.native_meta.native_backend, "deepagents")
+        self.assertFalse(executor.native_meta.native_backend_available)
+        self.assertIn("Install deepagents", executor.native_meta.native_backend_notes[0])
+
+    def test_executor_deepagents_available_records_no_notes(self):
+        import sys
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen), \
+             patch.dict(sys.modules, {"deepagents": MagicMock()}):
+            executor = NativeAgentExecutor(provider=MagicMock(), backend_name="deepagents")
+        self.assertEqual(executor.native_meta.native_backend, "deepagents")
+        self.assertTrue(executor.native_meta.native_backend_available)
+        self.assertEqual(executor.native_meta.native_backend_notes, [])
+
+    def test_selecting_builtin_leaves_generate_behaviour_unchanged(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), backend_name="builtin")
+        result = executor.generate("fix bug", model="some-model")
+        fake_gen.generate.assert_called_once()
+        self.assertIs(result, fake_gen.generate.return_value)

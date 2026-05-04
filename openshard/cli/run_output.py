@@ -352,6 +352,13 @@ def _render_native_demo_block(native_meta: Any) -> list[str]:
             parts.append("tests detected")
         lines.append(f"  repo: {', '.join(parts)}")
 
+    native_backend = getattr(native_meta, "native_backend", None)
+    if native_backend:
+        _backend_available = getattr(native_meta, "native_backend_available", True)
+        _backend_suffix = "" if _backend_available else " unavailable"
+        lines.append(f"  backend: {native_backend}{_backend_suffix}")
+        has_content = True
+
     observation = getattr(native_meta, "observation", None)
     if observation is not None:
         has_content = True
@@ -434,6 +441,9 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "diff_review": entry.get("diff_review"),
         "final_report": entry.get("final_report"),
         "native_loop_steps": entry.get("native_loop_steps", []),
+        "native_backend": entry.get("native_backend", None),
+        "native_backend_available": entry.get("native_backend_available", True),
+        "native_backend_notes": entry.get("native_backend_notes", []),
     })
 
 

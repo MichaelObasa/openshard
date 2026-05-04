@@ -297,6 +297,93 @@ class TestLastNativeInspection(unittest.TestCase):
         out = _render(entry, detail="more")
         self.assertNotIn("loop:", out)
 
+    def test_render_native_demo_block_shows_backend_builtin(self):
+        from types import SimpleNamespace
+        from openshard.cli.run_output import _render_native_demo_block
+
+        meta = SimpleNamespace(
+            repo_context_summary=SimpleNamespace(likely_stack_markers=["python"], test_markers=[]),
+            native_backend="builtin",
+            native_backend_available=True,
+            native_backend_notes=[],
+            observation=None,
+            plan=None,
+            write_path="pipeline",
+            verification_loop=None,
+            diff_review=None,
+            native_loop_steps=[],
+        )
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertIn("backend: builtin", joined)
+
+    def test_render_native_demo_block_shows_backend_unavailable(self):
+        from types import SimpleNamespace
+        from openshard.cli.run_output import _render_native_demo_block
+
+        meta = SimpleNamespace(
+            repo_context_summary=SimpleNamespace(likely_stack_markers=["python"], test_markers=[]),
+            native_backend="deepagents",
+            native_backend_available=False,
+            native_backend_notes=["Install deepagents to enable this experimental backend."],
+            observation=None,
+            plan=None,
+            write_path="pipeline",
+            verification_loop=None,
+            diff_review=None,
+            native_loop_steps=[],
+        )
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertIn("backend: deepagents unavailable", joined)
+
+    def test_render_native_demo_block_no_backend_field_no_error(self):
+        from types import SimpleNamespace
+        from openshard.cli.run_output import _render_native_demo_block
+
+        meta = SimpleNamespace(
+            repo_context_summary=SimpleNamespace(likely_stack_markers=["python"], test_markers=[]),
+            observation=None,
+            plan=None,
+            write_path="pipeline",
+            verification_loop=None,
+            diff_review=None,
+            native_loop_steps=[],
+        )
+        lines = _render_native_demo_block(meta)
+        self.assertNotIn("backend:", "\n".join(lines))
+
+    def test_backend_line_appears_after_repo_and_before_observation(self):
+        from types import SimpleNamespace
+        from openshard.cli.run_output import _render_native_demo_block
+
+        meta = SimpleNamespace(
+            repo_context_summary=SimpleNamespace(likely_stack_markers=["python"], test_markers=[]),
+            native_backend="builtin",
+            native_backend_available=True,
+            native_backend_notes=[],
+            observation=SimpleNamespace(dirty_diff_present=False, search_matches_count=0),
+            plan=None,
+            write_path="pipeline",
+            verification_loop=None,
+            diff_review=None,
+            native_loop_steps=[],
+        )
+        lines = _render_native_demo_block(meta)
+        repo_idx = next((i for i, ln in enumerate(lines) if "repo:" in ln), -1)
+        backend_idx = next((i for i, ln in enumerate(lines) if "backend:" in ln), -1)
+        observation_idx = next((i for i, ln in enumerate(lines) if "observation:" in ln), -1)
+        self.assertGreater(backend_idx, repo_idx)
+        self.assertLess(backend_idx, observation_idx)
+
+    def test_native_meta_from_entry_passes_backend_fields(self):
+        entry = _native_entry()
+        entry["native_backend"] = "deepagents"
+        entry["native_backend_available"] = False
+        entry["native_backend_notes"] = ["Install deepagents to enable this experimental backend."]
+        out = _render(entry, detail="more")
+        self.assertIn("backend: deepagents unavailable", out)
+
 
 if __name__ == "__main__":
     unittest.main()
