@@ -50,6 +50,7 @@ class NativeRunMeta:
     write_path: str = "pipeline"
     verification_loop: NativeVerificationLoop | None = None
     final_report: NativeFinalReport | None = None
+    native_loop_steps: list[str] = field(default_factory=list)
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -184,6 +185,10 @@ class NativeAgentExecutor:
         self.native_meta = NativeRunMeta()
         self._runner = NativeToolRunner(repo_root) if repo_root is not None else None
 
+    def record_loop_step(self, step: str) -> None:
+        if step not in self.native_meta.native_loop_steps:
+            self.native_meta.native_loop_steps.append(step)
+
     def run_tool(self, call: NativeToolCall) -> NativeToolResult:
         if self._runner is None:
             result = NativeToolResult(
@@ -219,6 +224,7 @@ class NativeAgentExecutor:
                 self.native_meta.context_budget = build_initial_context_budget()
             self.native_meta.context_budget.repo_map_built = True
             self.native_meta.repo_context_summary = build_repo_context_summary(result.output)
+            self.record_loop_step("repo_context")
 
     def _run_observe_phase(self, task: str, repo_facts=None) -> None:
         if self._runner is None:
@@ -255,8 +261,10 @@ class NativeAgentExecutor:
                         file_snippets=file_snippets,
                         truncated=truncated,
                     )
+                    self.record_loop_step("evidence")
 
         self.native_meta.observation = observation
+        self.record_loop_step("observation")
 
     def review_diff(self) -> NativeDiffReview | None:
         if self._runner is None:
@@ -274,6 +282,7 @@ class NativeAgentExecutor:
             truncated=bool(result.metadata.get("truncated", False)),
         )
         self.native_meta.diff_review = review
+        self.record_loop_step("diff_review")
         return review
 
     def build_final_report(self) -> NativeFinalReport:
@@ -286,6 +295,7 @@ class NativeAgentExecutor:
             diff_review=self.native_meta.diff_review,
         )
         self.native_meta.final_report = report
+        self.record_loop_step("final_report")
         return report
 
     def generate(
@@ -306,6 +316,7 @@ class NativeAgentExecutor:
             evidence=self.native_meta.evidence,
             selected_skills=self.native_meta.selected_skills,
         )
+        self.record_loop_step("plan")
 
         context_parts = []
 
@@ -333,6 +344,8 @@ class NativeAgentExecutor:
                 len(combined_context) // 4
             )
 
-        return self._gen.generate(
+        result = self._gen.generate(
             task, model=model, repo_facts=repo_facts, skills_context=combined_context
         )
+        self.record_loop_step("generation")
+        return result
