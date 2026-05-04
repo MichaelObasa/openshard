@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import unittest
 
-from openshard.native.repo_context import NativeRepoContextSummary, build_repo_context_summary
+from openshard.native.repo_context import (
+    NativeRepoContextSummary,
+    build_repo_context_summary,
+    render_repo_context_summary,
+)
 
 
 class TestNativeRepoContextSummaryDefaults(unittest.TestCase):
@@ -159,3 +163,82 @@ class TestBuildRepoContextSummary(unittest.TestCase):
         s = build_repo_context_summary(lines)
         self.assertEqual(s.top_level_dirs, sorted(s.top_level_dirs))
         self.assertEqual(s.likely_stack_markers, sorted(s.likely_stack_markers))
+
+
+class TestRenderRepoContextSummary(unittest.TestCase):
+
+    def _full_summary(self) -> NativeRepoContextSummary:
+        return NativeRepoContextSummary(
+            total_files=42,
+            top_level_dirs=["docs", "src", "tests"],
+            package_files=["pyproject.toml"],
+            test_markers=["tests/test_main.py"],
+            likely_stack_markers=["python"],
+            truncated=False,
+        )
+
+    def test_render_includes_total_files(self):
+        s = self._full_summary()
+        rendered = render_repo_context_summary(s)
+        self.assertIn("files: 42", rendered)
+
+    def test_render_includes_stack(self):
+        s = self._full_summary()
+        rendered = render_repo_context_summary(s)
+        self.assertIn("python", rendered)
+
+    def test_render_includes_packages(self):
+        s = self._full_summary()
+        rendered = render_repo_context_summary(s)
+        self.assertIn("pyproject.toml", rendered)
+
+    def test_render_includes_dirs(self):
+        s = self._full_summary()
+        rendered = render_repo_context_summary(s)
+        self.assertIn("src", rendered)
+
+    def test_render_includes_test_markers(self):
+        s = self._full_summary()
+        rendered = render_repo_context_summary(s)
+        self.assertIn("tests/test_main.py", rendered)
+
+    def test_render_caps_test_markers_at_five(self):
+        s = NativeRepoContextSummary(
+            total_files=10,
+            test_markers=[f"tests/test_{i}.py" for i in range(10)],
+        )
+        rendered = render_repo_context_summary(s)
+        self.assertIn("tests/test_0.py", rendered)
+        self.assertNotIn("tests/test_5.py", rendered)
+
+    def test_render_shows_truncated_flag(self):
+        s = NativeRepoContextSummary(total_files=5, truncated=True)
+        rendered = render_repo_context_summary(s)
+        self.assertIn("(results truncated)", rendered)
+
+    def test_render_bounded_by_limit(self):
+        s = self._full_summary()
+        rendered = render_repo_context_summary(s, limit=50)
+        self.assertLessEqual(len(rendered), 50)
+
+    def test_render_truncation_appends_marker(self):
+        s = self._full_summary()
+        rendered = render_repo_context_summary(s, limit=50)
+        self.assertTrue(rendered.endswith("[truncated]"))
+
+    def test_render_does_not_include_raw_file_list(self):
+        lines = "\n".join(f"src/file_{i}.py" for i in range(30))
+        s = build_repo_context_summary(lines)
+        rendered = render_repo_context_summary(s)
+        self.assertNotIn("src/file_0.py", rendered)
+
+    def test_render_empty_summary(self):
+        s = NativeRepoContextSummary()
+        rendered = render_repo_context_summary(s)
+        self.assertIn("[repo context]", rendered)
+        self.assertIn("files: 0", rendered)
+
+    def test_render_within_limit_no_truncation_marker(self):
+        s = self._full_summary()
+        rendered = render_repo_context_summary(s, limit=1200)
+        self.assertNotIn("[truncated]", rendered)

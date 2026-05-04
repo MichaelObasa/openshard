@@ -364,6 +364,61 @@ class TestNativePreflight(unittest.TestCase):
         self.assertIsNone(executor.native_meta.context_budget)
 
 
+class TestNativeContextInjection(unittest.TestCase):
+    """Tests for repo context summary injection into ExecutionGenerator.generate()."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor, fake_gen
+
+    def _make_executor_no_repo(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor, fake_gen
+
+    def test_generate_with_repo_root_passes_rendered_context_to_generator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        _, kwargs = fake_gen.generate.call_args
+        self.assertIn("[repo context]", kwargs["skills_context"])
+
+    def test_generate_combines_repo_context_with_existing_skills_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("fix the bug", skills_context="hint")
+        _, kwargs = fake_gen.generate.call_args
+        self.assertIn("[repo context]", kwargs["skills_context"])
+        self.assertIn("hint", kwargs["skills_context"])
+
+    def test_generate_without_repo_root_skills_context_unchanged(self):
+        executor, fake_gen = self._make_executor_no_repo()
+        executor.generate("fix the bug", skills_context="hint")
+        fake_gen.generate.assert_called_once_with(
+            "fix the bug", model=None, repo_facts=None, skills_context="hint"
+        )
+
+    def test_generate_with_repo_root_updates_estimated_tokens(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor, _ = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        self.assertGreater(executor.native_meta.context_budget.estimated_tokens_used, 0)
+
+    def test_generate_without_repo_root_no_context_budget(self):
+        executor, _ = self._make_executor_no_repo()
+        executor.generate("fix the bug")
+        self.assertIsNone(executor.native_meta.context_budget)
+
+
 class TestNativeWorkflowIntegration(unittest.TestCase):
     """Integration tests via CLI runner — verify routing and log metadata."""
 

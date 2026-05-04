@@ -97,3 +97,25 @@ def build_repo_context_summary(
         likely_stack_markers=_compact(stack_markers),
         truncated=truncated,
     )
+
+
+def render_repo_context_summary(
+    summary: NativeRepoContextSummary, *, limit: int = 1200
+) -> str:
+    lines = ["[repo context]"]
+    lines.append(f"files: {summary.total_files}")
+    if summary.likely_stack_markers:
+        lines.append(f"stack: {', '.join(summary.likely_stack_markers)}")
+    if summary.package_files:
+        lines.append(f"packages: {', '.join(summary.package_files)}")
+    if summary.top_level_dirs:
+        lines.append(f"dirs: {', '.join(summary.top_level_dirs)}")
+    if summary.test_markers:
+        lines.append(f"tests: {', '.join(summary.test_markers[:5])}")
+    if summary.truncated:
+        lines.append("(results truncated)")
+    rendered = "\n".join(lines)
+    if len(rendered) <= limit:
+        return rendered
+    suffix = "\n[truncated]"
+    return (rendered[: max(0, limit - len(suffix))].rstrip() + suffix)[:limit]
