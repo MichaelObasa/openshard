@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from openshard.execution.generator import ExecutionGenerator, ExecutionResult
 from openshard.analysis.repo import RepoFacts
+from openshard.execution.generator import ExecutionGenerator, ExecutionResult
+from openshard.native.context import CompactRunState, NativeContextBudget
 
 
 @dataclass
@@ -11,9 +12,11 @@ class NativeRunMeta:
     workflow: str = "native"
     executor: str = "native"
     execution_depth: str = "fast"
-    selected_skills: list = field(default_factory=list)
-    context_budget: int | None = None
-    tool_trace: list = field(default_factory=list)
+    selected_skills: list[str] = field(default_factory=list)
+    context_budget: NativeContextBudget | None = None
+    context_state: CompactRunState | None = None
+    context_warnings: list[str] = field(default_factory=list)
+    tool_trace: list[dict] = field(default_factory=list)
 
 
 class NativeAgentExecutor:

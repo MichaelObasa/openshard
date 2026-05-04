@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -872,7 +872,9 @@ class RunPipeline:
                 "executor": _native_meta.executor,
                 "execution_depth": _native_meta.execution_depth,
                 "selected_skills": _native_meta.selected_skills,
-                "context_budget": _native_meta.context_budget,
+                "context_budget": asdict(_native_meta.context_budget) if _native_meta.context_budget is not None else None,
+                "context_state": asdict(_native_meta.context_state) if _native_meta.context_state is not None else None,
+                "context_warnings": _native_meta.context_warnings,
                 "tool_trace": _native_meta.tool_trace,
             }
         try:
