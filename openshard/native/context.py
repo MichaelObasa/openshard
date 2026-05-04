@@ -72,6 +72,16 @@ class NativePlan:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass
+class NativeVerificationLoop:
+    attempted: bool = False
+    passed: bool = False
+    retried: bool = False
+    exit_code: int | None = None
+    output_chars: int = 0
+    truncated: bool = False
+
+
 def build_initial_context_budget(
     context_window: int | None = None,
 ) -> NativeContextBudget:
@@ -190,6 +200,26 @@ def render_native_plan(plan: NativePlan, *, limit: int = 600) -> str:
     if len(rendered) <= limit:
         return rendered
     return (rendered[: max(0, limit - len(suffix))].rstrip() + suffix)[:limit]
+
+
+def render_verification_failure_context(
+    output: str,
+    *,
+    exit_code: int,
+    limit: int = 1200,
+) -> str:
+    header_lines = [
+        "[verification failure]",
+        f"exit_code: {exit_code}",
+        "output:",
+    ]
+    suffix = "\n[truncated]"
+    header = "\n".join(header_lines)
+    body_limit = max(0, limit - len(header) - 1 - len(suffix))
+    bounded = output
+    if len(bounded) > body_limit:
+        bounded = bounded[:body_limit].rstrip() + suffix
+    return (header + "\n" + bounded)[:limit]
 
 
 def build_compact_run_state(

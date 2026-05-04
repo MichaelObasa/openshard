@@ -24,6 +24,7 @@ from openshard.native.context import (
     render_native_evidence,
     render_native_observation,
     render_native_plan,
+    render_verification_failure_context,
 )
 from openshard.native.executor import (
     NativeAgentExecutor,
@@ -1991,6 +1992,102 @@ class TestNativeDiffReviewPipeline(unittest.TestCase):
             result = runner.invoke(cli, ["run"] + args)
         return result, native_mock, logged
 
+    def test_native_dry_run_does_not_call_review_diff(self):
+        result, native_mock, _ = self._run(["--workflow", "native", "--dry-run", "add a feature"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        native_mock.review_diff.assert_not_called()
+
+    def test_native_log_contains_diff_review_key(self):
+        result, _, logged = self._run(["--workflow", "native", "add a feature"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("diff_review", logged)
+
+
+def _safe_cmd():
+    from openshard.verification.plan import (
+        CommandSafety, VerificationCommand, VerificationKind, VerificationSource,
+    )
+    return VerificationCommand(
+        name="pytest",
+        argv=["python", "-m", "pytest"],
+        kind=VerificationKind.test,
+        source=VerificationSource.config,
+        safety=CommandSafety.safe,
+        reason="safe test runner",
+    )
+
+
+def _unsafe_cmd(safety_label):
+    from openshard.verification.plan import (
+        CommandSafety, VerificationCommand, VerificationKind, VerificationSource,
+    )
+    return VerificationCommand(
+        name="make",
+        argv=["make", "test"],
+        kind=VerificationKind.test,
+        source=VerificationSource.config,
+        safety=CommandSafety(safety_label),
+        reason="needs approval",
+    )
+
+
+def _safe_plan():
+    from openshard.verification.plan import VerificationPlan
+    return VerificationPlan(commands=[_safe_cmd()])
+
+
+def _empty_plan():
+    from openshard.verification.plan import VerificationPlan
+    return VerificationPlan(commands=[])
+
+
+def _mixed_plan():
+    from openshard.verification.plan import VerificationPlan
+    return VerificationPlan(commands=[_safe_cmd(), _unsafe_cmd("needs_approval")])
+
+
+class TestNativeVerificationLoop(unittest.TestCase):
+    """Tests for the native-only controlled verification loop in RunPipeline."""
+
+    def _run_write_simple(self, native_mock, plan=None, verify_returns=None):
+        from openshard.execution.generator import ChangedFile
+        safe_file = ChangedFile(
+            path="out.txt", content="ok", change_type="create", summary="created"
+        )
+        if not native_mock.generate.side_effect:
+            r = MagicMock()
+            r.files = [safe_file]
+            r.summary = "done"
+            r.notes = []
+            r.usage = None
+            native_mock.generate.return_value = r
+
+        plan = plan if plan is not None else _safe_plan()
+        verify_returns = verify_returns if verify_returns is not None else [(0, "")]
+        logged = {}
+
+        def _capture_log(*a, **kw):
+            logged.update(kw.get("extra_metadata") or {})
+
+        verify_iter = iter(verify_returns)
+
+        def _verify_side(*a, **kw):
+            return next(verify_iter)
+
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run", side_effect=_capture_log), \
+                 patch("openshard.run.pipeline.build_verification_plan", return_value=plan), \
+                 patch("openshard.run.pipeline._run_verification_plan", side_effect=_verify_side), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                result = runner.invoke(cli, ["run", "--workflow", "native", "--write", "fix the bug"])
+        return result, native_mock, logged
+
     def test_native_write_calls_review_diff_once(self):
         from openshard.execution.generator import ChangedFile
         safe_file = ChangedFile(
@@ -2075,10 +2172,107 @@ class TestNativeDiffReviewPipeline(unittest.TestCase):
         # Two writes happened: initial + retry → two review_diff calls
         self.assertEqual(native_mock.review_diff.call_count, 2)
 
-    def test_native_dry_run_does_not_call_review_diff(self):
-        result, native_mock, _ = self._run(["--workflow", "native", "--dry-run", "add a feature"])
+    def test_native_write_runs_safe_verification(self):
+        native_mock = _make_native_mock()
+        result, native_mock, _ = self._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "passed")]
+        )
         self.assertEqual(result.exit_code, 0, result.output)
-        native_mock.review_diff.assert_not_called()
+        loop = native_mock.native_meta.verification_loop
+        self.assertIsNotNone(loop)
+        self.assertTrue(loop.attempted)
+        self.assertTrue(loop.passed)
+        self.assertFalse(loop.retried)
+        self.assertEqual(loop.exit_code, 0)
+
+    def test_native_write_retries_once_on_verification_failure(self):
+        from openshard.execution.generator import ChangedFile
+
+        first_result = MagicMock()
+        first_result.files = [ChangedFile(path="out.txt", content="broken", change_type="create", summary="")]
+        first_result.summary = "done"
+        first_result.notes = []
+        first_result.usage = None
+
+        retry_result = MagicMock()
+        retry_result.files = [ChangedFile(path="out.txt", content="fixed", change_type="create", summary="")]
+        retry_result.summary = "done retry"
+        retry_result.notes = []
+        retry_result.usage = None
+
+        native_mock = _make_native_mock()
+        native_mock.generate.side_effect = [first_result, retry_result]
+
+        result, native_mock, _ = self._run_write_simple(
+            native_mock,
+            plan=_safe_plan(),
+            verify_returns=[(1, "test failed"), (0, "passed")],
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(native_mock.generate.call_count, 2)
+        loop = native_mock.native_meta.verification_loop
+        self.assertIsNotNone(loop)
+        self.assertTrue(loop.attempted)
+        self.assertTrue(loop.retried)
+        self.assertTrue(loop.passed)
+        self.assertEqual(loop.exit_code, 0)
+
+    def test_retry_context_contains_verification_failure_marker(self):
+        from openshard.execution.generator import ChangedFile
+
+        first_result = MagicMock()
+        first_result.files = [ChangedFile(path="out.txt", content="x", change_type="create", summary="")]
+        first_result.summary = "done"
+        first_result.notes = []
+        first_result.usage = None
+
+        retry_result = MagicMock()
+        retry_result.files = []
+        retry_result.summary = "done"
+        retry_result.notes = []
+        retry_result.usage = None
+
+        native_mock = _make_native_mock()
+        native_mock.generate.side_effect = [first_result, retry_result]
+
+        self._run_write_simple(
+            native_mock,
+            plan=_safe_plan(),
+            verify_returns=[(1, "FAIL output"), (0, "")],
+        )
+        self.assertEqual(native_mock.generate.call_count, 2)
+        _, kwargs = native_mock.generate.call_args_list[1]
+        self.assertIn("[verification failure]", kwargs["skills_context"])
+
+    def test_native_write_does_not_retry_when_verification_passes(self):
+        native_mock = _make_native_mock()
+        result, native_mock, _ = self._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(native_mock.generate.call_count, 1)
+        loop = native_mock.native_meta.verification_loop
+        self.assertFalse(loop.retried)
+
+    def test_native_write_does_not_verify_without_command(self):
+        native_mock = _make_native_mock()
+        verify_mock = MagicMock(return_value=(0, ""))
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline.build_verification_plan", return_value=_empty_plan()), \
+                 patch("openshard.run.pipeline._run_verification_plan", verify_mock), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                runner.invoke(cli, ["run", "--workflow", "native", "--write", "fix the bug"])
+        verify_mock.assert_not_called()
+        loop = native_mock.native_meta.verification_loop
+        self.assertIsNotNone(loop)
+        self.assertFalse(loop.attempted)
 
     def test_non_native_write_does_not_call_review_diff(self):
         from openshard.execution.generator import ChangedFile
@@ -2108,7 +2302,144 @@ class TestNativeDiffReviewPipeline(unittest.TestCase):
                 )
         native_cls.assert_not_called()
 
-    def test_native_log_contains_diff_review_key(self):
-        result, _, logged = self._run(["--workflow", "native", "add a feature"])
+    def test_native_write_does_not_verify_needs_approval(self):
+        from openshard.verification.plan import VerificationPlan
+        plan = VerificationPlan(commands=[_unsafe_cmd("needs_approval")])
+        verify_mock = MagicMock(return_value=(0, ""))
+        native_mock = _make_native_mock()
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline.build_verification_plan", return_value=plan), \
+                 patch("openshard.run.pipeline._run_verification_plan", verify_mock), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                runner.invoke(cli, ["run", "--workflow", "native", "--write", "fix the bug"])
+        verify_mock.assert_not_called()
+
+    def test_native_write_does_not_verify_blocked(self):
+        from openshard.verification.plan import VerificationPlan
+        plan = VerificationPlan(commands=[_unsafe_cmd("blocked")])
+        verify_mock = MagicMock(return_value=(0, ""))
+        native_mock = _make_native_mock()
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline.build_verification_plan", return_value=plan), \
+                 patch("openshard.run.pipeline._run_verification_plan", verify_mock), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                runner.invoke(cli, ["run", "--workflow", "native", "--write", "fix the bug"])
+        verify_mock.assert_not_called()
+
+    def test_native_write_does_not_verify_when_any_command_unsafe(self):
+        verify_mock = MagicMock(return_value=(0, ""))
+        native_mock = _make_native_mock()
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline.build_verification_plan", return_value=_mixed_plan()), \
+                 patch("openshard.run.pipeline._run_verification_plan", verify_mock), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                runner.invoke(cli, ["run", "--workflow", "native", "--write", "fix the bug"])
+        verify_mock.assert_not_called()
+
+    def test_native_write_does_not_verify_in_dry_run(self):
+        verify_mock = MagicMock(return_value=(0, ""))
+        native_mock = _make_native_mock()
+        with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+             patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.run.pipeline.build_verification_plan", return_value=_safe_plan()), \
+             patch("openshard.run.pipeline._run_verification_plan", verify_mock), \
+             patch("openshard.run.pipeline._log_run"):
+            runner = CliRunner()
+            runner.invoke(cli, ["run", "--workflow", "native", "--dry-run", "fix the bug"])
+        verify_mock.assert_not_called()
+
+    def test_native_verification_loop_metadata_logged(self):
+        native_mock = _make_native_mock()
+        result, _, logged = self._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertIn("diff_review", logged)
+        self.assertIn("verification_loop", logged)
+        vl = logged["verification_loop"]
+        self.assertIsNotNone(vl)
+        self.assertIsInstance(vl, dict)
+        for key in ("attempted", "passed", "retried", "exit_code", "output_chars", "truncated"):
+            self.assertIn(key, vl)
+
+    def test_native_verification_loop_metadata_none_when_no_commands(self):
+        native_mock = _make_native_mock()
+        result, _, logged = self._run_write_simple(
+            native_mock, plan=_empty_plan(), verify_returns=[]
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        vl = logged.get("verification_loop")
+        if vl is not None:
+            self.assertFalse(vl.get("attempted"))
+
+    def test_verification_failure_context_is_bounded(self):
+        large_output = "x" * 2000
+        result = render_verification_failure_context(large_output, exit_code=1, limit=1200)
+        self.assertLessEqual(len(result), 1200)
+        self.assertIn("[truncated]", result)
+
+    def test_verification_failure_context_contains_exit_code(self):
+        result = render_verification_failure_context("some output", exit_code=2, limit=1200)
+        self.assertIn("exit_code: 2", result)
+        self.assertIn("[verification failure]", result)
+
+    def test_verification_failure_context_small_output_not_truncated(self):
+        result = render_verification_failure_context("short", exit_code=1, limit=1200)
+        self.assertNotIn("[truncated]", result)
+        self.assertIn("short", result)
+
+    def test_native_verification_loop_metadata_final_state_after_retry(self):
+        from openshard.execution.generator import ChangedFile
+
+        first_result = MagicMock()
+        first_result.files = [ChangedFile(path="out.txt", content="x", change_type="create", summary="")]
+        first_result.summary = "done"
+        first_result.notes = []
+        first_result.usage = None
+
+        retry_result = MagicMock()
+        retry_result.files = []
+        retry_result.summary = "done"
+        retry_result.notes = []
+        retry_result.usage = None
+
+        native_mock = _make_native_mock()
+        native_mock.generate.side_effect = [first_result, retry_result]
+
+        result, native_mock, logged = self._run_write_simple(
+            native_mock,
+            plan=_safe_plan(),
+            verify_returns=[(1, "failed initially"), (0, "passed after retry")],
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        loop = native_mock.native_meta.verification_loop
+        self.assertTrue(loop.retried)
+        self.assertTrue(loop.passed)
+        self.assertEqual(loop.exit_code, 0)
+        vl = logged.get("verification_loop")
+        self.assertIsNotNone(vl)
+        self.assertTrue(vl["retried"])
+        self.assertTrue(vl["passed"])
