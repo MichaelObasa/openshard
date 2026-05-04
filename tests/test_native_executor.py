@@ -2788,3 +2788,203 @@ class TestNativeFinalReportPipeline(unittest.TestCase):
         loop = native_mock.native_meta.verification_loop
         self.assertTrue(loop.retried)
         native_mock.build_final_report.assert_called_once()
+
+
+import click  # noqa: E402 — needed for CliRunner command wrapper below
+
+
+def _render_native_summary(report: NativeFinalReport | None) -> str:
+    from click.testing import CliRunner
+    from openshard.cli.run_output import _print_native_summary
+
+    meta = NativeRunMeta()
+    meta.final_report = report
+
+    @click.command()
+    def cmd():
+        _print_native_summary(meta)
+
+    return CliRunner().invoke(cmd).output
+
+
+class TestNativeSummaryRenderer(unittest.TestCase):
+    """Unit tests for _print_native_summary CLI renderer."""
+
+    def _blank(self) -> NativeFinalReport:
+        return NativeFinalReport()
+
+    # 1
+    def test_no_output_when_final_report_is_none(self):
+        out = _render_native_summary(None)
+        self.assertNotIn("[native summary]", out)
+
+    # 2
+    def test_context_yes(self):
+        r = self._blank()
+        r.used_native_context = True
+        out = _render_native_summary(r)
+        self.assertIn("context: yes", out)
+
+    # 3
+    def test_context_no(self):
+        r = self._blank()
+        r.used_native_context = False
+        out = _render_native_summary(r)
+        self.assertIn("context: no", out)
+
+    # 4
+    def test_skills_rendered(self):
+        r = self._blank()
+        r.selected_skills = ["repo mapping", "safe file editing"]
+        out = _render_native_summary(r)
+        self.assertIn("skills: repo mapping, safe file editing", out)
+
+    # 5
+    def test_plan_renders(self):
+        r = self._blank()
+        r.plan_intent = "implementation"
+        r.plan_risk = "medium"
+        out = _render_native_summary(r)
+        self.assertIn("plan: implementation / medium", out)
+
+    # 6
+    def test_evidence_renders(self):
+        r = self._blank()
+        r.evidence_items = 3
+        r.snippet_files = 2
+        out = _render_native_summary(r)
+        self.assertIn("evidence: 3 items, 2 snippets", out)
+
+    # 7
+    def test_verification_retried_passed(self):
+        r = self._blank()
+        r.verification_attempted = True
+        r.verification_retried = True
+        r.verification_passed = True
+        out = _render_native_summary(r)
+        self.assertIn("verification: retried, passed", out)
+
+    # 8
+    def test_verification_failed(self):
+        r = self._blank()
+        r.verification_attempted = True
+        r.verification_retried = False
+        r.verification_passed = False
+        out = _render_native_summary(r)
+        self.assertIn("verification: failed", out)
+        self.assertNotIn("retried", out)
+
+    # 9
+    def test_diff_counts_render(self):
+        r = self._blank()
+        r.diff_files = ["a.py", "b.py"]
+        r.added_lines = 34
+        r.removed_lines = 8
+        out = _render_native_summary(r)
+        self.assertIn("diff: 2 files, +34 / -8", out)
+
+    # 10
+    def test_diff_singular_file(self):
+        r = self._blank()
+        r.diff_files = ["a.py"]
+        r.added_lines = 5
+        r.removed_lines = 1
+        out = _render_native_summary(r)
+        self.assertIn("diff: 1 file,", out)
+        self.assertNotIn("1 files", out)
+
+    # 11
+    def test_warnings_render_compact(self):
+        r = self._blank()
+        r.warnings = ["dirty working tree detected", "large diff"]
+        out = _render_native_summary(r)
+        self.assertIn("  warning: dirty working tree detected", out)
+        self.assertIn("  warning: large diff", out)
+
+    # 12
+    def test_no_raw_diff_filenames(self):
+        r = self._blank()
+        r.diff_files = ["src/secret_internal_path.py"]
+        r.added_lines = 1
+        r.removed_lines = 0
+        out = _render_native_summary(r)
+        self.assertNotIn("src/secret_internal_path.py", out)
+
+    # 13 — integration: native workflow shows summary when final_report exists
+    def test_pipeline_native_shows_summary(self):
+        from openshard.execution.generator import ChangedFile
+
+        native_mock = _make_native_mock()
+        safe_file = ChangedFile(path="out.txt", content="ok", change_type="create", summary="created")
+        r = MagicMock()
+        r.files = [safe_file]
+        r.summary = "done"
+        r.notes = []
+        r.usage = None
+        native_mock.generate.return_value = r
+
+        def _set_report():
+            native_mock.native_meta.final_report = NativeFinalReport(
+                used_native_context=True,
+                selected_skills=["repo mapping"],
+            )
+
+        native_mock.build_final_report.side_effect = _set_report
+
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.build_verification_plan", return_value=_safe_plan()), \
+                 patch("openshard.run.pipeline._run_verification_plan", return_value=(0, "")), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                result = runner.invoke(cli, ["run", "--workflow", "native", "--write", "fix the bug"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("[native summary]", result.output)
+        self.assertIn("context: yes", result.output)
+        self.assertIn("skills: repo mapping", result.output)
+
+    # 14 — integration: non-native workflow omits native summary
+    def test_pipeline_non_native_no_summary(self):
+        from openshard.execution.generator import ChangedFile
+
+        safe_file = ChangedFile(path="out.txt", content="ok", change_type="create", summary="created")
+        fake_result = MagicMock()
+        fake_result.files = [safe_file]
+        fake_result.summary = "done"
+        fake_result.notes = []
+        fake_result.usage = None
+
+        generator_mock = _make_generator_mock()
+        generator_mock.generate.return_value = fake_result
+
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor") as _native_cls, \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator_mock), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                result = runner.invoke(cli, ["run", "--workflow", "direct", "--write", "fix the bug"])
+
+        self.assertNotIn("[native summary]", result.output)
+
+    # 15 — getattr guard: passing None directly must not crash
+    def test_renderer_accepts_none_meta(self):
+        from click.testing import CliRunner
+        from openshard.cli.run_output import _print_native_summary
+
+        @click.command()
+        def cmd():
+            _print_native_summary(None)
+
+        result = CliRunner().invoke(cmd)
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(result.output.strip(), "")
