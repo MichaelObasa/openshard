@@ -413,6 +413,11 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         lines.append(f"  loop: {' -> '.join(loop_steps)}")
         has_content = True
 
+    read_search_findings = getattr(native_meta, "read_search_findings", None)
+    if read_search_findings:
+        lines.append(f"  read/search: {len(read_search_findings)} findings")
+        has_content = True
+
     if detail == "full":
         loop_trace = getattr(native_meta, "native_loop_trace", None)
         if loop_trace is None:
@@ -483,6 +488,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "native_backend_available": entry.get("native_backend_available", True),
         "native_backend_notes": entry.get("native_backend_notes", []),
         "native_backend_proof": entry.get("native_backend_proof"),
+        "read_search_findings": entry.get("read_search_findings", []),
     })
 
 

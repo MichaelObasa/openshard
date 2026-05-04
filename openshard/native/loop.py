@@ -7,6 +7,7 @@ NativeLoopPhase = Literal[
     "repo_context",
     "observation",
     "evidence",
+    "read_search",
     "plan",
     "backend_proof",
     "generation",

@@ -58,6 +58,7 @@ class NativeRunMeta:
     native_backend_available: bool = True
     native_backend_notes: list[str] = field(default_factory=list)
     native_backend_proof: dict | None = None
+    read_search_findings: list[str] = field(default_factory=list)
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -68,6 +69,9 @@ _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
 })
 
 _SEARCH_TRIGGER_WORDS: frozenset[str] = frozenset({"where", "find", "search", "locate"})
+
+_MAX_READ_SEARCH_STEPS: int = 3
+_MAX_LOOP_FINDINGS: int = 5
 
 
 def _parse_search_result_line(line: str) -> tuple[str, int] | None:
@@ -299,6 +303,90 @@ class NativeAgentExecutor:
         self.native_meta.observation = observation
         self.record_loop_step("observation")
 
+    def _run_read_search_loop(self, task: str) -> None:
+        if self._runner is None:
+            return
+
+        task_lower = task.lower()
+        if any(kw in task_lower for kw in ("test", "pytest", "failing", "bug", "flaky")):
+            strategy = "test"
+        elif any(kw in task_lower for kw in ("cli", "command", "argument")):
+            strategy = "cli"
+        else:
+            strategy = "default"
+
+        findings: list[str] = []
+        files_checked: int = 0
+        matched_terms: int = 0
+        steps_taken: int = 0
+        truncated: bool = False
+
+        rcs = self.native_meta.repo_context_summary
+
+        # Step 1: mine test_markers from already-collected repo context (no new tool call)
+        if steps_taken < _MAX_READ_SEARCH_STEPS and rcs is not None:
+            steps_taken += 1
+            for marker in rcs.test_markers:
+                if len(findings) >= _MAX_LOOP_FINDINGS:
+                    truncated = True
+                    break
+                findings.append(f"test-marker:{marker}")
+                matched_terms += 1
+
+        # Step 2: mine package_files from already-collected repo context (no new tool call)
+        if steps_taken < _MAX_READ_SEARCH_STEPS and rcs is not None:
+            steps_taken += 1
+            for pkg in rcs.package_files:
+                if len(findings) >= _MAX_LOOP_FINDINGS:
+                    truncated = True
+                    break
+                findings.append(f"package:{pkg}")
+                matched_terms += 1
+
+        # Step 3: one optional targeted search_repo call based on strategy
+        if steps_taken < _MAX_READ_SEARCH_STEPS and len(findings) < _MAX_LOOP_FINDINGS:
+            steps_taken += 1
+            if strategy == "test":
+                query = "test"
+            elif strategy == "cli":
+                query = "cli"
+            else:
+                query = _extract_search_query(task) or "main"
+
+            search_call = NativeToolCall(tool_name="search_repo", args={"query": query})
+            search_result = self._runner.run(search_call)
+            self.native_meta.tool_trace.append(self._runner.trace_entry(search_call, search_result))
+
+            if search_result.ok:
+                raw_lines = [ln for ln in search_result.output.splitlines() if ln.strip()]
+                for line in raw_lines:
+                    if len(findings) >= _MAX_LOOP_FINDINGS:
+                        truncated = True
+                        break
+                    parsed = _parse_search_result_line(line)
+                    if parsed is not None:
+                        path, _ = parsed
+                        label = f"file:{path}"
+                        if label not in findings:
+                            findings.append(label)
+                            files_checked += 1
+                            matched_terms += 1
+
+        self.native_meta.read_search_findings = findings[:_MAX_LOOP_FINDINGS]
+
+        self.record_loop_step(
+            "read_search",
+            summary=f"strategy={strategy} steps={steps_taken} findings={len(findings)}",
+            metadata={
+                "steps": steps_taken,
+                "findings": len(findings),
+                "files_checked": files_checked,
+                "matched_terms": matched_terms,
+                "truncated": truncated,
+                "strategy": strategy,
+            },
+        )
+
     def _run_backend_proof_phase(self, task: str) -> None:
         if self._backend.name != "deepagents":
             return
@@ -361,6 +449,7 @@ class NativeAgentExecutor:
         if self._experimental_deepagents_run:
             self._run_backend_proof_phase(task)
         self._run_observe_phase(task, repo_facts=repo_facts)
+        self._run_read_search_loop(task)
         matches = match_builtin_skills(task, repo_facts=repo_facts)
         self.native_meta.selected_skills = selected_skill_names(matches)
 

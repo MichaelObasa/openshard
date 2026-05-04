@@ -990,6 +990,7 @@ class RunPipeline:
                 "native_backend_available": getattr(_native_meta, "native_backend_available", True),
                 "native_backend_notes": list(getattr(_native_meta, "native_backend_notes", [])),
                 "native_backend_proof": getattr(_native_meta, "native_backend_proof", None),
+                "read_search_findings": list(getattr(_native_meta, "read_search_findings", [])),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
