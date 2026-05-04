@@ -7,6 +7,12 @@ from click.testing import CliRunner
 
 from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
+from openshard.native.context import (
+    CompactRunState,
+    NativeContextBudget,
+    build_compact_run_state,
+    build_initial_context_budget,
+)
 from openshard.native.executor import NativeAgentExecutor, NativeRunMeta
 
 _DEFAULT_CONFIG = {"approval_mode": "smart"}
@@ -62,7 +68,74 @@ class TestNativeRunMeta(unittest.TestCase):
         self.assertEqual(meta.execution_depth, "fast")
         self.assertEqual(meta.selected_skills, [])
         self.assertIsNone(meta.context_budget)
+        self.assertIsNone(meta.context_state)
+        self.assertEqual(meta.context_warnings, [])
         self.assertEqual(meta.tool_trace, [])
+
+
+class TestNativeContextBudget(unittest.TestCase):
+    """Unit tests for NativeContextBudget, CompactRunState, and their builders."""
+
+    def test_budget_defaults(self):
+        budget = NativeContextBudget()
+        self.assertIsNone(budget.context_window)
+        self.assertEqual(budget.estimated_tokens_used, 0)
+        self.assertIsNone(budget.estimated_tokens_remaining)
+        self.assertEqual(budget.files_loaded, 0)
+        self.assertEqual(budget.skills_loaded, 0)
+        self.assertFalse(budget.repo_map_built)
+        self.assertEqual(budget.warnings, [])
+
+    def test_build_initial_budget_no_window(self):
+        budget = build_initial_context_budget()
+        self.assertIsNone(budget.context_window)
+        self.assertIsNone(budget.estimated_tokens_remaining)
+        self.assertEqual(budget.estimated_tokens_used, 0)
+
+    def test_build_initial_budget_with_window(self):
+        budget = build_initial_context_budget(context_window=8000)
+        self.assertEqual(budget.context_window, 8000)
+        self.assertEqual(budget.estimated_tokens_remaining, 8000)
+        self.assertEqual(budget.estimated_tokens_used, 0)
+
+    def test_compact_run_state_defaults(self):
+        state = CompactRunState()
+        self.assertEqual(state.task_goal, "")
+        self.assertEqual(state.repo_facts_summary, "")
+        self.assertEqual(state.files_touched, [])
+        self.assertIsNone(state.verification_result)
+        self.assertEqual(state.blockers, [])
+        self.assertEqual(state.next_step, "")
+
+    def test_build_compact_run_state_defaults(self):
+        state = build_compact_run_state("fix the bug")
+        self.assertEqual(state.task_goal, "fix the bug")
+        self.assertEqual(state.repo_facts_summary, "")
+        self.assertEqual(state.files_touched, [])
+        self.assertIsNone(state.verification_result)
+        self.assertEqual(state.blockers, [])
+        self.assertEqual(state.next_step, "")
+
+    def test_build_compact_run_state_with_values(self):
+        state = build_compact_run_state(
+            task_goal="refactor auth",
+            repo_facts_summary="Python, Django",
+            files_touched=["auth.py", "views.py"],
+            verification_result="passed",
+            blockers=["missing test"],
+            next_step="add coverage",
+        )
+        self.assertEqual(state.task_goal, "refactor auth")
+        self.assertEqual(state.repo_facts_summary, "Python, Django")
+        self.assertEqual(state.files_touched, ["auth.py", "views.py"])
+        self.assertEqual(state.verification_result, "passed")
+        self.assertEqual(state.blockers, ["missing test"])
+        self.assertEqual(state.next_step, "add coverage")
+
+    def test_build_compact_run_state_none_lists_default_to_empty(self):
+        state = build_compact_run_state("task", files_touched=None, blockers=None)
+        self.assertEqual(state.files_touched, [])
+        self.assertEqual(state.blockers, [])
 
 
 class TestNativeAgentExecutor(unittest.TestCase):
@@ -82,6 +155,8 @@ class TestNativeAgentExecutor(unittest.TestCase):
         self.assertEqual(executor.native_meta.execution_depth, "fast")
         self.assertEqual(executor.native_meta.selected_skills, [])
         self.assertIsNone(executor.native_meta.context_budget)
+        self.assertIsNone(executor.native_meta.context_state)
+        self.assertEqual(executor.native_meta.context_warnings, [])
         self.assertEqual(executor.native_meta.tool_trace, [])
 
     def test_model_attributes_forwarded(self):
@@ -152,6 +227,8 @@ class TestNativeWorkflowIntegration(unittest.TestCase):
         self.assertEqual(logged.get("execution_depth"), "fast")
         self.assertEqual(logged.get("selected_skills"), [])
         self.assertIsNone(logged.get("context_budget"))
+        self.assertIsNone(logged.get("context_state"))
+        self.assertEqual(logged.get("context_warnings"), [])
         self.assertEqual(logged.get("tool_trace"), [])
 
     def test_native_dry_run(self):
