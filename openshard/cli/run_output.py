@@ -340,26 +340,28 @@ def _render_native_demo_block(native_meta: Any) -> list[str]:
         return []
 
     lines: list[str] = []
+    has_content = False
 
     repo_summary = getattr(native_meta, "repo_context_summary", None)
     if repo_summary is not None:
+        has_content = True
         stack = getattr(repo_summary, "likely_stack_markers", [])
         tests = getattr(repo_summary, "test_markers", [])
         parts: list[str] = list(stack) if stack else ["unknown"]
         if tests:
             parts.append("tests detected")
         lines.append(f"  repo: {', '.join(parts)}")
-    else:
-        lines.append("  repo: unknown")
 
     observation = getattr(native_meta, "observation", None)
     if observation is not None:
+        has_content = True
         dirty = "yes" if getattr(observation, "dirty_diff_present", False) else "no"
         search_ev = "yes" if getattr(observation, "search_matches_count", 0) > 0 else "no"
         lines.append(f"  observation: dirty tree {dirty}, search evidence {search_ev}")
 
     plan = getattr(native_meta, "plan", None)
     if plan is not None:
+        has_content = True
         intent = getattr(plan, "intent", "")
         risk = getattr(plan, "risk", "")
         lines.append(f"  plan: {intent} / {risk}")
@@ -369,6 +371,7 @@ def _render_native_demo_block(native_meta: Any) -> list[str]:
 
     vloop = getattr(native_meta, "verification_loop", None)
     if vloop is not None and getattr(vloop, "attempted", False):
+        has_content = True
         v_parts: list[str] = []
         if getattr(vloop, "retried", False):
             v_parts.append("retried")
@@ -377,6 +380,7 @@ def _render_native_demo_block(native_meta: Any) -> list[str]:
 
     diff_review = getattr(native_meta, "diff_review", None)
     if diff_review is not None and getattr(diff_review, "has_diff", False):
+        has_content = True
         changed = getattr(diff_review, "changed_files", [])
         n = len(changed)
         file_word = "file" if n == 1 else "files"
@@ -384,7 +388,7 @@ def _render_native_demo_block(native_meta: Any) -> list[str]:
         removed = getattr(diff_review, "removed_lines", 0)
         lines.append(f"  diff: {n} {file_word}, +{added} / -{removed}")
 
-    return lines
+    return lines if has_content else []
 
 
 def _print_native_demo_block(native_meta: Any) -> None:
