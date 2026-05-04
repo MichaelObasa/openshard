@@ -273,6 +273,74 @@ class TestNativeAgentExecutorRunTool(unittest.TestCase):
         self.assertEqual(len(executor.native_meta.tool_trace), 2)
 
 
+class TestNativePreflight(unittest.TestCase):
+    """Tests for NativeAgentExecutor._run_preflight() via generate()."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor, fake_gen
+
+    def _make_executor_no_repo(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor, fake_gen
+
+    def test_generate_with_repo_root_runs_preflight(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        self.assertEqual(len(executor.native_meta.tool_trace), 1)
+        self.assertEqual(executor.native_meta.tool_trace[0]["tool"], "list_files")
+
+    def test_preflight_records_list_files_in_trace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor, _ = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        entry = executor.native_meta.tool_trace[0]
+        self.assertIn("tool", entry)
+        self.assertIn("ok", entry)
+        self.assertIn("approved", entry)
+        self.assertIn("output_chars", entry)
+        self.assertIn("error", entry)
+
+    def test_preflight_does_not_store_full_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.py").write_text("a = 1")
+            executor, _ = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        self.assertNotIn("output", executor.native_meta.tool_trace[0])
+
+    def test_context_budget_updated_after_preflight(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor, _ = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        self.assertIsNotNone(executor.native_meta.context_budget)
+        self.assertTrue(executor.native_meta.context_budget.repo_map_built)
+
+    def test_context_budget_files_loaded_not_incremented(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "b.py").write_text("b = 2")
+            executor, _ = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        self.assertEqual(executor.native_meta.context_budget.files_loaded, 0)
+
+    def test_generate_without_repo_root_still_works(self):
+        executor, fake_gen = self._make_executor_no_repo()
+        result = executor.generate("fix the bug")
+        self.assertIs(result, fake_gen.generate.return_value)
+        self.assertEqual(executor.native_meta.tool_trace, [])
+        self.assertIsNone(executor.native_meta.context_budget)
+
+
 class TestNativeWorkflowIntegration(unittest.TestCase):
     """Integration tests via CLI runner — verify routing and log metadata."""
 
