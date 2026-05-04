@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 from openshard.native.tool_runner import NativeToolRunner
 from openshard.native.tools import NativeToolCall
+
+
+def _run_git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
 
 
 def _make_runner(tmp_path: Path) -> NativeToolRunner:
@@ -188,6 +193,57 @@ class TestNativeToolRunnerTraceEntry(unittest.TestCase):
         result = self._runner.run(call)
         entry = self._runner.trace_entry(call, result)
         self.assertTrue(entry["approved"])
+
+
+class TestNativeToolRunnerGitDiff(unittest.TestCase):
+    def test_run_get_git_diff_ok(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _run_git(root, "init")
+            (root / "change.txt").write_text("original\n")
+            _run_git(root, "add", "change.txt")
+            (root / "change.txt").write_text("modified\n")
+            runner = _make_runner(root)
+            call = NativeToolCall(tool_name="get_git_diff", args={})
+            result = runner.run(call)
+        self.assertTrue(result.ok)
+        self.assertIn("change.txt", result.output)
+
+    def test_run_get_git_diff_non_git_repo_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runner = _make_runner(root)
+            call = NativeToolCall(tool_name="get_git_diff", args={})
+            result = runner.run(call)
+        self.assertFalse(result.ok)
+
+    def test_trace_entry_get_git_diff_no_full_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _run_git(root, "init")
+            (root / "t.txt").write_text("a\n")
+            _run_git(root, "add", "t.txt")
+            (root / "t.txt").write_text("b\n")
+            runner = _make_runner(root)
+            call = NativeToolCall(tool_name="get_git_diff", args={})
+            result = runner.run(call)
+            entry = runner.trace_entry(call, result)
+        self.assertIn("output_chars", entry)
+        self.assertNotIn("output", entry)
+        self.assertEqual(entry["output_chars"], len(result.output))
+
+    def test_run_get_git_diff_respects_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _run_git(root, "init")
+            (root / "big.txt").write_text("before\n")
+            _run_git(root, "add", "big.txt")
+            (root / "big.txt").write_text("after\n" * 1000)
+            runner = _make_runner(root)
+            call = NativeToolCall(tool_name="get_git_diff", args={"limit": 200})
+            result = runner.run(call)
+        self.assertTrue(result.ok)
+        self.assertTrue(result.metadata["truncated"])
 
 
 if __name__ == "__main__":

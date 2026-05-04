@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -9,6 +10,7 @@ from openshard.native.tools import (
     NativeTool,
     NativeToolCall,
     NativeToolResult,
+    _exec_get_git_diff,
     _exec_list_files,
     _exec_read_file,
     _exec_search_repo,
@@ -17,6 +19,10 @@ from openshard.native.tools import (
     get_native_tool,
     list_native_tools,
 )
+
+
+def _run_git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
 
 _EXPECTED_BUILTIN_NAMES = {
     "list_files",
@@ -339,6 +345,81 @@ class TestExecSearchRepo(unittest.TestCase):
             (root / "file.py").write_text("hello\n")
             result = _exec_search_repo(root, "hello", max_matches="bad")  # type: ignore[arg-type]
         self.assertTrue(result.ok)
+
+
+class TestExecGetGitDiff(unittest.TestCase):
+    def test_returns_changes(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _run_git(root, "init")
+            (root / "demo.txt").write_text("before\n")
+            _run_git(root, "add", "demo.txt")
+            (root / "demo.txt").write_text("after\n")
+            result = _exec_get_git_diff(root)
+        self.assertTrue(result.ok)
+        self.assertIn("demo.txt", result.output)
+        self.assertIn("after", result.output)
+
+    def test_no_changes_returns_empty_output(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _run_git(root, "init")
+            (root / "stable.txt").write_text("unchanged\n")
+            _run_git(root, "add", "stable.txt")
+            result = _exec_get_git_diff(root)
+        self.assertTrue(result.ok)
+        self.assertEqual(result.output, "")
+
+    def test_non_git_repo_returns_error(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            result = _exec_get_git_diff(root)
+        self.assertFalse(result.ok)
+        self.assertIsNotNone(result.error)
+
+    def test_compacts_large_output(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _run_git(root, "init")
+            (root / "big.txt").write_text("before\n")
+            _run_git(root, "add", "big.txt")
+            (root / "big.txt").write_text("after\n" * 1000)
+            result = _exec_get_git_diff(root, limit=200)
+        self.assertTrue(result.ok)
+        self.assertTrue(result.metadata["truncated"])
+        self.assertIn("[truncated:", result.output)
+
+    def test_timeout_returns_error(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".git").mkdir()
+            with patch(
+                "openshard.native.tools.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(["git"], 10.0),
+            ):
+                result = _exec_get_git_diff(root)
+        self.assertFalse(result.ok)
+        self.assertIn("timed out", result.error)
+
+    def test_uses_no_shell(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / ".git").mkdir()
+            mock_completed = MagicMock(returncode=0, stdout="", stderr="")
+            with patch(
+                "openshard.native.tools.subprocess.run",
+                return_value=mock_completed,
+            ) as mock_run:
+                _exec_get_git_diff(root)
+            call_kwargs = mock_run.call_args
+            self.assertIsInstance(call_kwargs[0][0], list)
+            self.assertNotEqual(call_kwargs[1].get("shell"), True)
 
 
 class TestNativeFastPathToolTrace(unittest.TestCase):

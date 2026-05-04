@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -190,6 +191,74 @@ def _exec_search_repo(
         ok=True,
         output=output,
         metadata={"matches": len(matches), "truncated": truncated},
+    )
+
+
+def _exec_get_git_diff(
+    repo_root: Path,
+    *,
+    limit: int = 4000,
+    timeout: float = 10.0,
+) -> NativeToolResult:
+    repo_resolved = repo_root.resolve()
+
+    if not (repo_resolved / ".git").exists():
+        return NativeToolResult(
+            tool_name="get_git_diff",
+            ok=False,
+            error="not a git repository (or any of the parent directories): .git",
+        )
+
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                "-c", "core.externalDiff=",
+                "-c", "diff.external=",
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--",
+            ],
+            cwd=repo_resolved,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return NativeToolResult(
+            tool_name="get_git_diff",
+            ok=False,
+            error=f"git diff timed out after {timeout} seconds.",
+            metadata={"timeout": timeout},
+        )
+    except OSError as exc:
+        return NativeToolResult(
+            tool_name="get_git_diff",
+            ok=False,
+            error=str(exc),
+        )
+
+    if completed.returncode != 0:
+        err = completed.stderr.strip() or completed.stdout.strip()
+        return NativeToolResult(
+            tool_name="get_git_diff",
+            ok=False,
+            error=compact_tool_result(err, limit=limit),
+            metadata={"returncode": completed.returncode},
+        )
+
+    output = compact_tool_result(completed.stdout, limit=limit)
+    return NativeToolResult(
+        tool_name="get_git_diff",
+        ok=True,
+        output=output,
+        metadata={
+            "returncode": completed.returncode,
+            "output_chars": len(output),
+            "truncated": len(completed.stdout) > limit,
+        },
     )
 
 
