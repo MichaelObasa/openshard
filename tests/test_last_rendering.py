@@ -384,6 +384,41 @@ class TestLastNativeInspection(unittest.TestCase):
         out = _render(entry, detail="more")
         self.assertIn("backend: deepagents unavailable", out)
 
+    def test_render_readonly_proof_line(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        from openshard.native.executor import NativeRunMeta
+        meta = NativeRunMeta()
+        meta.native_backend = "deepagents"
+        meta.native_backend_available = True
+        meta.native_backend_proof = {"mode": "readonly_agent_proof"}
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertIn("proof: readonly agent proof", joined)
+
+    def test_render_unconfigured_proof_line(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        from openshard.native.executor import NativeRunMeta
+        meta = NativeRunMeta()
+        meta.native_backend = "deepagents"
+        meta.native_backend_available = True
+        meta.native_backend_proof = {"mode": "readonly_agent_unconfigured"}
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertIn("proof: readonly agent unconfigured", joined)
+
+    def test_native_meta_from_entry_includes_proof(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+        entry = {
+            "workflow": "native",
+            "native_backend": "deepagents",
+            "native_backend_available": True,
+            "native_backend_notes": [],
+            "native_backend_proof": {"mode": "readonly_agent_proof", "summary": "ok"},
+        }
+        meta = _native_meta_from_entry(entry)
+        self.assertIsNotNone(meta.native_backend_proof)
+        self.assertEqual(meta.native_backend_proof.mode, "readonly_agent_proof")
+
 
 if __name__ == "__main__":
     unittest.main()
