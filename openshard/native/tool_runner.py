@@ -5,6 +5,7 @@ from pathlib import Path
 from openshard.native.tools import (
     NativeToolCall,
     NativeToolResult,
+    _exec_get_git_diff,
     _exec_list_files,
     _exec_read_file,
     _exec_search_repo,
@@ -55,6 +56,19 @@ class NativeToolRunner:
                 self._repo_root,
                 args.get("query", ""),
                 max_matches=args.get("max_matches", 50),
+            )
+
+        if call.tool_name == "get_git_diff":
+            limit = args.get("limit", 4000)
+            timeout = args.get("timeout", 10.0)
+            if not isinstance(limit, int) or limit <= 0:
+                limit = 4000
+            if not isinstance(timeout, (int, float)) or timeout <= 0:
+                timeout = 10.0
+            return _exec_get_git_diff(
+                self._repo_root,
+                limit=limit,
+                timeout=timeout,
             )
 
         return NativeToolResult(
