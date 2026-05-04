@@ -13,6 +13,7 @@ from openshard.native.tools import (
     _exec_get_git_diff,
     _exec_list_files,
     _exec_read_file,
+    _exec_run_verification,
     _exec_search_repo,
     classify_native_tool,
     compact_tool_result,
@@ -440,3 +441,161 @@ class TestNativeFastPathToolTrace(unittest.TestCase):
 
         executor.generate("add a feature")
         self.assertEqual(executor.native_meta.tool_trace, [])
+
+
+class TestExecRunVerification(unittest.TestCase):
+    def _make_plan(self, safety=None):
+        from openshard.verification.plan import (
+            CommandSafety,
+            VerificationCommand,
+            VerificationKind,
+            VerificationPlan,
+            VerificationSource,
+        )
+        if safety is None:
+            return VerificationPlan(commands=[])
+        reason = "safe test runner" if safety == CommandSafety.safe else "requires review"
+        cmd = VerificationCommand(
+            name="tests",
+            argv=["python", "-m", "pytest"],
+            kind=VerificationKind.test,
+            source=VerificationSource.detected,
+            safety=safety,
+            reason=reason,
+        )
+        return VerificationPlan(commands=[cmd])
+
+    def _patches(self, plan, run_return=(0, "")):
+        fake_facts = MagicMock()
+        return (
+            patch("openshard.analysis.repo.analyze_repo", return_value=fake_facts),
+            patch("openshard.verification.plan.build_verification_plan", return_value=plan),
+            patch("openshard.verification.executor.run_verification_plan", return_value=run_return),
+        )
+
+    def test_no_commands_detected_returns_error(self):
+        plan = self._make_plan(safety=None)
+        p1, p2, p3 = self._patches(plan)
+        with p1, p2, p3:
+            result = _exec_run_verification(Path("/fake"))
+        self.assertFalse(result.ok)
+        self.assertIn("No verification command", result.error)
+        self.assertFalse(result.metadata["attempted"])
+
+    def test_safe_command_passes(self):
+        from openshard.verification.plan import CommandSafety
+        plan = self._make_plan(safety=CommandSafety.safe)
+        p1, p2, p3 = self._patches(plan, run_return=(0, "1 passed"))
+        with p1, p2, p3:
+            result = _exec_run_verification(Path("/fake"))
+        self.assertTrue(result.ok)
+        self.assertTrue(result.metadata["passed"])
+        self.assertEqual(result.metadata["exit_code"], 0)
+        self.assertIsNone(result.error)
+        self.assertIn("1 passed", result.output)
+
+    def test_safe_command_fails_nonzero_exit(self):
+        from openshard.verification.plan import CommandSafety
+        plan = self._make_plan(safety=CommandSafety.safe)
+        p1, p2, p3 = self._patches(plan, run_return=(2, "1 failed"))
+        with p1, p2, p3:
+            result = _exec_run_verification(Path("/fake"))
+        self.assertFalse(result.ok)
+        self.assertFalse(result.metadata["passed"])
+        self.assertEqual(result.metadata["exit_code"], 2)
+        self.assertIn("exit code 2", result.error)
+
+    def test_needs_approval_without_approved_returns_error(self):
+        from openshard.verification.plan import CommandSafety
+        plan = self._make_plan(safety=CommandSafety.needs_approval)
+        p1, p2, _ = self._patches(plan)
+        with p1, p2:
+            result = _exec_run_verification(Path("/fake"), approved=False)
+        self.assertFalse(result.ok)
+        self.assertIn("requires approval", result.error)
+        self.assertFalse(result.metadata["attempted"])
+
+    def test_needs_approval_with_approved_executes(self):
+        from openshard.verification.plan import CommandSafety
+        plan = self._make_plan(safety=CommandSafety.needs_approval)
+        p1, p2, p3 = self._patches(plan, run_return=(0, "ok"))
+        with p1, p2, p3:
+            result = _exec_run_verification(Path("/fake"), approved=True)
+        self.assertTrue(result.ok)
+        self.assertTrue(result.metadata["attempted"])
+
+    def test_blocked_command_returns_error_without_executing(self):
+        from openshard.verification.plan import CommandSafety
+        plan = self._make_plan(safety=CommandSafety.blocked)
+        p1, p2, p3 = self._patches(plan)
+        with p1, p2, p3 as mock_run:
+            result = _exec_run_verification(Path("/fake"))
+        self.assertFalse(result.ok)
+        self.assertIn("blocked", result.error.lower())
+        self.assertFalse(result.metadata["attempted"])
+        mock_run.assert_not_called()
+
+    def test_large_output_truncated(self):
+        from openshard.verification.plan import CommandSafety
+        plan = self._make_plan(safety=CommandSafety.safe)
+        big_output = "x" * 5000
+        p1, p2, p3 = self._patches(plan, run_return=(0, big_output))
+        with p1, p2, p3:
+            result = _exec_run_verification(Path("/fake"), limit=100)
+        self.assertTrue(result.ok)
+        self.assertTrue(result.metadata["truncated"])
+        self.assertEqual(result.metadata["output_chars"], 5000)
+        self.assertIn("[truncated:", result.output)
+        self.assertLessEqual(len(result.output), 200)
+
+    def test_not_truncated_when_output_fits(self):
+        from openshard.verification.plan import CommandSafety
+        plan = self._make_plan(safety=CommandSafety.safe)
+        p1, p2, p3 = self._patches(plan, run_return=(0, "short output"))
+        with p1, p2, p3:
+            result = _exec_run_verification(Path("/fake"), limit=4000)
+        self.assertFalse(result.metadata["truncated"])
+
+    def test_command_count_in_metadata(self):
+        from openshard.verification.plan import CommandSafety
+        plan = self._make_plan(safety=CommandSafety.safe)
+        p1, p2, p3 = self._patches(plan, run_return=(0, ""))
+        with p1, p2, p3:
+            result = _exec_run_verification(Path("/fake"))
+        self.assertEqual(result.metadata["command_count"], 1)
+
+    def test_all_blocked_checked_not_just_first(self):
+        from openshard.verification.plan import (
+            CommandSafety,
+            VerificationCommand,
+            VerificationKind,
+            VerificationPlan,
+            VerificationSource,
+        )
+        safe_cmd = VerificationCommand(
+            name="tests",
+            argv=["python", "-m", "pytest"],
+            kind=VerificationKind.test,
+            source=VerificationSource.detected,
+            safety=CommandSafety.safe,
+            reason="ok",
+        )
+        blocked_cmd = VerificationCommand(
+            name="danger",
+            argv=["rm", "-rf", "/"],
+            kind=VerificationKind.unknown,
+            source=VerificationSource.detected,
+            safety=CommandSafety.blocked,
+            reason="destructive command",
+        )
+        plan = VerificationPlan(commands=[safe_cmd, blocked_cmd])
+        fake_facts = MagicMock()
+        with (
+            patch("openshard.analysis.repo.analyze_repo", return_value=fake_facts),
+            patch("openshard.verification.plan.build_verification_plan", return_value=plan),
+            patch("openshard.verification.executor.run_verification_plan") as mock_run,
+        ):
+            result = _exec_run_verification(Path("/fake"))
+        self.assertFalse(result.ok)
+        self.assertIn("blocked", result.error.lower())
+        mock_run.assert_not_called()

@@ -8,6 +8,7 @@ from openshard.native.tools import (
     _exec_get_git_diff,
     _exec_list_files,
     _exec_read_file,
+    _exec_run_verification,
     _exec_search_repo,
     classify_native_tool,
 )
@@ -69,6 +70,16 @@ class NativeToolRunner:
                 self._repo_root,
                 limit=limit,
                 timeout=timeout,
+            )
+
+        if call.tool_name == "run_verification":
+            limit = args.get("limit", 4000)
+            if not isinstance(limit, int) or limit <= 0:
+                limit = 4000
+            return _exec_run_verification(
+                self._repo_root,
+                approved=call.approved,
+                limit=limit,
             )
 
         return NativeToolResult(

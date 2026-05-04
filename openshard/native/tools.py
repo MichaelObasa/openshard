@@ -262,6 +262,67 @@ def _exec_get_git_diff(
     )
 
 
+def _exec_run_verification(
+    repo_root: Path,
+    *,
+    approved: bool = False,
+    limit: int = 4000,
+) -> NativeToolResult:
+    from openshard.analysis.repo import analyze_repo
+    from openshard.verification.executor import run_verification_plan
+    from openshard.verification.plan import CommandSafety, build_verification_plan
+
+    repo_facts = analyze_repo(repo_root)
+    plan = build_verification_plan({}, repo_facts)
+
+    if not plan.has_commands:
+        return NativeToolResult(
+            tool_name="run_verification",
+            ok=False,
+            error="No verification command detected.",
+            metadata={"attempted": False},
+        )
+
+    blocked = [c for c in plan.commands if c.safety == CommandSafety.blocked]
+    needs_approval_cmds = [c for c in plan.commands if c.safety == CommandSafety.needs_approval]
+
+    if blocked:
+        reasons = "; ".join(c.reason for c in blocked)
+        return NativeToolResult(
+            tool_name="run_verification",
+            ok=False,
+            error=f"Verification command is blocked: {reasons}",
+            metadata={"attempted": False, "command_count": len(plan.commands)},
+        )
+
+    if needs_approval_cmds and not approved:
+        return NativeToolResult(
+            tool_name="run_verification",
+            ok=False,
+            error="Verification command requires approval. Set approved=True to run.",
+            metadata={"attempted": False, "command_count": len(plan.commands)},
+        )
+
+    exit_code, raw_output = run_verification_plan(plan, repo_root, capture=True)
+    output = compact_tool_result(raw_output, limit)
+    passed = exit_code == 0
+
+    return NativeToolResult(
+        tool_name="run_verification",
+        ok=passed,
+        output=output,
+        error=None if passed else f"Verification failed (exit code {exit_code})",
+        metadata={
+            "attempted": True,
+            "passed": passed,
+            "exit_code": exit_code,
+            "command_count": len(plan.commands),
+            "output_chars": len(raw_output),
+            "truncated": len(raw_output) > limit,
+        },
+    )
+
+
 def _exec_read_file(repo_root: Path, path: str) -> NativeToolResult:
     try:
         safe = resolve_safe_repo_path(repo_root, path)
