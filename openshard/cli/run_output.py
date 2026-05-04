@@ -333,6 +333,71 @@ def _print_native_summary(native_meta: Any, detail: str = "default") -> None:
         click.echo(f"  warning: {warning}")
 
 
+def _render_native_demo_block(native_meta: Any) -> list[str]:
+    """Return ordered indented lines for the [native] block. Pure, no I/O."""
+    if native_meta is None:
+        return []
+
+    lines: list[str] = []
+
+    repo_summary = getattr(native_meta, "repo_context_summary", None)
+    if repo_summary is not None:
+        stack = getattr(repo_summary, "likely_stack_markers", [])
+        tests = getattr(repo_summary, "test_markers", [])
+        parts: list[str] = list(stack) if stack else ["unknown"]
+        if tests:
+            parts.append("tests detected")
+        lines.append(f"  repo: {', '.join(parts)}")
+    else:
+        lines.append("  repo: unknown")
+
+    observation = getattr(native_meta, "observation", None)
+    if observation is not None:
+        dirty = "yes" if getattr(observation, "dirty_diff_present", False) else "no"
+        search_ev = "yes" if getattr(observation, "search_matches_count", 0) > 0 else "no"
+        lines.append(f"  observation: dirty tree {dirty}, search evidence {search_ev}")
+
+    plan = getattr(native_meta, "plan", None)
+    if plan is not None:
+        intent = getattr(plan, "intent", "")
+        risk = getattr(plan, "risk", "")
+        lines.append(f"  plan: {intent} / {risk}")
+
+    write_path = getattr(native_meta, "write_path", "pipeline")
+    lines.append(f"  write path: {write_path}")
+
+    vloop = getattr(native_meta, "verification_loop", None)
+    if vloop is not None and getattr(vloop, "attempted", False):
+        v_parts: list[str] = []
+        if getattr(vloop, "retried", False):
+            v_parts.append("retried")
+        v_parts.append("passed" if getattr(vloop, "passed", False) else "failed")
+        lines.append(f"  verification: {', '.join(v_parts)}")
+
+    diff_review = getattr(native_meta, "diff_review", None)
+    if diff_review is not None and getattr(diff_review, "has_diff", False):
+        changed = getattr(diff_review, "changed_files", [])
+        n = len(changed)
+        file_word = "file" if n == 1 else "files"
+        added = getattr(diff_review, "added_lines", 0)
+        removed = getattr(diff_review, "removed_lines", 0)
+        lines.append(f"  diff: {n} {file_word}, +{added} / -{removed}")
+
+    return lines
+
+
+def _print_native_demo_block(native_meta: Any) -> None:
+    """Print the [native] demo block via click.echo."""
+    if native_meta is None:
+        return
+    body = _render_native_demo_block(native_meta)
+    if not body:
+        return
+    click.echo("\n[native]")
+    for line in body:
+        click.echo(line)
+
+
 def _print_dry_run(files: list[ChangedFile]) -> None:
     if not files:
         click.echo("\n(no files to preview)")

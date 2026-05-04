@@ -2807,6 +2807,18 @@ def _render_native_summary(report: NativeFinalReport | None) -> str:
     return CliRunner().invoke(cmd).output
 
 
+def _render_native_demo_block_str(meta: NativeRunMeta | None) -> str:
+    """Wrap _print_native_demo_block in CliRunner for unit testing."""
+    from click.testing import CliRunner
+    from openshard.cli.run_output import _print_native_demo_block
+
+    @click.command()
+    def cmd():
+        _print_native_demo_block(meta)
+
+    return CliRunner().invoke(cmd).output
+
+
 class TestNativeSummaryRenderer(unittest.TestCase):
     """Unit tests for _print_native_summary CLI renderer."""
 
@@ -2988,3 +3000,130 @@ class TestNativeSummaryRenderer(unittest.TestCase):
         result = CliRunner().invoke(cmd)
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(result.output.strip(), "")
+
+
+class TestNativeDemoBlock(unittest.TestCase):
+    """Unit and integration tests for the [native] demo block renderer."""
+
+    def _blank_meta(self) -> NativeRunMeta:
+        meta = NativeRunMeta()
+        meta.repo_context_summary = NativeRepoContextSummary(
+            likely_stack_markers=["python"],
+            test_markers=["tests/test_foo.py"],
+        )
+        meta.observation = NativeObservation(dirty_diff_present=False, search_matches_count=5)
+        meta.plan = NativePlan(intent="implementation", risk="medium")
+        meta.write_path = "pipeline"
+        meta.verification_loop = NativeVerificationLoop(attempted=True, passed=True, retried=True)
+        meta.diff_review = NativeDiffReview(
+            has_diff=True, changed_files=["a.py", "b.py"], added_lines=34, removed_lines=8
+        )
+        return meta
+
+    # 1 — repo/context signal
+    def test_repo_line_shows_stack_and_tests(self):
+        out = _render_native_demo_block_str(self._blank_meta())
+        self.assertIn("[native]", out)
+        self.assertIn("repo: python, tests detected", out)
+
+    def test_repo_no_markers_shows_unknown(self):
+        meta = self._blank_meta()
+        meta.repo_context_summary = NativeRepoContextSummary()
+        out = _render_native_demo_block_str(meta)
+        self.assertIn("repo: unknown", out)
+
+    # 2 — observation signal
+    def test_observation_dirty_tree_yes(self):
+        meta = self._blank_meta()
+        meta.observation = NativeObservation(dirty_diff_present=True, search_matches_count=3)
+        out = _render_native_demo_block_str(meta)
+        self.assertIn("observation: dirty tree yes, search evidence yes", out)
+
+    def test_observation_absent_skips_line(self):
+        meta = self._blank_meta()
+        meta.observation = None
+        out = _render_native_demo_block_str(meta)
+        self.assertNotIn("observation:", out)
+
+    # 3 — plan/risk signal
+    def test_plan_line_shows_intent_and_risk(self):
+        out = _render_native_demo_block_str(self._blank_meta())
+        self.assertIn("plan: implementation / medium", out)
+
+    def test_plan_absent_skips_line(self):
+        meta = self._blank_meta()
+        meta.plan = None
+        out = _render_native_demo_block_str(meta)
+        self.assertNotIn("  plan:", out)
+
+    # 4 — write path always shown
+    def test_write_path_always_present(self):
+        out = _render_native_demo_block_str(self._blank_meta())
+        self.assertIn("write path: pipeline", out)
+
+    # 5 — verification state
+    def test_verification_retried_passed(self):
+        out = _render_native_demo_block_str(self._blank_meta())
+        self.assertIn("verification: retried, passed", out)
+
+    def test_verification_not_attempted_skips_line(self):
+        meta = self._blank_meta()
+        meta.verification_loop = NativeVerificationLoop(attempted=False, passed=False, retried=False)
+        out = _render_native_demo_block_str(meta)
+        self.assertNotIn("verification:", out)
+
+    # 6 — diff summary (counts only, no paths)
+    def test_diff_line_shows_counts(self):
+        out = _render_native_demo_block_str(self._blank_meta())
+        self.assertIn("diff: 2 files, +34 / -8", out)
+
+    def test_diff_no_diff_skips_line(self):
+        meta = self._blank_meta()
+        meta.diff_review = NativeDiffReview(has_diff=False)
+        out = _render_native_demo_block_str(meta)
+        self.assertNotIn("  diff:", out)
+
+    # 7 — non-native workflow omits [native] block
+    def test_non_native_workflow_no_native_block(self):
+        from openshard.execution.generator import ChangedFile
+        safe_file = ChangedFile(path="out.txt", content="ok", change_type="create", summary="created")
+        fake_result = MagicMock()
+        fake_result.files = [safe_file]
+        fake_result.summary = "done"
+        fake_result.notes = []
+        fake_result.usage = None
+        generator_mock = _make_generator_mock()
+        generator_mock.generate.return_value = fake_result
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor"), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator_mock), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                result = CliRunner().invoke(cli, ["run", "--workflow", "direct", "--write", "fix the bug"])
+        self.assertNotIn("[native]", result.output)
+
+    # 8 — raw output is never printed
+    def test_no_raw_diff_file_paths_in_output(self):
+        meta = self._blank_meta()
+        meta.diff_review = NativeDiffReview(
+            has_diff=True, changed_files=["src/secret_internal_path.py"],
+            added_lines=10, removed_lines=2,
+        )
+        out = _render_native_demo_block_str(meta)
+        self.assertNotIn("src/secret_internal_path.py", out)
+        self.assertIn("diff: 1 file,", out)
+
+    def test_no_raw_search_count_in_output(self):
+        meta = self._blank_meta()
+        meta.observation = NativeObservation(dirty_diff_present=False, search_matches_count=99)
+        out = _render_native_demo_block_str(meta)
+        self.assertIn("search evidence yes", out)
+        self.assertNotIn("99", out)
+
+    def test_renderer_accepts_none_meta(self):
+        out = _render_native_demo_block_str(None)
+        self.assertNotIn("[native]", out)
+        self.assertEqual(out.strip(), "")
