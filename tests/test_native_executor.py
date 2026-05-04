@@ -13,12 +13,14 @@ from openshard.cli.main import cli
 from openshard.native.context import (
     CompactRunState,
     NativeContextBudget,
+    NativeDiffReview,
     NativeEvidence,
     NativeFileSnippet,
     NativeObservation,
     NativePlan,
     build_compact_run_state,
     build_initial_context_budget,
+    build_native_diff_review,
     render_native_evidence,
     render_native_observation,
     render_native_plan,
@@ -1776,3 +1778,337 @@ class TestNativeEvidenceMetaSerialization(unittest.TestCase):
         d = asdict(ev)
         self.assertIn("file_snippets", d)
         self.assertEqual(d["file_snippets"], [])
+
+
+_SAMPLE_DIFF = """\
+diff --git a/foo.py b/foo.py
+index 1234567..abcdefg 100644
+--- a/foo.py
++++ b/foo.py
+@@ -1,3 +1,4 @@
+ x = 1
+-y = 2
++y = 3
++z = 4
+"""
+
+
+class TestNativeDiffReviewBuilder(unittest.TestCase):
+    """Unit tests for build_native_diff_review()."""
+
+    def test_empty_diff_has_no_diff(self):
+        review = build_native_diff_review("")
+        self.assertFalse(review.has_diff)
+
+    def test_has_diff_true_for_nonempty_output(self):
+        review = build_native_diff_review(_SAMPLE_DIFF)
+        self.assertTrue(review.has_diff)
+
+    def test_detects_changed_file_from_diff_git_line(self):
+        review = build_native_diff_review(_SAMPLE_DIFF)
+        self.assertIn("foo.py", review.changed_files)
+
+    def test_detects_changed_file_from_plus_header(self):
+        diff = "+++ b/bar.py\n--- a/bar.py\n+added\n"
+        review = build_native_diff_review(diff)
+        self.assertIn("bar.py", review.changed_files)
+
+    def test_counts_added_lines(self):
+        review = build_native_diff_review(_SAMPLE_DIFF)
+        self.assertEqual(review.added_lines, 2)
+
+    def test_counts_removed_lines(self):
+        review = build_native_diff_review(_SAMPLE_DIFF)
+        self.assertEqual(review.removed_lines, 1)
+
+    def test_does_not_count_diff_headers_as_added_removed(self):
+        review = build_native_diff_review(_SAMPLE_DIFF)
+        # +++ and --- lines must not be counted
+        self.assertEqual(review.added_lines, 2)
+        self.assertEqual(review.removed_lines, 1)
+
+    def test_caps_changed_files_at_20(self):
+        lines = []
+        for i in range(25):
+            lines.append(f"diff --git a/file{i}.py b/file{i}.py")
+        review = build_native_diff_review("\n".join(lines))
+        self.assertEqual(len(review.changed_files), 20)
+
+    def test_sets_output_chars(self):
+        review = build_native_diff_review(_SAMPLE_DIFF)
+        self.assertEqual(review.output_chars, len(_SAMPLE_DIFF))
+
+    def test_sets_truncated_flag(self):
+        review = build_native_diff_review(_SAMPLE_DIFF, truncated=True)
+        self.assertTrue(review.truncated)
+
+    def test_truncated_false_by_default(self):
+        review = build_native_diff_review(_SAMPLE_DIFF)
+        self.assertFalse(review.truncated)
+
+    def test_empty_diff_has_zero_lines(self):
+        review = build_native_diff_review("")
+        self.assertEqual(review.added_lines, 0)
+        self.assertEqual(review.removed_lines, 0)
+        self.assertEqual(review.changed_files, [])
+
+    def test_changed_files_sorted(self):
+        diff = "diff --git a/z.py b/z.py\ndiff --git a/a.py b/a.py\n"
+        review = build_native_diff_review(diff)
+        self.assertEqual(review.changed_files, sorted(review.changed_files))
+
+
+class TestNativeDiffReviewExecutor(unittest.TestCase):
+    """Tests for NativeAgentExecutor.review_diff()."""
+
+    def _run_git(self, root: Path, *args: str) -> None:
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor
+
+    def _make_executor_no_repo(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor
+
+    def test_review_diff_returns_none_without_runner(self):
+        executor = self._make_executor_no_repo()
+        result = executor.review_diff()
+        self.assertIsNone(result)
+
+    def test_review_diff_returns_none_for_non_git_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            result = executor.review_diff()
+        # get_git_diff returns ok=False outside a git repo
+        self.assertIsNone(result)
+
+    def test_review_diff_stores_review_on_native_meta(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._run_git(root, "init")
+            self._run_git(root, "config", "user.email", "test@test.com")
+            self._run_git(root, "config", "user.name", "Test")
+            (root / "hello.txt").write_text("original\n")
+            self._run_git(root, "add", "hello.txt")
+            (root / "hello.txt").write_text("modified\n")
+            executor = self._make_executor_with_repo(root)
+            result = executor.review_diff()
+        self.assertIsNotNone(result)
+        self.assertIsInstance(executor.native_meta.diff_review, NativeDiffReview)
+        self.assertTrue(executor.native_meta.diff_review.has_diff)
+
+    def test_review_diff_detects_changed_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._run_git(root, "init")
+            self._run_git(root, "config", "user.email", "test@test.com")
+            self._run_git(root, "config", "user.name", "Test")
+            (root / "hello.txt").write_text("original\n")
+            self._run_git(root, "add", "hello.txt")
+            (root / "hello.txt").write_text("modified\n")
+            executor = self._make_executor_with_repo(root)
+            executor.review_diff()
+        self.assertIsNotNone(executor.native_meta.diff_review)
+        self.assertIn("hello.txt", executor.native_meta.diff_review.changed_files)
+
+    def test_review_diff_appends_tool_trace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            before = len(executor.native_meta.tool_trace)
+            executor.review_diff()
+        self.assertEqual(len(executor.native_meta.tool_trace), before + 1)
+        self.assertEqual(executor.native_meta.tool_trace[-1]["tool"], "get_git_diff")
+
+    def test_review_diff_trace_has_no_raw_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor.review_diff()
+        entry = executor.native_meta.tool_trace[-1]
+        self.assertNotIn("output", entry)
+        self.assertIn("output_chars", entry)
+
+    def test_review_diff_returns_none_on_git_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            from openshard.native.tools import NativeToolResult
+            original_run = executor._runner.run
+
+            def patched_run(call):
+                if call.tool_name == "get_git_diff":
+                    return NativeToolResult(tool_name="get_git_diff", ok=False, error="git error")
+                return original_run(call)
+
+            executor._runner.run = patched_run
+            result = executor.review_diff()
+        self.assertIsNone(result)
+        self.assertIsNone(executor.native_meta.diff_review)
+
+    def test_review_diff_does_not_store_diff_review_on_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            from openshard.native.tools import NativeToolResult
+
+            def patched_run(call):
+                if call.tool_name == "get_git_diff":
+                    return NativeToolResult(tool_name="get_git_diff", ok=False, error="fail")
+                return executor._runner.__class__.run(executor._runner, call)
+
+            executor._runner.run = patched_run
+            executor.review_diff()
+        self.assertIsNone(executor.native_meta.diff_review)
+
+
+class TestNativeDiffReviewPipeline(unittest.TestCase):
+    """Pipeline wiring tests for review_diff()."""
+
+    def _run(self, args, native_mock=None):
+        native_mock = native_mock or _make_native_mock()
+        generator_mock = _make_generator_mock()
+        manager_mock = _make_manager_mock()
+        logged = {}
+
+        def _capture_log(*a, **kw):
+            logged.update(kw.get("extra_metadata") or {})
+
+        with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator_mock), \
+             patch("openshard.run.pipeline.ProviderManager", return_value=manager_mock), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.run.pipeline._log_run", side_effect=_capture_log):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run"] + args)
+        return result, native_mock, logged
+
+    def test_native_write_calls_review_diff_once(self):
+        from openshard.execution.generator import ChangedFile
+        safe_file = ChangedFile(
+            path="out.txt", content="hello", change_type="create", summary="created"
+        )
+        fake_result = MagicMock()
+        fake_result.files = [safe_file]
+        fake_result.summary = "done"
+        fake_result.notes = []
+        fake_result.usage = None
+
+        native_mock = _make_native_mock()
+        native_mock.generate.return_value = fake_result
+
+        with tempfile.TemporaryDirectory() as workspace_dir:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=workspace_dir):
+                runner = CliRunner()
+                result = runner.invoke(
+                    cli, ["run", "--workflow", "native", "--write", "create file"]
+                )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(native_mock.review_diff.call_count, 1)
+
+    def test_native_retry_calls_review_diff_twice(self):
+        from openshard.execution.generator import ChangedFile
+        from openshard.verification.plan import (
+            CommandSafety, VerificationCommand, VerificationKind,
+            VerificationPlan, VerificationSource,
+        )
+
+        safe_file = ChangedFile(
+            path="out.txt", content="hello", change_type="create", summary="created"
+        )
+        fake_result = MagicMock()
+        fake_result.files = [safe_file]
+        fake_result.summary = "done"
+        fake_result.notes = []
+        fake_result.usage = None
+
+        native_mock = _make_native_mock()
+        native_mock.generate.return_value = fake_result
+
+        _fake_plan = VerificationPlan(commands=[
+            VerificationCommand(
+                name="pytest",
+                argv=["python", "-m", "pytest"],
+                kind=VerificationKind.test,
+                source=VerificationSource.detected,
+                safety=CommandSafety.safe,
+                reason="detected",
+            )
+        ])
+
+        # Verification sequence: initial fails (1), capture returns (1, ""), retry passes (0)
+        verify_calls = [1, 1, "", 0]
+
+        def _fake_verify_plan(plan, workspace, gate=None, capture=False, label="[verify]", detail="default"):
+            if capture:
+                return verify_calls.pop(0), verify_calls.pop(0)
+            return verify_calls.pop(0)
+
+        with tempfile.TemporaryDirectory() as workspace_dir:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.build_verification_plan", return_value=_fake_plan), \
+                 patch("openshard.run.pipeline._run_verification_plan", side_effect=_fake_verify_plan), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=workspace_dir):
+                runner = CliRunner()
+                runner.invoke(
+                    cli, ["run", "--workflow", "native", "--write", "--verify", "create file"]
+                )
+        # Two writes happened: initial + retry → two review_diff calls
+        self.assertEqual(native_mock.review_diff.call_count, 2)
+
+    def test_native_dry_run_does_not_call_review_diff(self):
+        result, native_mock, _ = self._run(["--workflow", "native", "--dry-run", "add a feature"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        native_mock.review_diff.assert_not_called()
+
+    def test_non_native_write_does_not_call_review_diff(self):
+        from openshard.execution.generator import ChangedFile
+        safe_file = ChangedFile(
+            path="out.txt", content="hello", change_type="create", summary="created"
+        )
+        fake_result = MagicMock()
+        fake_result.files = [safe_file]
+        fake_result.summary = "done"
+        fake_result.notes = []
+        fake_result.usage = None
+
+        generator_mock = _make_generator_mock()
+        generator_mock.generate.return_value = fake_result
+
+        with tempfile.TemporaryDirectory() as workspace_dir:
+            with patch("openshard.run.pipeline.NativeAgentExecutor") as native_cls, \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator_mock), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=workspace_dir):
+                runner = CliRunner()
+                runner.invoke(
+                    cli, ["run", "--workflow", "direct", "--write", "create file"]
+                )
+        native_cls.assert_not_called()
+
+    def test_native_log_contains_diff_review_key(self):
+        result, _, logged = self._run(["--workflow", "native", "add a feature"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("diff_review", logged)
