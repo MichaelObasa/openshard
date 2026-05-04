@@ -8,6 +8,7 @@ from openshard.execution.generator import ExecutionGenerator, ExecutionResult
 from openshard.native.context import (
     CompactRunState,
     NativeContextBudget,
+    NativeObservation,
     build_initial_context_budget,
 )
 from openshard.native.repo_context import (
@@ -31,6 +32,28 @@ class NativeRunMeta:
     context_warnings: list[str] = field(default_factory=list)
     tool_trace: list[dict] = field(default_factory=list)
     repo_context_summary: NativeRepoContextSummary | None = None
+    observation: NativeObservation | None = None
+
+
+_SEARCH_STOP_WORDS: frozenset[str] = frozenset({
+    "the", "a", "an", "in", "on", "at", "to", "for", "of",
+    "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did",
+    "will", "would", "should", "could", "may", "might", "can",
+})
+
+_SEARCH_TRIGGER_WORDS: frozenset[str] = frozenset({"where", "find", "search", "locate"})
+
+
+def _extract_search_query(task: str) -> str | None:
+    filtered = []
+    for raw in task.lower().split():
+        word = raw.strip(".,:;!?()[]{}\"'`")
+        if word and word not in _SEARCH_STOP_WORDS and word not in _SEARCH_TRIGGER_WORDS and len(word) >= 3:
+            filtered.append(word)
+    if not filtered:
+        return None
+    return " ".join(filtered[:3])
 
 
 class NativeAgentExecutor:
@@ -79,6 +102,32 @@ class NativeAgentExecutor:
             self.native_meta.context_budget.repo_map_built = True
             self.native_meta.repo_context_summary = build_repo_context_summary(result.output)
 
+    def _run_observe_phase(self, task: str, repo_facts=None) -> None:
+        if self._runner is None:
+            return
+
+        observation = NativeObservation()
+
+        diff_call = NativeToolCall(tool_name="get_git_diff", args={})
+        diff_result = self._runner.run(diff_call)
+        self.native_meta.tool_trace.append(self._runner.trace_entry(diff_call, diff_result))
+        observation.observed_tools.append("get_git_diff")
+        if diff_result.ok and diff_result.output.strip():
+            observation.dirty_diff_present = True
+
+        task_lower = task.lower()
+        if any(trigger in task_lower.split() for trigger in _SEARCH_TRIGGER_WORDS):
+            query = _extract_search_query(task)
+            if query:
+                search_call = NativeToolCall(tool_name="search_repo", args={"query": query})
+                search_result = self._runner.run(search_call)
+                self.native_meta.tool_trace.append(self._runner.trace_entry(search_call, search_result))
+                observation.observed_tools.append("search_repo")
+                if search_result.ok:
+                    observation.search_matches_count = search_result.metadata.get("matches", 0)
+
+        self.native_meta.observation = observation
+
     def generate(
         self,
         task: str,
@@ -87,6 +136,7 @@ class NativeAgentExecutor:
         skills_context: str = "",
     ) -> ExecutionResult:
         self._run_preflight()
+        self._run_observe_phase(task, repo_facts=repo_facts)
         matches = match_builtin_skills(task, repo_facts=repo_facts)
         self.native_meta.selected_skills = selected_skill_names(matches)
 

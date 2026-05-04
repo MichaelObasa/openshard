@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,10 +13,11 @@ from openshard.cli.main import cli
 from openshard.native.context import (
     CompactRunState,
     NativeContextBudget,
+    NativeObservation,
     build_compact_run_state,
     build_initial_context_budget,
 )
-from openshard.native.executor import NativeAgentExecutor, NativeRunMeta
+from openshard.native.executor import NativeAgentExecutor, NativeRunMeta, _extract_search_query
 from openshard.native.repo_context import NativeRepoContextSummary
 from openshard.native.skills import NativeSkill, NativeSkillMatch
 from openshard.native.tools import NativeToolCall
@@ -317,7 +319,7 @@ class TestNativePreflight(unittest.TestCase):
             (root / "main.py").write_text("x = 1")
             executor, fake_gen = self._make_executor_with_repo(root)
             executor.generate("fix the bug")
-        self.assertEqual(len(executor.native_meta.tool_trace), 1)
+        self.assertGreaterEqual(len(executor.native_meta.tool_trace), 1)
         self.assertEqual(executor.native_meta.tool_trace[0]["tool"], "list_files")
 
     def test_preflight_records_list_files_in_trace(self):
@@ -555,3 +557,247 @@ class TestNativeWorkflowIntegration(unittest.TestCase):
 
         self.assertNotIn("workflow", logged)
         self.assertNotIn("execution_depth", logged)
+
+
+class TestNativeObservePhase(unittest.TestCase):
+    """Tests for NativeAgentExecutor._run_observe_phase()."""
+
+    def _run_git(self, root: Path, *args: str) -> None:
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor
+
+    def _make_executor_no_repo(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor
+
+    def test_observe_returns_early_without_runner(self):
+        executor = self._make_executor_no_repo()
+        executor._run_observe_phase("fix the bug")
+        self.assertEqual(executor.native_meta.tool_trace, [])
+        self.assertIsNone(executor.native_meta.observation)
+
+    def test_observe_records_get_git_diff_trace_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("fix the bug")
+        tools = [e["tool"] for e in executor.native_meta.tool_trace]
+        self.assertIn("get_git_diff", tools)
+
+    def test_observe_get_git_diff_trace_has_no_raw_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("fix the bug")
+        diff_entry = next(e for e in executor.native_meta.tool_trace if e["tool"] == "get_git_diff")
+        self.assertNotIn("output", diff_entry)
+        self.assertIn("output_chars", diff_entry)
+
+    def test_observe_runs_search_repo_for_where_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config.py").write_text("DATABASE_URL = 'sqlite:///db'\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("where is the database config")
+        tools = [e["tool"] for e in executor.native_meta.tool_trace]
+        self.assertIn("search_repo", tools)
+
+    def test_observe_runs_search_repo_for_find_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("find the login function")
+        tools = [e["tool"] for e in executor.native_meta.tool_trace]
+        self.assertIn("search_repo", tools)
+
+    def test_observe_runs_search_repo_for_search_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("search for payment handler")
+        tools = [e["tool"] for e in executor.native_meta.tool_trace]
+        self.assertIn("search_repo", tools)
+
+    def test_observe_runs_search_repo_for_locate_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("locate error handling code")
+        tools = [e["tool"] for e in executor.native_meta.tool_trace]
+        self.assertIn("search_repo", tools)
+
+    def test_observe_does_not_run_search_repo_for_non_search_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("fix the bug in auth.py")
+        tools = [e["tool"] for e in executor.native_meta.tool_trace]
+        self.assertNotIn("search_repo", tools)
+
+    def test_observe_does_not_run_search_repo_for_refactor_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("refactor the database module")
+        tools = [e["tool"] for e in executor.native_meta.tool_trace]
+        self.assertNotIn("search_repo", tools)
+
+    def test_observe_does_not_run_verification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("fix the bug")
+        tools = [e["tool"] for e in executor.native_meta.tool_trace]
+        self.assertNotIn("run_verification", tools)
+
+    def test_observe_stores_native_observation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("fix the bug")
+        self.assertIsInstance(executor.native_meta.observation, NativeObservation)
+
+    def test_observe_observation_observed_tools_contains_get_git_diff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("fix the bug")
+        self.assertIn("get_git_diff", executor.native_meta.observation.observed_tools)
+
+    def test_observe_dirty_diff_present_true_when_diff_has_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._run_git(root, "init")
+            self._run_git(root, "config", "user.email", "test@test.com")
+            self._run_git(root, "config", "user.name", "Test")
+            (root / "hello.txt").write_text("original\n")
+            self._run_git(root, "add", "hello.txt")
+            (root / "hello.txt").write_text("modified\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("fix the bug")
+        self.assertTrue(executor.native_meta.observation.dirty_diff_present)
+
+    def test_observe_dirty_diff_present_false_for_non_git_repo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("fix the bug")
+        self.assertFalse(executor.native_meta.observation.dirty_diff_present)
+
+    def test_observe_search_matches_count_reflects_actual_matches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("def login(): pass\ndef logout(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            # "find login" → query = "login", which matches the file content
+            executor._run_observe_phase("find login")
+        self.assertGreater(executor.native_meta.observation.search_matches_count, 0)
+
+    def test_observe_search_matches_count_zero_for_non_search_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("fix the bug")
+        self.assertEqual(executor.native_meta.observation.search_matches_count, 0)
+
+    def test_generate_still_delegates_to_execution_generator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fake_gen = _make_generator_mock()
+            with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+                executor = NativeAgentExecutor(provider=MagicMock(), repo_root=root)
+            result = executor.generate("fix the bug")
+        fake_gen.generate.assert_called_once()
+        self.assertIs(result, fake_gen.generate.return_value)
+
+    def test_generate_sets_observation_after_observe_phase(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            fake_gen = _make_generator_mock()
+            with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+                executor = NativeAgentExecutor(provider=MagicMock(), repo_root=root)
+            executor.generate("fix the bug")
+        self.assertIsInstance(executor.native_meta.observation, NativeObservation)
+
+    def test_generate_observation_is_none_without_repo_root(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        executor.generate("fix the bug")
+        self.assertIsNone(executor.native_meta.observation)
+
+    def test_observe_search_repo_trace_has_no_raw_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("find the login function")
+        search_entry = next(e for e in executor.native_meta.tool_trace if e["tool"] == "search_repo")
+        self.assertNotIn("output", search_entry)
+        self.assertIn("output_chars", search_entry)
+
+
+class TestExtractSearchQuery(unittest.TestCase):
+    """Unit tests for the _extract_search_query() helper."""
+
+    def test_returns_none_for_empty_string(self):
+        self.assertIsNone(_extract_search_query(""))
+
+    def test_returns_none_when_only_stop_and_trigger_words(self):
+        self.assertIsNone(_extract_search_query("find the a"))
+
+    def test_returns_none_when_remaining_words_too_short(self):
+        self.assertIsNone(_extract_search_query("find is db"))
+
+    def test_basic_extraction(self):
+        result = _extract_search_query("find the login function")
+        self.assertIsNotNone(result)
+        self.assertIn("login", result)
+
+    def test_trigger_word_removed(self):
+        result = _extract_search_query("where is the config file")
+        self.assertIsNotNone(result)
+        self.assertNotIn("where", result.split())
+
+    def test_stop_words_removed(self):
+        result = _extract_search_query("search for the payment handler")
+        self.assertIsNotNone(result)
+        self.assertNotIn("the", result.split())
+        self.assertNotIn("for", result.split())
+
+    def test_takes_at_most_three_words(self):
+        result = _extract_search_query("find login authentication middleware service")
+        self.assertIsNotNone(result)
+        self.assertLessEqual(len(result.split()), 3)
+
+    def test_minimum_word_length_filter(self):
+        result = _extract_search_query("find db api config")
+        self.assertIsNotNone(result)
+        self.assertNotIn("db", result.split())
+        self.assertIn("api", result.split())
+
+    def test_case_insensitive(self):
+        result = _extract_search_query("Find THE Config File")
+        self.assertIsNotNone(result)
+        self.assertEqual(result, result.lower())
+
+    def test_punctuation_stripped(self):
+        result = _extract_search_query("where is config?")
+        self.assertIsNotNone(result)
+        self.assertNotIn("config?", result.split())
+        self.assertIn("config", result.split())
+
+    def test_punctuation_stripped_various(self):
+        result = _extract_search_query("find (login) function.")
+        self.assertIsNotNone(result)
+        for word in result.split():
+            self.assertFalse(any(c in word for c in ".,:;!?()[]{}\"'`"))
