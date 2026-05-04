@@ -101,6 +101,11 @@ def compact_tool_result(output: str, limit: int = 4000) -> str:
 
 _IGNORE_DIRS: frozenset[str] = frozenset({".git", "__pycache__", ".openshard"})
 _IGNORE_SUFFIXES: frozenset[str] = frozenset({".pyc"})
+_BINARY_SUFFIXES: frozenset[str] = frozenset({
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg",
+    ".pdf", ".zip", ".tar", ".gz", ".exe", ".bin",
+    ".woff", ".woff2", ".ttf", ".eot",
+})
 
 
 def _exec_list_files(repo_root: Path, subdir: str = ".") -> NativeToolResult:
@@ -129,6 +134,63 @@ def _exec_list_files(repo_root: Path, subdir: str = ".") -> NativeToolResult:
 
     output = "\n".join(sorted(paths))
     return NativeToolResult(tool_name="list_files", ok=True, output=output)
+
+
+def _exec_search_repo(
+    repo_root: Path,
+    query: str,
+    *,
+    max_matches: int = 50,
+) -> NativeToolResult:
+    if not query or not query.strip():
+        return NativeToolResult(
+            tool_name="search_repo",
+            ok=False,
+            error="search_repo requires a non-empty query.",
+        )
+
+    try:
+        max_matches_int = int(max_matches)
+    except (TypeError, ValueError):
+        max_matches_int = 50
+    max_matches_int = max(1, max_matches_int)
+
+    query_lower = query.strip().lower()
+    repo_resolved = repo_root.resolve()
+    matches: list[str] = []
+    truncated = False
+
+    for dirpath, dirnames, filenames in os.walk(repo_resolved):
+        dirnames[:] = [d for d in dirnames if d not in _IGNORE_DIRS]
+        for fname in filenames:
+            p = Path(fname)
+            if p.suffix in _IGNORE_SUFFIXES or p.suffix in _BINARY_SUFFIXES:
+                continue
+            full = Path(dirpath) / fname
+            try:
+                rel = str(full.relative_to(repo_resolved))
+            except ValueError:
+                continue
+            try:
+                text = full.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for lineno, line in enumerate(text.splitlines(), start=1):
+                if query_lower in line.lower():
+                    matches.append(f"{rel}:{lineno}:{line.rstrip()}")
+                    if len(matches) >= max_matches_int:
+                        truncated = True
+                        break
+            if truncated:
+                break
+
+    output = compact_tool_result("\n".join(matches))
+    return NativeToolResult(
+        tool_name="search_repo",
+        ok=True,
+        output=output,
+        metadata={"matches": len(matches), "truncated": truncated},
+    )
 
 
 def _exec_read_file(repo_root: Path, path: str) -> NativeToolResult:

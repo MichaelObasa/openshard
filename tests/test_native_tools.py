@@ -11,6 +11,7 @@ from openshard.native.tools import (
     NativeToolResult,
     _exec_list_files,
     _exec_read_file,
+    _exec_search_repo,
     classify_native_tool,
     compact_tool_result,
     get_native_tool,
@@ -227,6 +228,117 @@ class TestExecReadFile(unittest.TestCase):
             self.assertTrue(result.ok)
             self.assertIn("[truncated:", result.output)
             self.assertLessEqual(len(result.output), 5000)
+
+
+class TestExecSearchRepo(unittest.TestCase):
+    def test_finds_match_in_file(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "auth.py").write_text("def authenticate(user):\n    pass\n")
+            result = _exec_search_repo(root, "authenticate")
+        self.assertTrue(result.ok)
+        self.assertIn("auth.py", result.output)
+
+    def test_returns_line_numbers(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "mod.py").write_text("line one\ntarget line\nline three\n")
+            result = _exec_search_repo(root, "target")
+        self.assertTrue(result.ok)
+        self.assertIn(":2:", result.output)
+
+    def test_case_insensitive(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "mod.py").write_text("class Auth:\n    pass\n")
+            result = _exec_search_repo(root, "auth")
+        self.assertTrue(result.ok)
+        self.assertIn("Auth", result.output)
+
+    def test_empty_query_returns_error(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            result = _exec_search_repo(root, "")
+        self.assertFalse(result.ok)
+        self.assertIsNotNone(result.error)
+
+    def test_whitespace_query_returns_error(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            result = _exec_search_repo(root, "   ")
+        self.assertFalse(result.ok)
+        self.assertIsNotNone(result.error)
+
+    def test_ignores_git_dir(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            git_dir = root / ".git"
+            git_dir.mkdir()
+            (git_dir / "config").write_text("needle in git")
+            (root / "real.py").write_text("nothing here")
+            result = _exec_search_repo(root, "needle")
+        self.assertTrue(result.ok)
+        self.assertNotIn(".git", result.output)
+
+    def test_ignores_pyc_files(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "module.pyc").write_bytes(b"needle")
+            result = _exec_search_repo(root, "needle")
+        self.assertTrue(result.ok)
+        self.assertNotIn(".pyc", result.output)
+
+    def test_no_match_returns_ok_empty(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "file.py").write_text("hello world\n")
+            result = _exec_search_repo(root, "zzznomatch")
+        self.assertTrue(result.ok)
+        self.assertEqual(result.output, "")
+        self.assertEqual(result.metadata["matches"], 0)
+
+    def test_max_matches_limits_results(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            lines = "\n".join(["match line"] * 20)
+            (root / "big.py").write_text(lines)
+            result = _exec_search_repo(root, "match", max_matches=5)
+        self.assertTrue(result.ok)
+        self.assertLessEqual(result.metadata["matches"], 5)
+
+    def test_truncated_flag_set_when_capped(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            lines = "\n".join(["hit"] * 20)
+            (root / "hits.py").write_text(lines)
+            result = _exec_search_repo(root, "hit", max_matches=5)
+        self.assertTrue(result.metadata["truncated"])
+
+    def test_truncated_false_when_not_capped(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "few.py").write_text("hit\nhit\n")
+            result = _exec_search_repo(root, "hit", max_matches=50)
+        self.assertFalse(result.metadata["truncated"])
+
+    def test_invalid_max_matches_falls_back_to_default(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "file.py").write_text("hello\n")
+            result = _exec_search_repo(root, "hello", max_matches="bad")  # type: ignore[arg-type]
+        self.assertTrue(result.ok)
 
 
 class TestNativeFastPathToolTrace(unittest.TestCase):

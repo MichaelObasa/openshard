@@ -7,6 +7,7 @@ from openshard.native.tools import (
     NativeToolResult,
     _exec_list_files,
     _exec_read_file,
+    _exec_search_repo,
     classify_native_tool,
 )
 
@@ -48,6 +49,13 @@ class NativeToolRunner:
 
         if call.tool_name == "read_file":
             return _exec_read_file(self._repo_root, args.get("path", ""))
+
+        if call.tool_name == "search_repo":
+            return _exec_search_repo(
+                self._repo_root,
+                args.get("query", ""),
+                max_matches=args.get("max_matches", 50),
+            )
 
         return NativeToolResult(
             tool_name=call.tool_name,
