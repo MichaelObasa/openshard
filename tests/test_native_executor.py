@@ -16,6 +16,7 @@ from openshard.native.context import (
     NativeObservation,
     build_compact_run_state,
     build_initial_context_budget,
+    render_native_observation,
 )
 from openshard.native.executor import NativeAgentExecutor, NativeRunMeta, _extract_search_query
 from openshard.native.repo_context import NativeRepoContextSummary
@@ -801,3 +802,158 @@ class TestExtractSearchQuery(unittest.TestCase):
         self.assertIsNotNone(result)
         for word in result.split():
             self.assertFalse(any(c in word for c in ".,:;!?()[]{}\"'`"))
+
+
+class TestRenderNativeObservation(unittest.TestCase):
+    """Unit tests for render_native_observation()."""
+
+    def _obs(self, **kwargs) -> NativeObservation:
+        defaults = dict(
+            observed_tools=[],
+            dirty_diff_present=False,
+            search_matches_count=0,
+            verification_available=False,
+            warnings=[],
+        )
+        defaults.update(kwargs)
+        return NativeObservation(**defaults)
+
+    def test_starts_with_observation_header(self):
+        result = render_native_observation(self._obs())
+        self.assertEqual(result.splitlines()[0], "[observation]")
+
+    def test_includes_tools(self):
+        result = render_native_observation(self._obs(observed_tools=["get_git_diff"]))
+        self.assertIn("tools: get_git_diff", result)
+
+    def test_no_tools_line_when_empty(self):
+        result = render_native_observation(self._obs(observed_tools=[]))
+        self.assertNotIn("tools:", result)
+
+    def test_dirty_diff_yes(self):
+        result = render_native_observation(self._obs(dirty_diff_present=True))
+        self.assertIn("dirty diff: yes", result)
+
+    def test_dirty_diff_no(self):
+        result = render_native_observation(self._obs(dirty_diff_present=False))
+        self.assertIn("dirty diff: no", result)
+
+    def test_search_matches(self):
+        result = render_native_observation(self._obs(search_matches_count=3))
+        self.assertIn("search matches: 3", result)
+
+    def test_verification_available_yes(self):
+        result = render_native_observation(self._obs(verification_available=True))
+        self.assertIn("verification available: yes", result)
+
+    def test_verification_available_no(self):
+        result = render_native_observation(self._obs(verification_available=False))
+        self.assertIn("verification available: no", result)
+
+    def test_warnings_capped_at_3(self):
+        obs = self._obs(warnings=["w1", "w2", "w3", "w4", "w5"])
+        result = render_native_observation(obs)
+        self.assertIn("w1", result)
+        self.assertIn("w3", result)
+        self.assertNotIn("w4", result)
+        self.assertNotIn("w5", result)
+
+    def test_no_warnings_line_when_empty(self):
+        result = render_native_observation(self._obs(warnings=[]))
+        self.assertNotIn("warnings:", result)
+
+    def test_bounded_by_limit(self):
+        obs = self._obs(observed_tools=["get_git_diff", "search_repo"], warnings=["x" * 200])
+        result = render_native_observation(obs, limit=50)
+        self.assertLessEqual(len(result), 50)
+
+    def test_truncation_marker_appears(self):
+        obs = self._obs(observed_tools=["get_git_diff"], warnings=["x" * 200])
+        result = render_native_observation(obs, limit=50)
+        self.assertIn("[truncated]", result)
+
+    def test_no_truncation_marker_when_within_limit(self):
+        result = render_native_observation(self._obs())
+        self.assertNotIn("[truncated]", result)
+
+    def test_empty_observation_renders_minimal_block(self):
+        result = render_native_observation(self._obs())
+        self.assertIn("[observation]", result)
+        self.assertIn("dirty diff: no", result)
+        self.assertIn("search matches: 0", result)
+
+
+class TestNativeObservationInjection(unittest.TestCase):
+    """Tests that render_native_observation output is injected into generate()."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor, fake_gen
+
+    def _make_executor_no_repo(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor, fake_gen
+
+    def test_observation_injected_with_repo_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        _, kwargs = fake_gen.generate.call_args
+        self.assertIn("[observation]", kwargs["skills_context"])
+
+    def test_context_order_repo_then_observation_then_skills(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("fix the bug", skills_context="user-skills")
+        _, kwargs = fake_gen.generate.call_args
+        ctx = kwargs["skills_context"]
+        repo_pos = ctx.index("[repo context]")
+        obs_pos = ctx.index("[observation]")
+        skills_pos = ctx.index("user-skills")
+        self.assertLess(repo_pos, obs_pos)
+        self.assertLess(obs_pos, skills_pos)
+
+    def test_no_observation_without_repo_root(self):
+        executor, fake_gen = self._make_executor_no_repo()
+        executor.generate("fix the bug", skills_context="hint")
+        _, kwargs = fake_gen.generate.call_args
+        self.assertNotIn("[observation]", kwargs["skills_context"])
+
+    def test_raw_diff_not_in_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        _, kwargs = fake_gen.generate.call_args
+        ctx = kwargs["skills_context"]
+        self.assertNotIn("diff --git", ctx)
+        self.assertNotIn("@@", ctx)
+
+    def test_raw_search_not_in_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "config.py").write_text("DATABASE_URL = 'sqlite:///db'\n")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("where is the database config")
+        _, kwargs = fake_gen.generate.call_args
+        ctx = kwargs["skills_context"]
+        self.assertNotIn("DATABASE_URL", ctx)
+
+    def test_context_budget_populated_with_observation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor, _ = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        self.assertIsNotNone(executor.native_meta.context_budget)
+        self.assertGreater(executor.native_meta.context_budget.estimated_tokens_used, 0)
+        self.assertIsNotNone(executor.native_meta.observation)
