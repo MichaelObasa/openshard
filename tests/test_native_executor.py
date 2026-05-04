@@ -15,12 +15,14 @@ from openshard.native.context import (
     NativeContextBudget,
     NativeEvidence,
     NativeObservation,
+    NativePlan,
     build_compact_run_state,
     build_initial_context_budget,
     render_native_evidence,
     render_native_observation,
+    render_native_plan,
 )
-from openshard.native.executor import NativeAgentExecutor, NativeRunMeta, _extract_search_query
+from openshard.native.executor import NativeAgentExecutor, NativeRunMeta, _build_native_plan, _extract_search_query
 from openshard.native.repo_context import NativeRepoContextSummary
 from openshard.native.skills import NativeSkill, NativeSkillMatch
 from openshard.native.tools import NativeToolCall
@@ -178,17 +180,17 @@ class TestNativeAgentExecutor(unittest.TestCase):
     def test_generate_delegates_to_inner_generator(self):
         executor, fake_gen = self._make_executor()
         result = executor.generate("fix the bug", model="some-model")
-        fake_gen.generate.assert_called_once_with(
-            "fix the bug", model="some-model", repo_facts=None, skills_context=""
-        )
+        fake_gen.generate.assert_called_once()
+        _, kwargs = fake_gen.generate.call_args
+        self.assertIn("[native plan]", kwargs["skills_context"])
         self.assertIs(result, fake_gen.generate.return_value)
 
     def test_generate_passes_repo_facts_and_skills(self):
         executor, fake_gen = self._make_executor()
         executor.generate("task", repo_facts=_PYTHON_REPO, skills_context="hint")
-        fake_gen.generate.assert_called_once_with(
-            "task", model=None, repo_facts=_PYTHON_REPO, skills_context="hint"
-        )
+        _, kwargs = fake_gen.generate.call_args
+        self.assertIn("[native plan]", kwargs["skills_context"])
+        self.assertIn("hint", kwargs["skills_context"])
 
     def test_generate_updates_selected_skills(self):
         executor, _ = self._make_executor()
@@ -403,12 +405,12 @@ class TestNativeContextInjection(unittest.TestCase):
         self.assertIn("[repo context]", kwargs["skills_context"])
         self.assertIn("hint", kwargs["skills_context"])
 
-    def test_generate_without_repo_root_skills_context_unchanged(self):
+    def test_generate_without_repo_root_plan_and_skills_context_present(self):
         executor, fake_gen = self._make_executor_no_repo()
         executor.generate("fix the bug", skills_context="hint")
-        fake_gen.generate.assert_called_once_with(
-            "fix the bug", model=None, repo_facts=None, skills_context="hint"
-        )
+        _, kwargs = fake_gen.generate.call_args
+        self.assertIn("[native plan]", kwargs["skills_context"])
+        self.assertIn("hint", kwargs["skills_context"])
 
     def test_generate_with_repo_root_updates_estimated_tokens(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1143,3 +1145,255 @@ class TestNativeEvidenceInjection(unittest.TestCase):
         self.assertIsNotNone(executor.native_meta.context_budget)
         self.assertGreater(executor.native_meta.context_budget.estimated_tokens_used, 0)
         self.assertIsNotNone(executor.native_meta.evidence)
+
+
+class TestRenderNativePlan(unittest.TestCase):
+    """Tests for render_native_plan()."""
+
+    def test_renders_header(self):
+        plan = NativePlan()
+        self.assertIn("[native plan]", render_native_plan(plan))
+
+    def test_renders_intent(self):
+        plan = NativePlan(intent="search")
+        self.assertIn("intent: search", render_native_plan(plan))
+
+    def test_renders_risk(self):
+        plan = NativePlan(risk="medium")
+        self.assertIn("risk: medium", render_native_plan(plan))
+
+    def test_renders_suggested_steps(self):
+        plan = NativePlan(suggested_steps=["step one", "step two"])
+        rendered = render_native_plan(plan)
+        self.assertIn("suggested steps:", rendered)
+        self.assertIn("- step one", rendered)
+        self.assertIn("- step two", rendered)
+
+    def test_caps_steps_at_five(self):
+        plan = NativePlan(suggested_steps=[f"step {i}" for i in range(10)])
+        rendered = render_native_plan(plan)
+        self.assertIn("- step 4", rendered)
+        self.assertNotIn("- step 5", rendered)
+
+    def test_renders_warnings(self):
+        plan = NativePlan(warnings=["watch out"])
+        rendered = render_native_plan(plan)
+        self.assertIn("warnings:", rendered)
+        self.assertIn("- watch out", rendered)
+
+    def test_caps_warnings_at_three(self):
+        plan = NativePlan(warnings=[f"warn {i}" for i in range(5)])
+        rendered = render_native_plan(plan)
+        self.assertIn("- warn 2", rendered)
+        self.assertNotIn("- warn 3", rendered)
+
+    def test_respects_limit(self):
+        plan = NativePlan(suggested_steps=["x" * 200] * 5)
+        rendered = render_native_plan(plan, limit=100)
+        self.assertLessEqual(len(rendered), 100)
+
+    def test_truncation_marker_when_limit_exceeded(self):
+        plan = NativePlan(suggested_steps=["x" * 200] * 5)
+        rendered = render_native_plan(plan, limit=100)
+        self.assertIn("[truncated]", rendered)
+
+    def test_no_truncation_when_within_limit(self):
+        plan = NativePlan(intent="standard", risk="low")
+        rendered = render_native_plan(plan, limit=600)
+        self.assertNotIn("[truncated]", rendered)
+
+
+class TestBuildNativePlan(unittest.TestCase):
+    """Tests for _build_native_plan()."""
+
+    def test_search_intent(self):
+        for word in ("search", "find", "where", "locate"):
+            with self.subTest(word=word):
+                plan = _build_native_plan(f"please {word} the module")
+                self.assertEqual(plan.intent, "search")
+
+    def test_debug_intent(self):
+        for word in ("debug", "fix", "error", "fail", "verify", "test"):
+            with self.subTest(word=word):
+                plan = _build_native_plan(f"please {word} this")
+                self.assertEqual(plan.intent, "debug")
+
+    def test_refactor_intent(self):
+        plan = _build_native_plan("refactor the auth module")
+        self.assertEqual(plan.intent, "refactor")
+
+    def test_implementation_intent(self):
+        for word in ("add", "create", "implement", "build"):
+            with self.subTest(word=word):
+                plan = _build_native_plan(f"please {word} a feature")
+                self.assertEqual(plan.intent, "implementation")
+
+    def test_standard_intent_default(self):
+        plan = _build_native_plan("do something useful")
+        self.assertEqual(plan.intent, "standard")
+
+    def test_word_boundary_matching(self):
+        # "searchable" should NOT match "search"
+        plan = _build_native_plan("make it searchable")
+        self.assertNotEqual(plan.intent, "search")
+
+    def test_security_skill_sets_medium_risk(self):
+        plan = _build_native_plan("update the config", selected_skills=["security-sensitive-change"])
+        self.assertEqual(plan.risk, "medium")
+
+    def test_security_skill_adds_warning(self):
+        plan = _build_native_plan("update the config", selected_skills=["security-sensitive-change"])
+        self.assertIn("security-sensitive task", plan.warnings)
+
+    def test_dirty_diff_sets_medium_risk(self):
+        obs = NativeObservation(dirty_diff_present=True)
+        plan = _build_native_plan("update the config", observation=obs)
+        self.assertEqual(plan.risk, "medium")
+
+    def test_dirty_diff_adds_warning(self):
+        obs = NativeObservation(dirty_diff_present=True)
+        plan = _build_native_plan("update the config", observation=obs)
+        self.assertIn("dirty working tree detected", plan.warnings)
+
+    def test_clean_diff_is_low_risk(self):
+        obs = NativeObservation(dirty_diff_present=False)
+        plan = _build_native_plan("update the config", observation=obs)
+        self.assertEqual(plan.risk, "low")
+
+    def test_evidence_prepends_step(self):
+        ev = NativeEvidence(search_results=["some result"])
+        plan = _build_native_plan("find the thing", evidence=ev)
+        self.assertEqual(plan.suggested_steps[0], "use bounded search evidence to choose files")
+
+    def test_no_evidence_no_prepend(self):
+        plan = _build_native_plan("find the thing", evidence=None)
+        self.assertNotIn("use bounded search evidence to choose files", plan.suggested_steps)
+
+    def test_debug_intent_appends_verification_step(self):
+        plan = _build_native_plan("fix the bug")
+        self.assertIn("run verification after changes", plan.suggested_steps)
+
+    def test_non_debug_no_verification_step(self):
+        plan = _build_native_plan("add a feature")
+        self.assertNotIn("run verification after changes", plan.suggested_steps)
+
+    def test_dirty_diff_appends_avoid_overwrite_step(self):
+        obs = NativeObservation(dirty_diff_present=True)
+        plan = _build_native_plan("update config", observation=obs)
+        self.assertIn("avoid overwriting existing user changes", plan.suggested_steps)
+
+    def test_always_includes_base_steps(self):
+        plan = _build_native_plan("do something")
+        self.assertIn("inspect relevant files", plan.suggested_steps)
+        self.assertIn("make the smallest safe change", plan.suggested_steps)
+        self.assertIn("review the diff", plan.suggested_steps)
+
+
+class TestNativePlanInjection(unittest.TestCase):
+    """Tests that native plan is injected into generate() context."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor, fake_gen
+
+    def _make_executor_no_repo(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor, fake_gen
+
+    def test_plan_injected_with_repo_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1\n")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        _, kwargs = fake_gen.generate.call_args
+        self.assertIn("[native plan]", kwargs["skills_context"])
+
+    def test_context_order_repo_observation_evidence_plan_skills(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login_user(): pass\n")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("where is the login function", skills_context="user-skills")
+        _, kwargs = fake_gen.generate.call_args
+        ctx = kwargs["skills_context"]
+        repo_pos = ctx.index("[repo context]")
+        obs_pos = ctx.index("[observation]")
+        ev_pos = ctx.index("[evidence]")
+        plan_pos = ctx.index("[native plan]")
+        skills_pos = ctx.index("user-skills")
+        self.assertLess(repo_pos, obs_pos)
+        self.assertLess(obs_pos, ev_pos)
+        self.assertLess(ev_pos, plan_pos)
+        self.assertLess(plan_pos, skills_pos)
+
+    def test_no_repo_root_plan_present_others_absent(self):
+        executor, fake_gen = self._make_executor_no_repo()
+        executor.generate("fix the bug", skills_context="hint")
+        _, kwargs = fake_gen.generate.call_args
+        ctx = kwargs["skills_context"]
+        self.assertIn("[native plan]", ctx)
+        self.assertNotIn("[repo context]", ctx)
+        self.assertNotIn("[observation]", ctx)
+        self.assertNotIn("[evidence]", ctx)
+
+    def test_plan_stored_on_native_meta(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1\n")
+            executor, _ = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        self.assertIsNotNone(executor.native_meta.plan)
+
+
+class TestNativePlanMetaSerialization(unittest.TestCase):
+    """Tests that plan is serialized correctly in native_meta."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor, fake_gen
+
+    def test_plan_has_expected_fields(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1\n")
+            executor, _ = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        plan = executor.native_meta.plan
+        self.assertIsNotNone(plan)
+        self.assertIsInstance(plan.intent, str)
+        self.assertIsInstance(plan.risk, str)
+        self.assertIsInstance(plan.suggested_steps, list)
+        self.assertIsInstance(plan.warnings, list)
+
+    def test_plan_fields_contain_no_raw_tool_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1\n")
+            executor, _ = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        plan = executor.native_meta.plan
+        for step in plan.suggested_steps:
+            self.assertNotIn("diff --git", step)
+            self.assertNotIn("@@", step)
+        for warning in plan.warnings:
+            self.assertNotIn("diff --git", warning)
+
+    def test_asdict_produces_expected_keys(self):
+        from dataclasses import asdict
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1\n")
+            executor, _ = self._make_executor_with_repo(root)
+            executor.generate("add a feature")
+        d = asdict(executor.native_meta.plan)
+        self.assertIn("intent", d)
+        self.assertIn("risk", d)
+        self.assertIn("suggested_steps", d)
+        self.assertIn("warnings", d)

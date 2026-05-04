@@ -10,9 +10,11 @@ from openshard.native.context import (
     NativeContextBudget,
     NativeEvidence,
     NativeObservation,
+    NativePlan,
     build_initial_context_budget,
     render_native_evidence,
     render_native_observation,
+    render_native_plan,
 )
 from openshard.native.repo_context import (
     NativeRepoContextSummary,
@@ -37,6 +39,7 @@ class NativeRunMeta:
     repo_context_summary: NativeRepoContextSummary | None = None
     observation: NativeObservation | None = None
     evidence: NativeEvidence | None = None
+    plan: NativePlan | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -58,6 +61,55 @@ def _extract_search_query(task: str) -> str | None:
     if not filtered:
         return None
     return " ".join(filtered[:3])
+
+
+def _build_native_plan(
+    task: str,
+    *,
+    observation: NativeObservation | None = None,
+    evidence: NativeEvidence | None = None,
+    selected_skills: list[str] | None = None,
+) -> NativePlan:
+    selected_skills = selected_skills or []
+
+    _strip = ".,:;!?()[]{}\"'`"
+    words = {w.strip(_strip) for w in task.lower().split() if w.strip(_strip)}
+
+    if words & {"search", "find", "where", "locate"}:
+        intent = "search"
+    elif words & {"test", "verify", "fail", "error", "debug", "fix"}:
+        intent = "debug"
+    elif "refactor" in words:
+        intent = "refactor"
+    elif words & {"add", "create", "implement", "build"}:
+        intent = "implementation"
+    else:
+        intent = "standard"
+
+    dirty = observation is not None and observation.dirty_diff_present
+    security = "security-sensitive-change" in selected_skills
+    risk = "medium" if (dirty or security) else "low"
+
+    steps = ["inspect relevant files", "make the smallest safe change", "review the diff"]
+    if evidence is not None:
+        steps.insert(0, "use bounded search evidence to choose files")
+    if intent == "debug":
+        steps.append("run verification after changes")
+    if dirty:
+        steps.append("avoid overwriting existing user changes")
+
+    warnings = []
+    if dirty:
+        warnings.append("dirty working tree detected")
+    if security:
+        warnings.append("security-sensitive task")
+
+    return NativePlan(
+        intent=intent,
+        risk=risk,
+        suggested_steps=steps,
+        warnings=warnings,
+    )
 
 
 class NativeAgentExecutor:
@@ -150,6 +202,13 @@ class NativeAgentExecutor:
         matches = match_builtin_skills(task, repo_facts=repo_facts)
         self.native_meta.selected_skills = selected_skill_names(matches)
 
+        self.native_meta.plan = _build_native_plan(
+            task,
+            observation=self.native_meta.observation,
+            evidence=self.native_meta.evidence,
+            selected_skills=self.native_meta.selected_skills,
+        )
+
         context_parts = []
 
         summary = self.native_meta.repo_context_summary
@@ -163,6 +222,8 @@ class NativeAgentExecutor:
         evidence = self.native_meta.evidence
         if evidence is not None:
             context_parts.append(render_native_evidence(evidence))
+
+        context_parts.append(render_native_plan(self.native_meta.plan))
 
         if skills_context:
             context_parts.append(skills_context)
