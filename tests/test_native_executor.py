@@ -13,9 +13,11 @@ from openshard.cli.main import cli
 from openshard.native.context import (
     CompactRunState,
     NativeContextBudget,
+    NativeEvidence,
     NativeObservation,
     build_compact_run_state,
     build_initial_context_budget,
+    render_native_evidence,
     render_native_observation,
 )
 from openshard.native.executor import NativeAgentExecutor, NativeRunMeta, _extract_search_query
@@ -478,6 +480,12 @@ class TestNativeWorkflowIntegration(unittest.TestCase):
         result, _, logged = self._run(["--workflow", "native", "add a feature"])
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIsNone(logged.get("repo_context_summary"))
+
+    def test_native_log_contains_evidence_key(self):
+        result, _, logged = self._run(["--workflow", "native", "add a feature"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("evidence", logged)
+        self.assertIsNone(logged.get("evidence"))
 
     def test_native_dry_run(self):
         """--workflow native --dry-run exits 0 without writing files."""
@@ -957,3 +965,181 @@ class TestNativeObservationInjection(unittest.TestCase):
         self.assertIsNotNone(executor.native_meta.context_budget)
         self.assertGreater(executor.native_meta.context_budget.estimated_tokens_used, 0)
         self.assertIsNotNone(executor.native_meta.observation)
+
+
+class TestRenderNativeEvidence(unittest.TestCase):
+    """Unit tests for render_native_evidence()."""
+
+    def _ev(self, **kwargs) -> NativeEvidence:
+        defaults = dict(search_results=[], truncated=False)
+        defaults.update(kwargs)
+        return NativeEvidence(**defaults)
+
+    def test_starts_with_evidence_header(self):
+        result = render_native_evidence(self._ev())
+        self.assertEqual(result.splitlines()[0], "[evidence]")
+
+    def test_includes_search_results(self):
+        result = render_native_evidence(self._ev(search_results=["src/auth.py:12: def login_user(*)"]))
+        self.assertIn("- src/auth.py:12: def login_user(*)", result)
+        self.assertIn("search:", result)
+
+    def test_caps_search_results_at_3(self):
+        items = [f"file.py:{i}: line" for i in range(5)]
+        result = render_native_evidence(self._ev(search_results=items))
+        self.assertIn("file.py:0:", result)
+        self.assertIn("file.py:2:", result)
+        self.assertNotIn("file.py:3:", result)
+        self.assertNotIn("file.py:4:", result)
+
+    def test_truncated_flag_adds_marker(self):
+        result = render_native_evidence(self._ev(truncated=True))
+        self.assertIn("[truncated]", result)
+
+    def test_no_truncated_marker_when_false(self):
+        result = render_native_evidence(self._ev(truncated=False))
+        self.assertNotIn("[truncated]", result)
+
+    def test_bounded_by_limit(self):
+        items = ["x" * 100 for _ in range(3)]
+        result = render_native_evidence(self._ev(search_results=items), limit=50)
+        self.assertLessEqual(len(result), 50)
+
+    def test_truncation_suffix_on_char_overflow(self):
+        items = ["x" * 100 for _ in range(3)]
+        result = render_native_evidence(self._ev(search_results=items), limit=50)
+        self.assertIn("[truncated]", result)
+
+    def test_empty_evidence_renders_header_only(self):
+        result = render_native_evidence(self._ev())
+        self.assertIn("[evidence]", result)
+        self.assertNotIn("search:", result)
+
+
+class TestNativeEvidenceObservePhase(unittest.TestCase):
+    """Tests for evidence population in _run_observe_phase()."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor
+
+    def _make_executor_no_repo(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor
+
+    def test_observe_stores_evidence_for_search_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login_user(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("where is the login function")
+        self.assertIsInstance(executor.native_meta.evidence, NativeEvidence)
+
+    def test_observe_evidence_none_for_non_search_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("fix the bug")
+        self.assertIsNone(executor.native_meta.evidence)
+
+    def test_observe_evidence_has_at_most_3_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for i in range(10):
+                (root / f"file{i}.py").write_text(f"def func_{i}(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("where is the func")
+        if executor.native_meta.evidence is not None:
+            self.assertLessEqual(len(executor.native_meta.evidence.search_results), 3)
+
+    def test_observe_evidence_does_not_include_diff_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("where is the login")
+        if executor.native_meta.evidence is not None:
+            for line in executor.native_meta.evidence.search_results:
+                self.assertNotIn("diff --git", line)
+                self.assertNotIn("@@", line)
+
+    def test_observe_evidence_truncated_when_more_than_3_lines(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for i in range(10):
+                (root / f"mod{i}.py").write_text(f"def target_func_{i}(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("where is the target func")
+        if executor.native_meta.evidence is not None and executor.native_meta.observation is not None:
+            if executor.native_meta.observation.search_matches_count > 3:
+                self.assertTrue(executor.native_meta.evidence.truncated)
+
+
+class TestNativeEvidenceInjection(unittest.TestCase):
+    """Tests that evidence is injected into generate() context."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor, fake_gen
+
+    def _make_executor_no_repo(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor, fake_gen
+
+    def test_evidence_injected_for_search_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login_user(): pass\n")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("where is the login function")
+        _, kwargs = fake_gen.generate.call_args
+        self.assertIn("[evidence]", kwargs["skills_context"])
+
+    def test_evidence_not_injected_for_non_search_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("fix the bug")
+        _, kwargs = fake_gen.generate.call_args
+        self.assertNotIn("[evidence]", kwargs["skills_context"])
+
+    def test_context_order_repo_observation_evidence_skills(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login_user(): pass\n")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("where is the login function", skills_context="user-skills")
+        _, kwargs = fake_gen.generate.call_args
+        ctx = kwargs["skills_context"]
+        repo_pos = ctx.index("[repo context]")
+        obs_pos = ctx.index("[observation]")
+        ev_pos = ctx.index("[evidence]")
+        skills_pos = ctx.index("user-skills")
+        self.assertLess(repo_pos, obs_pos)
+        self.assertLess(obs_pos, ev_pos)
+        self.assertLess(ev_pos, skills_pos)
+
+    def test_no_evidence_without_repo_root(self):
+        executor, fake_gen = self._make_executor_no_repo()
+        executor.generate("where is the login", skills_context="hint")
+        _, kwargs = fake_gen.generate.call_args
+        self.assertNotIn("[evidence]", kwargs["skills_context"])
+
+    def test_token_estimate_includes_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "auth.py").write_text("def login_user(): pass\n")
+            executor, _ = self._make_executor_with_repo(root)
+            executor.generate("where is the login function")
+        self.assertIsNotNone(executor.native_meta.context_budget)
+        self.assertGreater(executor.native_meta.context_budget.estimated_tokens_used, 0)
+        self.assertIsNotNone(executor.native_meta.evidence)

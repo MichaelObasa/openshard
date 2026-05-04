@@ -8,8 +8,10 @@ from openshard.execution.generator import ExecutionGenerator, ExecutionResult
 from openshard.native.context import (
     CompactRunState,
     NativeContextBudget,
+    NativeEvidence,
     NativeObservation,
     build_initial_context_budget,
+    render_native_evidence,
     render_native_observation,
 )
 from openshard.native.repo_context import (
@@ -34,6 +36,7 @@ class NativeRunMeta:
     tool_trace: list[dict] = field(default_factory=list)
     repo_context_summary: NativeRepoContextSummary | None = None
     observation: NativeObservation | None = None
+    evidence: NativeEvidence | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -126,6 +129,12 @@ class NativeAgentExecutor:
                 observation.observed_tools.append("search_repo")
                 if search_result.ok:
                     observation.search_matches_count = search_result.metadata.get("matches", 0)
+                    raw_lines = [ln for ln in search_result.output.splitlines() if ln.strip()]
+                    truncated = search_result.metadata.get("truncated", False) or len(raw_lines) > 3
+                    self.native_meta.evidence = NativeEvidence(
+                        search_results=raw_lines[:3],
+                        truncated=truncated,
+                    )
 
         self.native_meta.observation = observation
 
@@ -150,6 +159,10 @@ class NativeAgentExecutor:
         observation = self.native_meta.observation
         if observation is not None:
             context_parts.append(render_native_observation(observation))
+
+        evidence = self.native_meta.evidence
+        if evidence is not None:
+            context_parts.append(render_native_evidence(evidence))
 
         if skills_context:
             context_parts.append(skills_context)
