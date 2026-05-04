@@ -51,6 +51,9 @@ class NativeRunMeta:
     verification_loop: NativeVerificationLoop | None = None
     final_report: NativeFinalReport | None = None
     native_loop_steps: list[str] = field(default_factory=list)
+    native_backend: str = "builtin"
+    native_backend_available: bool = True
+    native_backend_notes: list[str] = field(default_factory=list)
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -178,12 +181,22 @@ def _build_native_plan(
 class NativeAgentExecutor:
     """Fast-path native executor. Delegates generation to ExecutionGenerator."""
 
-    def __init__(self, provider=None, repo_root: Path | None = None) -> None:
+    def __init__(self, provider=None, repo_root: Path | None = None, backend_name: str = "builtin") -> None:
+        from openshard.native.backends import get_backend
+
         self._gen = ExecutionGenerator(provider=provider)
         self.model = self._gen.model
         self.fixer_model = self._gen.fixer_model
         self.native_meta = NativeRunMeta()
         self._runner = NativeToolRunner(repo_root) if repo_root is not None else None
+        self._backend = get_backend(backend_name)
+        _available = self._backend.available()
+        self.native_meta.native_backend = self._backend.name
+        self.native_meta.native_backend_available = _available
+        if backend_name == "deepagents" and not _available:
+            self.native_meta.native_backend_notes = [
+                "Install deepagents to enable this experimental backend."
+            ]
 
     def record_loop_step(self, step: str) -> None:
         if step not in self.native_meta.native_loop_steps:

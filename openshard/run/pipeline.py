@@ -113,6 +113,7 @@ class RunPipeline:
         history_scoring: bool,
         eval_scoring: bool,
         detail: str,
+        native_backend: str | None = None,
     ) -> None:
         self._config = config
         self._write = write
@@ -128,6 +129,7 @@ class RunPipeline:
         self._history_scoring = history_scoring
         self._eval_scoring = eval_scoring
         self._detail = detail
+        self._native_backend = native_backend or "builtin"
 
     def run(self, task: str) -> RunResult:  # noqa: C901
         result_obj = RunResult()
@@ -237,6 +239,7 @@ class RunPipeline:
                 generator = NativeAgentExecutor(
                     provider=_provider_instance,
                     repo_root=Path.cwd(),
+                    backend_name=self._native_backend,
                 )
             else:
                 generator = ExecutionGenerator(provider=_provider_instance)
@@ -967,6 +970,9 @@ class RunPipeline:
                     else None
                 ),
                 "native_loop_steps": list(_native_meta.native_loop_steps),
+                "native_backend": getattr(_native_meta, "native_backend", "builtin"),
+                "native_backend_available": getattr(_native_meta, "native_backend_available", True),
+                "native_backend_notes": list(getattr(_native_meta, "native_backend_notes", [])),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
