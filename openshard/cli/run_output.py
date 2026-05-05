@@ -473,6 +473,15 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
             lines.append(f"  change budget: {max_files} files, {size}")
             has_content = True
 
+    budget_preview = getattr(native_meta, "change_budget_preview", None)
+    if budget_preview is not None:
+        _proposed = getattr(budget_preview, "proposed_files", 0)
+        _max_files = getattr(budget_preview, "budget_max_files", 0)
+        _action = getattr(budget_preview, "action", "")
+        if _max_files:
+            lines.append(f"  budget preview: {_proposed}/{_max_files} files, {_action}")
+            has_content = True
+
     patch_proposal = getattr(native_meta, "patch_proposal", None)
     if patch_proposal is not None:
         _count = getattr(patch_proposal, "file_count", 0)
@@ -566,6 +575,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "context_quality_score": entry.get("context_quality_score"),
         "context_quality_advisory": entry.get("context_quality_advisory"),
         "change_budget": entry.get("change_budget"),
+        "change_budget_preview": entry.get("change_budget_preview"),
     })
 
 
