@@ -4388,6 +4388,102 @@ class TestNativeContextPacket(unittest.TestCase):
         self.assertEqual(d["backend"], "builtin")
 
 
+class TestNativeContextPacketUse(unittest.TestCase):
+    """Tests for render_native_context_packet() and its integration into generate()."""
+
+    def _make_executor(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor, fake_gen
+
+    def _get_combined_context(self, fake_gen):
+        kwargs = fake_gen.generate.call_args.kwargs
+        return kwargs.get("skills_context", "")
+
+    def test_render_empty_returns_empty_string(self):
+        from openshard.native.context import render_native_context_packet
+        self.assertEqual(render_native_context_packet(None), "")
+
+    def test_render_includes_sources_and_paths(self):
+        from openshard.native.context import NativeContextPacket, render_native_context_packet
+        packet = NativeContextPacket(
+            sources=["backend", "repo_context"],
+            compact_paths=["file:src/main.py"],
+            backend="builtin",
+        )
+        rendered = render_native_context_packet(packet)
+        self.assertIn("OpenShard Native context packet:", rendered)
+        self.assertIn("sources:", rendered)
+        self.assertIn("compact paths:", rendered)
+        self.assertIn("file:src/main.py", rendered)
+
+    def test_render_does_not_include_raw_content(self):
+        from openshard.native.context import NativeContextPacket, render_native_context_packet
+        packet = NativeContextPacket(
+            sources=["read_search"],
+            compact_paths=["file:src/main.py"],
+            warnings=["context packet paths truncated"],
+        )
+        rendered = render_native_context_packet(packet)
+        self.assertNotIn("SECRET_RAW_FILE_CONTENT", rendered)
+        self.assertNotIn("RAW_DIFF", rendered)
+        self.assertNotIn("STDERR", rendered)
+        self.assertNotIn("CHAIN_OF_THOUGHT", rendered)
+
+    def test_generate_passes_context_packet_to_generator(self):
+        executor, fake_gen = self._make_executor()
+        executor.generate("fix the bug")
+        combined = self._get_combined_context(fake_gen)
+        self.assertIn("OpenShard Native context packet:", combined)
+
+    def test_generate_preserves_existing_skills_context(self):
+        executor, fake_gen = self._make_executor()
+        executor.generate("fix the bug", skills_context="EXISTING_SKILLS_CONTEXT")
+        combined = self._get_combined_context(fake_gen)
+        self.assertIn("EXISTING_SKILLS_CONTEXT", combined)
+
+    def test_generate_context_packet_includes_selected_skills(self):
+        executor, fake_gen = self._make_executor()
+        executor.native_meta.selected_skills = ["python", "pytest"]
+        with patch("openshard.native.executor.match_builtin_skills", return_value=[]):
+            with patch("openshard.native.executor.selected_skill_names", return_value=["python", "pytest"]):
+                executor.generate("fix the bug")
+        combined = self._get_combined_context(fake_gen)
+        self.assertIn("selected skills:", combined)
+        self.assertNotEqual(executor.native_meta.context_packet.selected_skills, [])
+
+    def test_context_packet_built_after_skill_selection(self):
+        executor, fake_gen = self._make_executor()
+        executor.generate("fix the bug")
+        self.assertEqual(
+            executor.native_meta.context_packet.selected_skills,
+            executor.native_meta.selected_skills,
+        )
+
+    def test_no_packet_no_extra_context(self):
+        from openshard.native.context import render_native_context_packet
+        combined = render_native_context_packet(None)
+        self.assertNotIn("OpenShard Native context packet:", combined)
+
+    def test_packet_context_is_bounded(self):
+        from openshard.native.context import NativeContextPacket, render_native_context_packet
+        packet = NativeContextPacket(
+            sources=["backend", "repo_context", "read_search", "skills"],
+            repo_stack=["python", "pytest", "django", "fastapi", "celery", "redis", "postgres", "docker"],
+            test_marker_count=99,
+            package_file_count=50,
+            read_search_count=100,
+            selected_skills=["python", "pytest", "django", "fastapi", "celery", "redis", "postgres", "docker"],
+            backend="builtin",
+            backend_available=True,
+            backend_proof_mode="strict",
+            compact_paths=[f"file:src/module_{i}.py" for i in range(8)],
+            warnings=[f"warning {i}" for i in range(5)],
+        )
+        rendered = render_native_context_packet(packet)
+        self.assertLess(len(rendered), 2000)
+
 
 class TestNativeFileContext(unittest.TestCase):
     """Unit tests for NativeAgentExecutor._run_file_context_phase()."""

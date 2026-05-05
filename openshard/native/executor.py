@@ -29,6 +29,7 @@ from openshard.native.context import (
     build_native_final_report,
     build_native_patch_proposal,
     build_native_verification_command_summary,
+    render_native_context_packet,
     render_native_evidence,
     render_native_observation,
     render_native_plan,
@@ -612,9 +613,9 @@ class NativeAgentExecutor:
         self._run_observe_phase(task, repo_facts=repo_facts)
         self._run_read_search_loop(task)
         self._run_file_context_phase()
-        self.build_context_packet(task)
         matches = match_builtin_skills(task, repo_facts=repo_facts)
         self.native_meta.selected_skills = selected_skill_names(matches)
+        self.build_context_packet(task)
 
         self.native_meta.plan = _build_native_plan(
             task,
@@ -639,6 +640,10 @@ class NativeAgentExecutor:
             context_parts.append(render_native_evidence(evidence))
 
         context_parts.append(render_native_plan(self.native_meta.plan))
+
+        packet_context = render_native_context_packet(self.native_meta.context_packet)
+        if packet_context:
+            context_parts.append(packet_context)
 
         if skills_context:
             context_parts.append(skills_context)
