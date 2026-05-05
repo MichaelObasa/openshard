@@ -456,6 +456,14 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         lines.append(f"  proposal: {_count} files")
         has_content = True
 
+    fc = getattr(native_meta, "file_context", None)
+    if fc is not None:
+        _fc_files = getattr(fc, "files_read", 0)
+        if _fc_files > 0:
+            _fc_chars = getattr(fc, "total_chars", 0)
+            lines.append(f"  file context: {_fc_files} files, {_fc_chars} chars")
+            has_content = True
+
     if detail == "full":
         loop_trace = getattr(native_meta, "native_loop_trace", None)
         if loop_trace is None:
@@ -530,7 +538,11 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "read_search_findings": entry.get("read_search_findings", []),
         "patch_proposal": entry.get("patch_proposal"),
         "command_policy_preview": entry.get("command_policy_preview"),
+ osn-context-packet
         "context_packet": entry.get("context_packet"),
+
+        "file_context": entry.get("file_context"),
+main
     })
 
 

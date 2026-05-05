@@ -4253,6 +4253,7 @@ class TestDeepAgentsReadonlyProof(unittest.TestCase):
         for key in ("backend", "available", "mode", "summary", "notes"):
             self.assertIn(key, result)
         self.assertIsInstance(result["summary"], str)
+osn-context-packet
         self.assertIsInstance(result["notes"], list)
 
 
@@ -4386,3 +4387,149 @@ class TestNativeContextPacket(unittest.TestCase):
         self.assertEqual(d["sources"], ["backend", "repo_context"])
         self.assertEqual(d["repo_stack"], ["python"])
         self.assertEqual(d["backend"], "builtin")
+
+
+
+class TestNativeFileContext(unittest.TestCase):
+    """Unit tests for NativeAgentExecutor._run_file_context_phase()."""
+
+    def _make_executor(self, runner=None):
+        executor = NativeAgentExecutor.__new__(NativeAgentExecutor)
+        executor.native_meta = NativeRunMeta()
+        executor._runner = runner
+        return executor
+
+    def _make_runner(self, responses=None):
+        """Return a mock runner that returns NativeToolResult objects."""
+        from openshard.native.tools import NativeToolResult
+        runner = MagicMock()
+        responses = responses or {}
+
+        def _run(call):
+            path = call.args.get("path", "")
+            if path in responses:
+                content, ok = responses[path]
+            else:
+                content, ok = "", False
+            return NativeToolResult(
+                tool_name=call.tool_name,
+                ok=ok,
+                output=content,
+            )
+
+        runner.run.side_effect = _run
+        runner.trace_entry.side_effect = lambda call, result: {
+            "tool": call.tool_name,
+            "ok": result.ok,
+            "approved": False,
+            "output_chars": len(result.output),
+            "error": result.error,
+        }
+        return runner
+
+    def test_default_file_context_is_none(self):
+        meta = NativeRunMeta()
+        self.assertIsNone(meta.file_context)
+
+    def test_no_runner_returns_early(self):
+        executor = self._make_executor(runner=None)
+        executor.native_meta.read_search_findings = ["file:src/main.py"]
+        executor._run_file_context_phase()
+        self.assertIsNone(executor.native_meta.file_context)
+
+    def test_no_findings_returns_early(self):
+        runner = self._make_runner()
+        executor = self._make_executor(runner=runner)
+        executor.native_meta.read_search_findings = []
+        executor._run_file_context_phase()
+        self.assertIsNone(executor.native_meta.file_context)
+
+    def test_reads_bounded_number_of_files(self):
+        responses = {f"file{i}.py": (f"content{i}", True) for i in range(6)}
+        runner = self._make_runner(responses)
+        executor = self._make_executor(runner=runner)
+        executor.native_meta.read_search_findings = [
+            f"file:{p}" for p in responses
+        ]
+        executor._run_file_context_phase()
+        self.assertIsNotNone(executor.native_meta.file_context)
+        self.assertLessEqual(executor.native_meta.file_context.files_read, 3)
+
+    def test_skips_absolute_paths(self):
+        runner = self._make_runner()
+        executor = self._make_executor(runner=runner)
+        executor.native_meta.read_search_findings = ["file:/etc/passwd"]
+        executor._run_file_context_phase()
+        runner.run.assert_not_called()
+
+    def test_skips_traversal_paths(self):
+        runner = self._make_runner()
+        executor = self._make_executor(runner=runner)
+        executor.native_meta.read_search_findings = ["file:../secret.py"]
+        executor._run_file_context_phase()
+        runner.run.assert_not_called()
+
+    def test_skips_git_paths(self):
+        runner = self._make_runner()
+        executor = self._make_executor(runner=runner)
+        executor.native_meta.read_search_findings = ["file:.git/config"]
+        executor._run_file_context_phase()
+        runner.run.assert_not_called()
+
+    def test_stores_only_metadata_not_content(self):
+        runner = self._make_runner({"src/main.py": ("def main(): pass", True)})
+        executor = self._make_executor(runner=runner)
+        executor.native_meta.read_search_findings = ["file:src/main.py"]
+        executor._run_file_context_phase()
+        fc = executor.native_meta.file_context
+        self.assertIsNotNone(fc)
+        self.assertFalse(hasattr(fc, "content"))
+        self.assertIn("src/main.py", fc.paths)
+        self.assertGreater(fc.total_chars, 0)
+
+    def test_records_file_context_loop_step(self):
+        runner = self._make_runner({"a.py": ("hello", True)})
+        executor = self._make_executor(runner=runner)
+        executor.native_meta.read_search_findings = ["file:a.py"]
+        executor._run_file_context_phase()
+        self.assertIn("file_context", executor.native_meta.native_loop_steps)
+
+    def test_serializes_file_context(self):
+        from dataclasses import asdict
+        runner = self._make_runner({"a.py": ("hello", True)})
+        executor = self._make_executor(runner=runner)
+        executor.native_meta.read_search_findings = ["file:a.py"]
+        executor._run_file_context_phase()
+        fc = executor.native_meta.file_context
+        self.assertIsNotNone(fc)
+        d = asdict(fc)
+        for key in ("files_read", "paths", "total_chars", "truncated", "warnings"):
+            self.assertIn(key, d)
+
+    def test_total_chars_bounded(self):
+        from openshard.native.executor import _MAX_FILE_CONTEXT_TOTAL_CHARS
+        big_content = "x" * (_MAX_FILE_CONTEXT_TOTAL_CHARS + 1)
+        runner = self._make_runner({
+            "a.py": (big_content, True),
+            "b.py": ("small", True),
+            "c.py": ("small", True),
+        })
+        executor = self._make_executor(runner=runner)
+        executor.native_meta.read_search_findings = [
+            "file:a.py", "file:b.py", "file:c.py"
+        ]
+        executor._run_file_context_phase()
+        fc = executor.native_meta.file_context
+        self.assertIsNotNone(fc)
+        self.assertTrue(fc.truncated)
+
+    def test_failed_read_records_warning(self):
+        runner = self._make_runner({"tests/": ("", False)})
+        executor = self._make_executor(runner=runner)
+        executor.native_meta.read_search_findings = ["test-marker:tests/"]
+        executor._run_file_context_phase()
+        fc = executor.native_meta.file_context
+        self.assertIsNotNone(fc)
+        self.assertEqual(fc.files_read, 0)
+        self.assertTrue(any("tests/" in w for w in fc.warnings))
+ main

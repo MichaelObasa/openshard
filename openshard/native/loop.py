@@ -8,7 +8,11 @@ NativeLoopPhase = Literal[
     "observation",
     "evidence",
     "read_search",
+ osn-context-packet
     "context_packet",
+
+    "file_context",
+ main
     "plan",
     "backend_proof",
     "generation",

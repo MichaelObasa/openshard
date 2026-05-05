@@ -727,6 +727,7 @@ class TestCommandPolicyPreviewRendering(unittest.TestCase):
         self.assertNotIn("argv", joined)
 
 
+osn-context-packet
 class TestNativeContextPacketRendering(unittest.TestCase):
     """Tests for context packet: N sources, N paths line in [native] block."""
 
@@ -797,6 +798,52 @@ class TestNativeContextPacketRendering(unittest.TestCase):
         joined = "\n".join(lines)
         self.assertNotIn("file:src/main.py", joined)
         self.assertNotIn("test-marker:tests/", joined)
+
+class TestNativeFileContextRendering(unittest.TestCase):
+    """Rendering tests for NativeFileContext compact line."""
+
+    def _base_entry(self):
+        return {
+            "workflow": "native",
+            "executor": "native",
+            "native_loop_steps": [],
+            "native_loop_trace": [],
+            "read_search_findings": [],
+            "write_path": "pipeline",
+        }
+
+    def test_file_context_compact_line_rendered(self):
+        entry = self._base_entry()
+        entry["file_context"] = {
+            "files_read": 3,
+            "paths": ["a.py", "b.py", "c.py"],
+            "total_chars": 4210,
+            "truncated": False,
+            "warnings": [],
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("file context: 3 files, 4210 chars", out)
+
+    def test_file_context_not_rendered_when_zero_files(self):
+        entry = self._base_entry()
+        entry["file_context"] = {
+            "files_read": 0,
+            "paths": [],
+            "total_chars": 0,
+            "truncated": False,
+            "warnings": [],
+        }
+        out = _render(entry, detail="more")
+        self.assertNotIn("file context:", out)
+
+    def test_old_entry_without_file_context_does_not_crash(self):
+        entry = self._base_entry()
+        try:
+            out = _render(entry, detail="more")
+        except Exception as exc:
+            self.fail(f"Rendering raised {exc}")
+        self.assertIsInstance(out, str)
+main
 
 
 if __name__ == "__main__":

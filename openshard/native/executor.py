@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from openshard.native.context import (
     NativeContextPacket,
     NativeDiffReview,
     NativeEvidence,
+    NativeFileContext,
     NativeFileSnippet,
     NativeFinalReport,
     NativeObservation,
@@ -70,7 +72,10 @@ class NativeRunMeta:
     read_search_findings: list[str] = field(default_factory=list)
     patch_proposal: NativePatchProposal | None = None
     command_policy_preview: NativeCommandPolicyPreview | None = None
+ osn-context-packet
     context_packet: NativeContextPacket | None = None
+    file_context: NativeFileContext | None = None
+ main
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -84,6 +89,9 @@ _SEARCH_TRIGGER_WORDS: frozenset[str] = frozenset({"where", "find", "search", "l
 
 _MAX_READ_SEARCH_STEPS: int = 3
 _MAX_LOOP_FINDINGS: int = 5
+_MAX_FILE_CONTEXT_FILES: int = 3
+_MAX_FILE_CONTEXT_CHARS_PER_FILE: int = 2000
+_MAX_FILE_CONTEXT_TOTAL_CHARS: int = 5000
 
 
 def _parse_search_result_line(line: str) -> tuple[str, int] | None:
@@ -399,6 +407,75 @@ class NativeAgentExecutor:
             },
         )
 
+    def _run_file_context_phase(self) -> None:
+        if self._runner is None:
+            return
+        findings = list(self.native_meta.read_search_findings)
+        if not findings:
+            return
+
+        candidates: list[str] = []
+        for f in findings:
+            for prefix in ("file:", "test-marker:", "package:"):
+                if f.startswith(prefix):
+                    candidates.append(f[len(prefix):])
+                    break
+
+        safe: list[str] = []
+        for p in candidates:
+            if os.path.isabs(p):
+                continue
+            parts = p.replace("\\", "/").split("/")
+            if ".." in parts or ".git" in parts:
+                continue
+            safe.append(p)
+
+        if not safe:
+            return
+
+        files_read = 0
+        total_chars = 0
+        truncated = False
+        paths_read: list[str] = []
+        warnings: list[str] = []
+
+        for path in safe[:_MAX_FILE_CONTEXT_FILES]:
+            read_call = NativeToolCall(tool_name="read_file", args={"path": path})
+            read_result = self._runner.run(read_call)
+            self.native_meta.tool_trace.append(
+                self._runner.trace_entry(read_call, read_result)
+            )
+
+            if not read_result.ok:
+                warnings.append(f"could not read: {path}")
+                continue
+
+            content = read_result.output or ""
+            chars = len(content)
+
+            if total_chars + min(chars, _MAX_FILE_CONTEXT_CHARS_PER_FILE) > _MAX_FILE_CONTEXT_TOTAL_CHARS:
+                truncated = True
+                break
+            if chars > _MAX_FILE_CONTEXT_CHARS_PER_FILE:
+                chars = _MAX_FILE_CONTEXT_CHARS_PER_FILE
+                truncated = True
+
+            total_chars += chars
+            paths_read.append(path)
+            files_read += 1
+
+        self.native_meta.file_context = NativeFileContext(
+            files_read=files_read,
+            paths=paths_read,
+            total_chars=total_chars,
+            truncated=truncated,
+            warnings=warnings,
+        )
+        self.record_loop_step(
+            "file_context",
+            metadata={"files_read": files_read, "total_chars": total_chars, "truncated": truncated},
+        )
+
     def _run_backend_proof_phase(self, task: str) -> None:
         if self._backend.name != "deepagents":
             return
@@ -538,7 +615,11 @@ class NativeAgentExecutor:
             self._run_backend_proof_phase(task)
         self._run_observe_phase(task, repo_facts=repo_facts)
         self._run_read_search_loop(task)
+ osn-context-packet
         self.build_context_packet(task)
+
+        self._run_file_context_phase()
+ main
         matches = match_builtin_skills(task, repo_facts=repo_facts)
         self.native_meta.selected_skills = selected_skill_names(matches)
 

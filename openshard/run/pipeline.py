@@ -1029,6 +1029,11 @@ class RunPipeline:
                     and _native_meta.command_policy_preview is not None
                     else None
                 ),
+                "file_context": (
+                    asdict(_native_meta.file_context)
+                    if _native_meta is not None and _native_meta.file_context is not None
+                    else None
+                ),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
