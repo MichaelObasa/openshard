@@ -725,9 +725,6 @@ class TestCommandPolicyPreviewRendering(unittest.TestCase):
         joined = "\n".join(lines)
         self.assertNotIn("python -m pytest", joined)
         self.assertNotIn("argv", joined)
-
-
-osn-context-packet
 class TestNativeContextPacketRendering(unittest.TestCase):
     """Tests for context packet: N sources, N paths line in [native] block."""
 
@@ -843,8 +840,5 @@ class TestNativeFileContextRendering(unittest.TestCase):
         except Exception as exc:
             self.fail(f"Rendering raised {exc}")
         self.assertIsInstance(out, str)
-main
-
-
 if __name__ == "__main__":
     unittest.main()

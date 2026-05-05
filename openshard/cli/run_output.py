@@ -538,11 +538,9 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "read_search_findings": entry.get("read_search_findings", []),
         "patch_proposal": entry.get("patch_proposal"),
         "command_policy_preview": entry.get("command_policy_preview"),
- osn-context-packet
         "context_packet": entry.get("context_packet"),
 
         "file_context": entry.get("file_context"),
-main
     })
 
 

@@ -492,3 +492,55 @@ def build_native_context_packet(
         compact_paths=compact_paths,
         warnings=warnings,
     )
+
+
+def render_native_context_packet(packet: NativeContextPacket | None) -> str:
+    if packet is None:
+        return ""
+
+    lines: list[str] = ["OpenShard Native context packet:"]
+
+    if packet.sources:
+        lines.append(f"- sources: {', '.join(packet.sources)}")
+
+    if packet.repo_stack:
+        lines.append(f"- repo stack: {', '.join(packet.repo_stack[:8])}")
+
+    if packet.test_marker_count or packet.package_file_count:
+        lines.append(
+            f"- repo signals: {packet.test_marker_count} test markers, "
+            f"{packet.package_file_count} package files"
+        )
+
+    if packet.read_search_count:
+        lines.append(f"- read/search findings: {packet.read_search_count}")
+
+    file_context_files = getattr(packet, "file_context_files", 0)
+    file_context_chars = getattr(packet, "file_context_chars", 0)
+    if file_context_files:
+        lines.append(
+            f"- file context: {file_context_files} files, "
+            f"{file_context_chars} chars"
+        )
+
+    if packet.selected_skills:
+        lines.append(f"- selected skills: {', '.join(packet.selected_skills[:8])}")
+
+    if packet.backend:
+        availability = "available" if packet.backend_available else "unavailable"
+        lines.append(f"- backend: {packet.backend} ({availability})")
+
+    if packet.backend_proof_mode:
+        lines.append(f"- backend proof: {packet.backend_proof_mode}")
+
+    if packet.compact_paths:
+        lines.append("- compact paths:")
+        for path in packet.compact_paths[:8]:
+            lines.append(f"  - {path}")
+
+    if packet.warnings:
+        lines.append("- warnings:")
+        for warning in packet.warnings[:5]:
+            lines.append(f"  - {warning}")
+
+    return "\n".join(lines)
