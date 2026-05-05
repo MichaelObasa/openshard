@@ -1086,5 +1086,64 @@ class TestNativeChangeBudgetPreviewRendering(unittest.TestCase):
         self.assertNotIn("proposal has 4 files but budget allows 2", out)
 
 
+class TestNativeChangeBudgetSoftGateRendering(unittest.TestCase):
+    """Tests for budget gate: action, approval=bool line in [native] block."""
+
+    def _base_entry(self):
+        return {
+            "workflow": "native",
+            "executor": "native",
+            "native_loop_steps": [],
+            "native_loop_trace": [],
+        }
+
+    def _entry_with_gate(self, action: str, requires_approval: bool, warnings: list | None = None) -> dict:
+        entry = self._base_entry()
+        entry["change_budget_soft_gate"] = {
+            "requires_approval": requires_approval,
+            "reason": "proposal exceeds advisory change budget" if requires_approval else "within budget",
+            "action": action,
+            "warnings": warnings if warnings is not None else [],
+        }
+        return entry
+
+    def test_soft_gate_line_rendered(self):
+        entry = self._entry_with_gate(action="require_approval", requires_approval=True)
+        out = _render(entry, detail="more")
+        self.assertIn("budget gate:", out)
+        self.assertIn("require_approval", out)
+        self.assertIn("approval=true", out)
+
+    def test_soft_gate_absent_when_missing(self):
+        entry = self._base_entry()
+        out = _render(entry, detail="more")
+        self.assertNotIn("budget gate:", out)
+
+    def test_soft_gate_absent_when_none(self):
+        entry = self._base_entry()
+        entry["change_budget_soft_gate"] = None
+        out = _render(entry, detail="more")
+        self.assertNotIn("budget gate:", out)
+
+    def test_native_meta_from_entry_passes_soft_gate(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+        entry = self._entry_with_gate(action="allow", requires_approval=False)
+        meta = _native_meta_from_entry(entry)
+        self.assertIsNotNone(meta)
+        gate = getattr(meta, "change_budget_soft_gate", None)
+        self.assertIsNotNone(gate)
+        self.assertEqual(getattr(gate, "action", None), "allow")
+        self.assertEqual(getattr(gate, "requires_approval", None), False)
+
+    def test_warnings_not_rendered_by_default(self):
+        entry = self._entry_with_gate(
+            action="require_approval",
+            requires_approval=True,
+            warnings=["proposal has 4 files but budget allows 2"],
+        )
+        out = _render(entry, detail="more")
+        self.assertNotIn("proposal has 4 files but budget allows 2", out)
+
+
 if __name__ == "__main__":
     unittest.main()

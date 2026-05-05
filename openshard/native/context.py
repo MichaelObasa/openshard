@@ -720,6 +720,38 @@ def build_native_change_budget_preview(
     )
 
 
+@dataclass
+class NativeChangeBudgetSoftGate:
+    requires_approval: bool = False
+    reason: str = ""
+    action: str = "allow"
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_change_budget_soft_gate(
+    preview: NativeChangeBudgetPreview | None,
+) -> NativeChangeBudgetSoftGate:
+    if preview is None:
+        return NativeChangeBudgetSoftGate(
+            requires_approval=False,
+            reason="change budget preview missing",
+            action="allow",
+            warnings=["change budget preview missing"],
+        )
+    if preview.would_exceed_budget:
+        return NativeChangeBudgetSoftGate(
+            requires_approval=True,
+            reason="proposal exceeds advisory change budget",
+            action="require_approval",
+            warnings=list(preview.warnings),
+        )
+    return NativeChangeBudgetSoftGate(
+        requires_approval=False,
+        reason="proposal is within advisory change budget",
+        action="allow",
+    )
+
+
 def render_native_change_budget(budget: NativeChangeBudget | None) -> str:
     if budget is None:
         return ""
