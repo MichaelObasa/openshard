@@ -4254,3 +4254,135 @@ class TestDeepAgentsReadonlyProof(unittest.TestCase):
             self.assertIn(key, result)
         self.assertIsInstance(result["summary"], str)
         self.assertIsInstance(result["notes"], list)
+
+
+class TestNativeContextPacket(unittest.TestCase):
+    """Unit tests for NativeContextPacket dataclass and build_native_context_packet()."""
+
+    from openshard.native.context import (
+        NativeContextPacket as _NativeContextPacket,
+        build_native_context_packet as _build_packet,
+    )
+
+    def _make_executor(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor, fake_gen
+
+    def _build(self, **kwargs):
+        from openshard.native.context import build_native_context_packet
+        return build_native_context_packet(task=kwargs.pop("task", ""), **kwargs)
+
+    def test_builder_defaults_empty(self):
+        from openshard.native.context import build_native_context_packet
+        packet = build_native_context_packet(task="")
+        self.assertEqual(packet.read_search_count, 0)
+        self.assertEqual(packet.test_marker_count, 0)
+        self.assertEqual(packet.package_file_count, 0)
+        self.assertEqual(packet.compact_paths, [])
+        self.assertEqual(packet.selected_skills, [])
+        self.assertEqual(packet.task_preview, "")
+
+    def test_builder_task_preview_bounded(self):
+        from openshard.native.context import build_native_context_packet
+        long_task = "x" * 400
+        packet = build_native_context_packet(task=long_task)
+        self.assertEqual(len(packet.task_preview), 300)
+        self.assertEqual(packet.task_preview, "x" * 300)
+
+    def test_builder_includes_repo_context_source(self):
+        from openshard.native.context import build_native_context_packet
+        from openshard.native.repo_context import NativeRepoContextSummary
+        summary = NativeRepoContextSummary(
+            likely_stack_markers=["python", "pytest"],
+            test_markers=["tests/"],
+            package_files=["pyproject.toml", "setup.py"],
+            total_files=10,
+            top_level_dirs=["openshard"],
+            truncated=False,
+        )
+        packet = build_native_context_packet(task="fix bug", repo_context_summary=summary)
+        self.assertIn("repo_context", packet.sources)
+        self.assertEqual(packet.repo_stack, ["python", "pytest"])
+        self.assertEqual(packet.test_marker_count, 1)
+        self.assertEqual(packet.package_file_count, 2)
+
+    def test_builder_counts_read_search_findings(self):
+        from openshard.native.context import build_native_context_packet
+        findings = ["file:src/a.py", "test-marker:tests/", "package:pyproject.toml"]
+        packet = build_native_context_packet(task="fix", read_search_findings=findings)
+        self.assertEqual(packet.read_search_count, 3)
+        self.assertIn("read_search", packet.sources)
+
+    def test_builder_includes_backend(self):
+        from openshard.native.context import build_native_context_packet
+        packet = build_native_context_packet(task="t", native_backend="builtin")
+        self.assertIn("backend", packet.sources)
+        self.assertEqual(packet.backend, "builtin")
+
+    def test_builder_includes_backend_proof_mode(self):
+        from openshard.native.context import build_native_context_packet
+        proof = {"mode": "strict", "available": True}
+        packet = build_native_context_packet(task="t", native_backend_proof=proof)
+        self.assertEqual(packet.backend_proof_mode, "strict")
+
+    def test_builder_bounds_compact_paths(self):
+        from openshard.native.context import build_native_context_packet
+        findings = [f"file:src/f{i}.py" for i in range(10)]
+        packet = build_native_context_packet(task="t", read_search_findings=findings)
+        self.assertLessEqual(len(packet.compact_paths), 8)
+        self.assertIn("context packet paths truncated", packet.warnings)
+
+    def test_builder_includes_skills(self):
+        from openshard.native.context import build_native_context_packet
+        packet = build_native_context_packet(task="t", selected_skills=["python"])
+        self.assertIn("skills", packet.sources)
+        self.assertEqual(packet.selected_skills, ["python"])
+
+    def test_builder_does_not_store_raw_content(self):
+        from openshard.native.context import build_native_context_packet
+        import dataclasses
+        packet = build_native_context_packet(
+            task="fix the bug",
+            read_search_findings=["file:src/main.py"],
+            selected_skills=["python"],
+        )
+        for f in dataclasses.fields(packet):
+            val = getattr(packet, f.name)
+            if isinstance(val, str):
+                self.assertLess(len(val), 1000, f"field {f.name!r} looks like raw content")
+
+    def test_executor_stores_context_packet(self):
+        executor, fake_gen = self._make_executor()
+        executor.generate("fix the bug")
+        self.assertIsNotNone(executor.native_meta.context_packet)
+
+    def test_executor_records_context_packet_loop_step(self):
+        executor, fake_gen = self._make_executor()
+        executor.generate("fix the bug")
+        phases = executor.native_meta.native_loop_trace.phases()
+        self.assertIn("context_packet", phases)
+
+    def test_generate_builds_context_packet_before_plan(self):
+        executor, fake_gen = self._make_executor()
+        executor.generate("fix the bug")
+        phases = executor.native_meta.native_loop_trace.phases()
+        self.assertIn("context_packet", phases)
+        self.assertIn("plan", phases)
+        self.assertLess(phases.index("context_packet"), phases.index("plan"))
+
+    def test_pipeline_serializes_context_packet(self):
+        from dataclasses import asdict
+        from openshard.native.context import NativeContextPacket
+        packet = NativeContextPacket(
+            task_preview="do something",
+            sources=["backend", "repo_context"],
+            repo_stack=["python"],
+            backend="builtin",
+        )
+        d = asdict(packet)
+        self.assertEqual(d["task_preview"], "do something")
+        self.assertEqual(d["sources"], ["backend", "repo_context"])
+        self.assertEqual(d["repo_stack"], ["python"])
+        self.assertEqual(d["backend"], "builtin")

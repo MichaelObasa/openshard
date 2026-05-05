@@ -10,6 +10,7 @@ from openshard.native.context import (
     CompactRunState,
     NativeCommandPolicyPreview,
     NativeContextBudget,
+    NativeContextPacket,
     NativeDiffReview,
     NativeEvidence,
     NativeFileSnippet,
@@ -21,6 +22,7 @@ from openshard.native.context import (
     NativeVerificationLoop,
     build_initial_context_budget,
     build_native_command_policy_preview,
+    build_native_context_packet,
     build_native_diff_review,
     build_native_final_report,
     build_native_patch_proposal,
@@ -68,6 +70,7 @@ class NativeRunMeta:
     read_search_findings: list[str] = field(default_factory=list)
     patch_proposal: NativePatchProposal | None = None
     command_policy_preview: NativeCommandPolicyPreview | None = None
+    context_packet: NativeContextPacket | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -502,6 +505,27 @@ class NativeAgentExecutor:
         )
         return proposal
 
+    def build_context_packet(self, task: str) -> NativeContextPacket:
+        packet = build_native_context_packet(
+            task=task,
+            repo_context_summary=self.native_meta.repo_context_summary,
+            read_search_findings=self.native_meta.read_search_findings,
+            selected_skills=self.native_meta.selected_skills,
+            native_backend=self.native_meta.native_backend,
+            native_backend_available=self.native_meta.native_backend_available,
+            native_backend_proof=self.native_meta.native_backend_proof,
+        )
+        self.native_meta.context_packet = packet
+        self.record_loop_step(
+            "context_packet",
+            summary=f"{len(packet.sources)} sources, {len(packet.compact_paths)} paths",
+            metadata={
+                "sources": len(packet.sources),
+                "paths": len(packet.compact_paths),
+            },
+        )
+        return packet
+
     def generate(
         self,
         task: str,
@@ -514,6 +538,7 @@ class NativeAgentExecutor:
             self._run_backend_proof_phase(task)
         self._run_observe_phase(task, repo_facts=repo_facts)
         self._run_read_search_loop(task)
+        self.build_context_packet(task)
         matches = match_builtin_skills(task, repo_facts=repo_facts)
         self.native_meta.selected_skills = selected_skill_names(matches)
 

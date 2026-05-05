@@ -442,6 +442,14 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         lines.append(f"  read/search: {len(read_search_findings)} findings")
         has_content = True
 
+    cp = getattr(native_meta, "context_packet", None)
+    if cp is not None:
+        _cp_sources = len(getattr(cp, "sources", []) or [])
+        _cp_paths = len(getattr(cp, "compact_paths", []) or [])
+        if _cp_sources > 0:
+            lines.append(f"  context packet: {_cp_sources} sources, {_cp_paths} paths")
+            has_content = True
+
     patch_proposal = getattr(native_meta, "patch_proposal", None)
     if patch_proposal is not None:
         _count = getattr(patch_proposal, "file_count", 0)
@@ -522,6 +530,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "read_search_findings": entry.get("read_search_findings", []),
         "patch_proposal": entry.get("patch_proposal"),
         "command_policy_preview": entry.get("command_policy_preview"),
+        "context_packet": entry.get("context_packet"),
     })
 
 
