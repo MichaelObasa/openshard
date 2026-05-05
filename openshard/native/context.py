@@ -619,6 +619,77 @@ def render_native_context_quality_advisory(
     return "\n".join(lines)
 
 
+@dataclass
+class NativeChangeBudget:
+    level: str = "unknown"
+    max_files: int = 1
+    max_change_size: str = "small"
+    guidance: str = ""
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_change_budget(
+    advisory: NativeContextQualityAdvisory | None,
+) -> NativeChangeBudget:
+    if advisory is None:
+        return NativeChangeBudget(
+            level="unknown",
+            max_files=1,
+            max_change_size="small",
+            guidance="prefer the smallest safe change; gather more context if needed",
+            warnings=["context advisory missing"],
+        )
+
+    level = advisory.level
+
+    if level == "strong":
+        return NativeChangeBudget(
+            level=level,
+            max_files=5,
+            max_change_size="normal",
+            guidance="normal scoped generation is acceptable",
+        )
+
+    if level == "good":
+        return NativeChangeBudget(
+            level=level,
+            max_files=3,
+            max_change_size="normal",
+            guidance="normal generation is acceptable; avoid unnecessary broad refactors",
+        )
+
+    if level == "fair":
+        return NativeChangeBudget(
+            level=level,
+            max_files=2,
+            max_change_size="small",
+            guidance="prefer a cautious, focused change",
+            warnings=["context is usable but not strong"],
+        )
+
+    return NativeChangeBudget(
+        level=level,
+        max_files=1,
+        max_change_size="small",
+        guidance="prefer the smallest safe change; avoid broad refactors",
+        warnings=["context is weak or unknown"],
+    )
+
+
+def render_native_change_budget(budget: NativeChangeBudget | None) -> str:
+    if budget is None:
+        return ""
+
+    lines = ["OpenShard Native change budget:"]
+    lines.append(f"- level: {budget.level}")
+    lines.append(f"- max files: {budget.max_files}")
+    lines.append(f"- max change size: {budget.max_change_size}")
+    if budget.guidance:
+        lines.append(f"- guidance: {budget.guidance}")
+
+    return "\n".join(lines)
+
+
 def build_native_context_quality_score(packet: NativeContextPacket) -> NativeContextQualityScore:
     score = 0
     reasons: list[str] = []

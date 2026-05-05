@@ -12,6 +12,7 @@ from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
 from openshard.native.context import (
     CompactRunState,
+    NativeChangeBudget,
     NativeCommandPolicyPreview,
     NativeContextBudget,
     NativeContextPacket,
@@ -28,6 +29,7 @@ from openshard.native.context import (
     NativeVerificationLoop,
     build_compact_run_state,
     build_initial_context_budget,
+    build_native_change_budget,
     build_native_command_policy_preview,
     build_native_context_quality_advisory,
     build_native_context_quality_score,
@@ -35,6 +37,7 @@ from openshard.native.context import (
     build_native_final_report,
     build_native_patch_proposal,
     build_native_verification_command_summary,
+    render_native_change_budget,
     render_native_context_quality_advisory,
     render_native_evidence,
     render_native_observation,
@@ -4897,3 +4900,136 @@ class TestNativeContextQualityAdvisoryUse(unittest.TestCase):
         rendered = render_native_context_quality_advisory(advisory)
         for token in forbidden:
             self.assertNotIn(token, rendered)
+
+
+class TestNativeChangeBudget(unittest.TestCase):
+    """Tests for NativeChangeBudget, build_native_change_budget, and render_native_change_budget."""
+
+    def _make_executor(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor, fake_gen
+
+    def _advisory(self, level: str) -> NativeContextQualityAdvisory:
+        return NativeContextQualityAdvisory(
+            level=level,
+            recommendation=f"context is {level}",
+            should_block=False,
+            warnings=[],
+        )
+
+    def test_builder_none_defaults_small(self):
+        budget = build_native_change_budget(None)
+        self.assertEqual(budget.level, "unknown")
+        self.assertEqual(budget.max_files, 1)
+        self.assertEqual(budget.max_change_size, "small")
+        self.assertTrue(any("advisory missing" in w for w in budget.warnings))
+
+    def test_builder_weak_allows_one_file(self):
+        budget = build_native_change_budget(self._advisory("weak"))
+        self.assertEqual(budget.max_files, 1)
+        self.assertEqual(budget.level, "weak")
+
+    def test_builder_fair_allows_two_files(self):
+        budget = build_native_change_budget(self._advisory("fair"))
+        self.assertEqual(budget.max_files, 2)
+        self.assertEqual(budget.level, "fair")
+
+    def test_builder_good_allows_three_files(self):
+        budget = build_native_change_budget(self._advisory("good"))
+        self.assertEqual(budget.max_files, 3)
+        self.assertEqual(budget.level, "good")
+
+    def test_builder_strong_allows_five_files(self):
+        budget = build_native_change_budget(self._advisory("strong"))
+        self.assertEqual(budget.max_files, 5)
+        self.assertEqual(budget.level, "strong")
+
+    def test_render_none_returns_empty_string(self):
+        self.assertEqual(render_native_change_budget(None), "")
+
+    def test_render_includes_level_files_size_guidance(self):
+        budget = NativeChangeBudget(
+            level="good",
+            max_files=3,
+            max_change_size="normal",
+            guidance="normal generation is acceptable",
+            warnings=[],
+        )
+        rendered = render_native_change_budget(budget)
+        self.assertIn("level: good", rendered)
+        self.assertIn("max files: 3", rendered)
+        self.assertIn("max change size: normal", rendered)
+        self.assertIn("guidance: normal generation is acceptable", rendered)
+
+    def test_render_does_not_include_warnings(self):
+        budget = NativeChangeBudget(
+            level="fair",
+            max_files=2,
+            max_change_size="small",
+            guidance="prefer a cautious change",
+            warnings=["SECRET_WARNING_TEXT"],
+        )
+        rendered = render_native_change_budget(budget)
+        self.assertNotIn("SECRET_WARNING_TEXT", rendered)
+
+    def test_executor_stores_change_budget(self):
+        executor, _ = self._make_executor()
+        executor.native_meta.context_quality_advisory = self._advisory("good")
+        budget = executor.build_change_budget()
+        self.assertIsInstance(budget, NativeChangeBudget)
+        self.assertIsNotNone(executor.native_meta.change_budget)
+        self.assertIs(executor.native_meta.change_budget, budget)
+
+    def test_executor_records_change_budget_loop_step(self):
+        executor, _ = self._make_executor()
+        executor.native_meta.context_quality_advisory = self._advisory("fair")
+        executor.build_change_budget()
+        phases = executor.native_meta.native_loop_trace.phases()
+        self.assertIn("change_budget", phases)
+
+    def test_generate_passes_change_budget_to_generator_context(self):
+        executor, fake_gen = self._make_executor()
+        executor.generate("add a function")
+        _, kwargs = fake_gen.generate.call_args
+        self.assertIn("OpenShard Native change budget:", kwargs["skills_context"])
+
+    def test_generate_preserves_existing_skills_context(self):
+        executor, fake_gen = self._make_executor()
+        executor.generate("add a function", skills_context="caller hint")
+        _, kwargs = fake_gen.generate.call_args
+        self.assertIn("caller hint", kwargs["skills_context"])
+        self.assertIn("OpenShard Native change budget:", kwargs["skills_context"])
+
+    def test_no_raw_content_in_budget_context(self):
+        forbidden = ["SECRET_RAW_FILE_CONTENT", "RAW_DIFF", "STDERR", "CHAIN_OF_THOUGHT"]
+        budget = NativeChangeBudget(
+            level="weak",
+            max_files=1,
+            max_change_size="small",
+            guidance="prefer the smallest safe change",
+            warnings=["SECRET_RAW_FILE_CONTENT", "RAW_DIFF", "STDERR", "CHAIN_OF_THOUGHT"],
+        )
+        rendered = render_native_change_budget(budget)
+        for token in forbidden:
+            self.assertNotIn(token, rendered)
+
+    def test_pipeline_serializes_change_budget(self):
+        native_mock = _make_native_mock()
+        native_mock.native_meta.change_budget = NativeChangeBudget(
+            level="good",
+            max_files=3,
+            max_change_size="normal",
+            guidance="normal generation is acceptable",
+            warnings=[],
+        )
+        _, _, logged = TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertIn("change_budget", logged)
+        cb = logged["change_budget"]
+        self.assertIsNotNone(cb)
+        self.assertEqual(cb["level"], "good")
+        self.assertEqual(cb["max_files"], 3)
+        self.assertEqual(cb["max_change_size"], "normal")

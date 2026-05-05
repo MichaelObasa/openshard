@@ -11,6 +11,7 @@ from openshard.native.context import (
     CompactRunState,
     NativeCommandPolicyPreview,
     NativeContextBudget,
+    NativeChangeBudget,
     NativeContextPacket,
     NativeContextQualityAdvisory,
     NativeContextQualityScore,
@@ -27,12 +28,14 @@ from openshard.native.context import (
     build_initial_context_budget,
     build_native_command_policy_preview,
     build_native_context_packet,
+    build_native_change_budget,
     build_native_context_quality_advisory,
     build_native_context_quality_score,
     build_native_diff_review,
     build_native_final_report,
     build_native_patch_proposal,
     build_native_verification_command_summary,
+    render_native_change_budget,
     render_native_context_packet,
     render_native_context_quality_advisory,
     render_native_evidence,
@@ -82,6 +85,9 @@ class NativeRunMeta:
     context_packet: NativeContextPacket | None = None
     context_quality_score: NativeContextQualityScore | None = None
     context_quality_advisory: NativeContextQualityAdvisory | None = None
+    change_budget: NativeChangeBudget | None = None
+
+
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
     "the", "a", "an", "in", "on", "at", "to", "for", "of",
     "is", "are", "was", "were", "be", "been", "being",
@@ -643,6 +649,20 @@ class NativeAgentExecutor:
         )
         return advisory
 
+    def build_change_budget(self) -> NativeChangeBudget:
+        budget = build_native_change_budget(self.native_meta.context_quality_advisory)
+        self.native_meta.change_budget = budget
+        self.record_loop_step(
+            "change_budget",
+            summary=f"{budget.level} max_files={budget.max_files} size={budget.max_change_size}",
+            metadata={
+                "level": budget.level,
+                "max_files": budget.max_files,
+                "max_change_size": budget.max_change_size,
+            },
+        )
+        return budget
+
     def generate(
         self,
         task: str,
@@ -661,6 +681,7 @@ class NativeAgentExecutor:
         self.build_context_packet(task)
         self.build_context_quality_score()
         self.build_context_quality_advisory()
+        self.build_change_budget()
 
         self.native_meta.plan = _build_native_plan(
             task,
@@ -695,6 +716,10 @@ class NativeAgentExecutor:
         )
         if advisory_context:
             context_parts.append(advisory_context)
+
+        change_budget_context = render_native_change_budget(self.native_meta.change_budget)
+        if change_budget_context:
+            context_parts.append(change_budget_context)
 
         if skills_context:
             context_parts.append(skills_context)
