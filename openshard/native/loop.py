@@ -8,6 +8,7 @@ NativeLoopPhase = Literal[
     "observation",
     "evidence",
     "read_search",
+    "file_context",
     "plan",
     "backend_proof",
     "generation",

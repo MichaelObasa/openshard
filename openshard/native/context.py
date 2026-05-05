@@ -180,6 +180,15 @@ class NativeFinalReport:
 
 
 @dataclass
+class NativeFileContext:
+    files_read: int = 0
+    paths: list[str] = field(default_factory=list)
+    total_chars: int = 0
+    truncated: bool = False
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
 class NativePatchProposal:
     file_count: int = 0
     files: list[str] = field(default_factory=list)
