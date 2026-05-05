@@ -398,6 +398,15 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         v_parts.append("passed" if getattr(vloop, "passed", False) else "failed")
         lines.append(f"  verification: {', '.join(v_parts)}")
 
+    vcs = getattr(native_meta, "verification_command_summary", None)
+    if vcs is not None and getattr(vcs, "command_count", 0) > 0:
+        lines.append(
+            f"  verification commands: {getattr(vcs, 'safe_count', 0)} safe, "
+            f"{getattr(vcs, 'needs_approval_count', 0)} approval, "
+            f"{getattr(vcs, 'blocked_count', 0)} blocked"
+        )
+        has_content = True
+
     diff_review = getattr(native_meta, "diff_review", None)
     if diff_review is not None and getattr(diff_review, "has_diff", False):
         has_content = True
@@ -486,6 +495,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "plan": entry.get("plan"),
         "write_path": entry.get("write_path", "pipeline"),
         "verification_loop": entry.get("verification_loop"),
+        "verification_command_summary": entry.get("verification_command_summary"),
         "diff_review": entry.get("diff_review"),
         "final_report": entry.get("final_report"),
         "native_loop_steps": entry.get("native_loop_steps", []),

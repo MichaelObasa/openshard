@@ -14,6 +14,7 @@ NativeLoopPhase = Literal[
     "proposal",
     "write",
     "verification",
+    "verification_summary",
     "diff_review",
     "final_report",
 ]

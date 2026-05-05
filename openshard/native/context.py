@@ -84,6 +84,44 @@ class NativeVerificationLoop:
 
 
 @dataclass
+class NativeVerificationCommandSummary:
+    attempted: bool = False
+    command_count: int = 0
+    safe_count: int = 0
+    needs_approval_count: int = 0
+    blocked_count: int = 0
+    passed: bool = False
+    retried: bool = False
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_verification_command_summary(
+    *,
+    verification_loop: NativeVerificationLoop | None,
+    verification_plan: Any | None,
+) -> NativeVerificationCommandSummary:
+    summary = NativeVerificationCommandSummary()
+    if verification_loop is not None:
+        summary.attempted = verification_loop.attempted
+        summary.passed = verification_loop.passed
+        summary.retried = verification_loop.retried
+    if verification_plan is not None and hasattr(verification_plan, "commands"):
+        from openshard.verification.plan import CommandSafety
+        commands = verification_plan.commands
+        summary.command_count = len(commands)
+        for cmd in commands:
+            if cmd.safety == CommandSafety.safe:
+                summary.safe_count += 1
+            elif cmd.safety == CommandSafety.needs_approval:
+                summary.needs_approval_count += 1
+            elif cmd.safety == CommandSafety.blocked:
+                summary.blocked_count += 1
+    if summary.attempted and summary.command_count == 0:
+        summary.warnings.append("verification attempted but no commands found in plan")
+    return summary
+
+
+@dataclass
 class NativeFinalReport:
     used_native_context: bool = False
     observed_tools: list[str] = field(default_factory=list)

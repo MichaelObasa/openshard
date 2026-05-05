@@ -16,11 +16,13 @@ from openshard.native.context import (
     NativeObservation,
     NativePatchProposal,
     NativePlan,
+    NativeVerificationCommandSummary,
     NativeVerificationLoop,
     build_initial_context_budget,
     build_native_diff_review,
     build_native_final_report,
     build_native_patch_proposal,
+    build_native_verification_command_summary,
     render_native_evidence,
     render_native_observation,
     render_native_plan,
@@ -53,6 +55,7 @@ class NativeRunMeta:
     diff_review: NativeDiffReview | None = None
     write_path: str = "pipeline"
     verification_loop: NativeVerificationLoop | None = None
+    verification_command_summary: NativeVerificationCommandSummary | None = None
     final_report: NativeFinalReport | None = None
     native_loop_steps: list[str] = field(default_factory=list)
     native_loop_trace: NativeLoopTrace = field(default_factory=NativeLoopTrace)
@@ -427,6 +430,28 @@ class NativeAgentExecutor:
         self.native_meta.diff_review = review
         self.record_loop_step("diff_review")
         return review
+
+    def build_verification_command_summary(
+        self, verification_plan: Any | None
+    ) -> NativeVerificationCommandSummary:
+        summary = build_native_verification_command_summary(
+            verification_loop=self.native_meta.verification_loop,
+            verification_plan=verification_plan,
+        )
+        self.native_meta.verification_command_summary = summary
+        self.record_loop_step(
+            "verification_summary",
+            summary=f"{summary.command_count} verification commands",
+            metadata={
+                "commands": summary.command_count,
+                "safe": summary.safe_count,
+                "needs_approval": summary.needs_approval_count,
+                "blocked": summary.blocked_count,
+                "passed": summary.passed,
+                "retried": summary.retried,
+            },
+        )
+        return summary
 
     def build_final_report(self) -> NativeFinalReport:
         report = build_native_final_report(
