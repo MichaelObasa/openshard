@@ -1024,5 +1024,67 @@ class TestNativeChangeBudgetRendering(unittest.TestCase):
         self.assertIn("change budget:", out)
 
 
+class TestNativeChangeBudgetPreviewRendering(unittest.TestCase):
+    """Tests for budget preview: N/M files, action line in [native] block."""
+
+    def _base_entry(self):
+        return {
+            "workflow": "native",
+            "executor": "native",
+            "native_loop_steps": [],
+            "native_loop_trace": [],
+        }
+
+    def _entry_with_preview(self, proposed_files: int, budget_max_files: int, action: str) -> dict:
+        entry = self._base_entry()
+        entry["change_budget_preview"] = {
+            "budget_max_files": budget_max_files,
+            "proposed_files": proposed_files,
+            "within_budget": proposed_files <= budget_max_files,
+            "would_exceed_budget": proposed_files > budget_max_files,
+            "action": action,
+            "warnings": (
+                [f"proposal has {proposed_files} files but budget allows {budget_max_files}"]
+                if proposed_files > budget_max_files
+                else []
+            ),
+        }
+        return entry
+
+    def test_budget_preview_line_rendered(self):
+        entry = self._entry_with_preview(proposed_files=4, budget_max_files=2, action="warn")
+        out = _render(entry, detail="more")
+        self.assertIn("budget preview:", out)
+        self.assertIn("4/2 files", out)
+        self.assertIn("warn", out)
+
+    def test_budget_preview_absent_when_missing(self):
+        entry = self._base_entry()
+        out = _render(entry, detail="more")
+        self.assertNotIn("budget preview:", out)
+
+    def test_budget_preview_absent_when_none(self):
+        entry = self._base_entry()
+        entry["change_budget_preview"] = None
+        out = _render(entry, detail="more")
+        self.assertNotIn("budget preview:", out)
+
+    def test_native_meta_from_entry_passes_budget_preview(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+        entry = self._entry_with_preview(proposed_files=1, budget_max_files=3, action="allow")
+        meta = _native_meta_from_entry(entry)
+        self.assertIsNotNone(meta)
+        cbp = getattr(meta, "change_budget_preview", None)
+        self.assertIsNotNone(cbp)
+        self.assertEqual(getattr(cbp, "proposed_files", None), 1)
+        self.assertEqual(getattr(cbp, "budget_max_files", None), 3)
+        self.assertEqual(getattr(cbp, "action", None), "allow")
+
+    def test_warnings_not_rendered_by_default(self):
+        entry = self._entry_with_preview(proposed_files=4, budget_max_files=2, action="warn")
+        out = _render(entry, detail="more")
+        self.assertNotIn("proposal has 4 files but budget allows 2", out)
+
+
 if __name__ == "__main__":
     unittest.main()

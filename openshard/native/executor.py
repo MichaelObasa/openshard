@@ -12,6 +12,7 @@ from openshard.native.context import (
     NativeCommandPolicyPreview,
     NativeContextBudget,
     NativeChangeBudget,
+    NativeChangeBudgetPreview,
     NativeContextPacket,
     NativeContextQualityAdvisory,
     NativeContextQualityScore,
@@ -29,6 +30,7 @@ from openshard.native.context import (
     build_native_command_policy_preview,
     build_native_context_packet,
     build_native_change_budget,
+    build_native_change_budget_preview,
     build_native_context_quality_advisory,
     build_native_context_quality_score,
     build_native_diff_review,
@@ -86,6 +88,7 @@ class NativeRunMeta:
     context_quality_score: NativeContextQualityScore | None = None
     context_quality_advisory: NativeContextQualityAdvisory | None = None
     change_budget: NativeChangeBudget | None = None
+    change_budget_preview: NativeChangeBudgetPreview | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -591,6 +594,28 @@ class NativeAgentExecutor:
             },
         )
         return proposal
+
+    def build_change_budget_preview(self) -> NativeChangeBudgetPreview:
+        preview = build_native_change_budget_preview(
+            budget=self.native_meta.change_budget,
+            proposal=self.native_meta.patch_proposal,
+        )
+        self.native_meta.change_budget_preview = preview
+        self.record_loop_step(
+            "change_budget_preview",
+            summary=(
+                f"{preview.proposed_files}/{preview.budget_max_files} files "
+                f"action={preview.action}"
+            ),
+            metadata={
+                "budget_max_files": preview.budget_max_files,
+                "proposed_files": preview.proposed_files,
+                "within_budget": preview.within_budget,
+                "would_exceed_budget": preview.would_exceed_budget,
+                "action": preview.action,
+            },
+        )
+        return preview
 
     def build_context_packet(self, task: str) -> NativeContextPacket:
         file_ctx = self.native_meta.file_context

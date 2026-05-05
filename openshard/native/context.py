@@ -676,6 +676,50 @@ def build_native_change_budget(
     )
 
 
+@dataclass
+class NativeChangeBudgetPreview:
+    budget_max_files: int = 0
+    proposed_files: int = 0
+    within_budget: bool = True
+    would_exceed_budget: bool = False
+    action: str = "allow"
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_change_budget_preview(
+    *,
+    budget: NativeChangeBudget | None,
+    proposal: NativePatchProposal | None,
+) -> NativeChangeBudgetPreview:
+    max_files = budget.max_files if budget is not None else 0
+    proposed_files = proposal.file_count if proposal is not None else 0
+
+    if max_files <= 0:
+        return NativeChangeBudgetPreview(
+            budget_max_files=max_files,
+            proposed_files=proposed_files,
+            within_budget=True,
+            would_exceed_budget=False,
+            action="allow",
+            warnings=["change budget missing or invalid"],
+        )
+
+    would_exceed = proposed_files > max_files
+
+    return NativeChangeBudgetPreview(
+        budget_max_files=max_files,
+        proposed_files=proposed_files,
+        within_budget=not would_exceed,
+        would_exceed_budget=would_exceed,
+        action="warn" if would_exceed else "allow",
+        warnings=(
+            [f"proposal has {proposed_files} files but budget allows {max_files}"]
+            if would_exceed
+            else []
+        ),
+    )
+
+
 def render_native_change_budget(budget: NativeChangeBudget | None) -> str:
     if budget is None:
         return ""

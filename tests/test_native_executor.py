@@ -13,6 +13,7 @@ from openshard.cli.main import cli
 from openshard.native.context import (
     CompactRunState,
     NativeChangeBudget,
+    NativeChangeBudgetPreview,
     NativeCommandPolicyPreview,
     NativeContextBudget,
     NativeContextPacket,
@@ -30,6 +31,7 @@ from openshard.native.context import (
     build_compact_run_state,
     build_initial_context_budget,
     build_native_change_budget,
+    build_native_change_budget_preview,
     build_native_command_policy_preview,
     build_native_context_quality_advisory,
     build_native_context_quality_score,
@@ -5033,3 +5035,137 @@ class TestNativeChangeBudget(unittest.TestCase):
         self.assertEqual(cb["level"], "good")
         self.assertEqual(cb["max_files"], 3)
         self.assertEqual(cb["max_change_size"], "normal")
+
+
+class TestNativeChangeBudgetPreview(unittest.TestCase):
+    """Tests for NativeChangeBudgetPreview, build_native_change_budget_preview, and executor integration."""
+
+    def _make_executor(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor, fake_gen
+
+    def _budget(self, max_files: int) -> NativeChangeBudget:
+        return NativeChangeBudget(
+            level="good",
+            max_files=max_files,
+            max_change_size="normal",
+            guidance="",
+            warnings=[],
+        )
+
+    def _proposal(self, file_count: int) -> NativePatchProposal:
+        return NativePatchProposal(
+            file_count=file_count,
+            files=[f"file{i}.py" for i in range(file_count)],
+            change_types=["modify"] * file_count,
+            summaries=[],
+            warnings=[],
+        )
+
+    # --- builder unit tests ---
+
+    def test_builder_missing_budget_allows_with_warning(self):
+        preview = build_native_change_budget_preview(budget=None, proposal=self._proposal(2))
+        self.assertEqual(preview.action, "allow")
+        self.assertTrue(len(preview.warnings) > 0)
+
+    def test_builder_missing_proposal_zero_files(self):
+        preview = build_native_change_budget_preview(budget=self._budget(3), proposal=None)
+        self.assertEqual(preview.proposed_files, 0)
+
+    def test_builder_within_budget_allows(self):
+        preview = build_native_change_budget_preview(budget=self._budget(3), proposal=self._proposal(1))
+        self.assertTrue(preview.within_budget)
+        self.assertFalse(preview.would_exceed_budget)
+        self.assertEqual(preview.action, "allow")
+        self.assertEqual(preview.warnings, [])
+
+    def test_builder_exceeding_budget_warns(self):
+        preview = build_native_change_budget_preview(budget=self._budget(2), proposal=self._proposal(4))
+        self.assertFalse(preview.within_budget)
+        self.assertTrue(preview.would_exceed_budget)
+        self.assertEqual(preview.action, "warn")
+        self.assertTrue(len(preview.warnings) > 0)
+
+    def test_builder_counts_only_no_content(self):
+        preview = build_native_change_budget_preview(budget=self._budget(2), proposal=self._proposal(4))
+        self.assertIsInstance(preview, NativeChangeBudgetPreview)
+        self.assertFalse(hasattr(preview, "files"))
+        self.assertFalse(hasattr(preview, "diff"))
+        self.assertFalse(hasattr(preview, "content"))
+
+    # --- executor integration tests ---
+
+    def test_executor_stores_budget_preview(self):
+        executor, _ = self._make_executor()
+        executor.native_meta.change_budget = self._budget(3)
+        executor.native_meta.patch_proposal = self._proposal(1)
+        preview = executor.build_change_budget_preview()
+        self.assertIsInstance(preview, NativeChangeBudgetPreview)
+        self.assertIsNotNone(executor.native_meta.change_budget_preview)
+        self.assertIs(executor.native_meta.change_budget_preview, preview)
+
+    def test_executor_records_budget_preview_loop_step(self):
+        executor, _ = self._make_executor()
+        executor.native_meta.change_budget = self._budget(3)
+        executor.native_meta.patch_proposal = self._proposal(2)
+        executor.build_change_budget_preview()
+        phases = executor.native_meta.native_loop_trace.phases()
+        self.assertIn("change_budget_preview", phases)
+
+    # --- pipeline tests ---
+
+    def test_pipeline_calls_budget_preview_after_patch_proposal(self):
+        native_mock = _make_native_mock()
+        native_mock.native_meta.change_budget = self._budget(3)
+        TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        native_mock.build_change_budget_preview.assert_called()
+
+    def test_pipeline_serializes_budget_preview(self):
+        native_mock = _make_native_mock()
+        native_mock.native_meta.change_budget_preview = NativeChangeBudgetPreview(
+            budget_max_files=3,
+            proposed_files=1,
+            within_budget=True,
+            would_exceed_budget=False,
+            action="allow",
+            warnings=[],
+        )
+        _, _, logged = TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertIn("change_budget_preview", logged)
+        cbp = logged["change_budget_preview"]
+        self.assertIsNotNone(cbp)
+        self.assertEqual(cbp["budget_max_files"], 3)
+        self.assertEqual(cbp["proposed_files"], 1)
+        self.assertEqual(cbp["action"], "allow")
+
+    def test_budget_preview_does_not_block_write(self):
+        from openshard.execution.generator import ChangedFile
+        native_mock = _make_native_mock()
+        safe_file = ChangedFile(
+            path="out.txt", content="ok", change_type="create", summary="created"
+        )
+        r = MagicMock()
+        r.files = [safe_file]
+        r.summary = "done"
+        r.notes = []
+        r.usage = None
+        native_mock.generate.return_value = r
+        native_mock.native_meta.change_budget_preview = NativeChangeBudgetPreview(
+            budget_max_files=1,
+            proposed_files=5,
+            within_budget=False,
+            would_exceed_budget=True,
+            action="warn",
+            warnings=["proposal has 5 files but budget allows 1"],
+        )
+        result, _, _ = TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertEqual(result.exit_code, 0)

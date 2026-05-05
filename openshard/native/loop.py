@@ -17,6 +17,7 @@ NativeLoopPhase = Literal[
     "backend_proof",
     "generation",
     "proposal",
+    "change_budget_preview",
     "write",
     "command_policy",
     "verification",
