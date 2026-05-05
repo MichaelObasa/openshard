@@ -429,6 +429,7 @@ class NativeContextPacket:
     backend_available: bool = True
     backend_proof_mode: str = ""
     compact_paths: list[str] = field(default_factory=list)
+    file_context_files: int = 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -441,6 +442,7 @@ def build_native_context_packet(
     native_backend: str = "builtin",
     native_backend_available: bool = True,
     native_backend_proof: dict | None = None,
+    file_context_files: int = 0,
 ) -> NativeContextPacket:
     sources: list[str] = []
     warnings: list[str] = []
@@ -490,6 +492,7 @@ def build_native_context_packet(
         backend_available=native_backend_available,
         backend_proof_mode=proof_mode,
         compact_paths=compact_paths,
+        file_context_files=file_context_files,
         warnings=warnings,
     )
 
@@ -544,3 +547,63 @@ def render_native_context_packet(packet: NativeContextPacket | None) -> str:
             lines.append(f"  - {warning}")
 
     return "\n".join(lines)
+
+
+@dataclass
+class NativeContextQualityScore:
+    score: int = 0
+    max_score: int = 100
+    level: str = "unknown"  # weak | fair | good | strong
+    reasons: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_context_quality_score(packet: NativeContextPacket) -> NativeContextQualityScore:
+    score = 0
+    reasons: list[str] = []
+    warnings: list[str] = []
+
+    if "repo_context" in packet.sources:
+        score += 20
+        reasons.append("repo_context")
+    if "read_search" in packet.sources:
+        score += 15
+        reasons.append("read_search")
+    if packet.compact_paths:
+        score += 15
+        reasons.append("compact_paths")
+    if packet.selected_skills:
+        score += 15
+        reasons.append("selected_skills")
+    if packet.backend:
+        score += 10
+        reasons.append("backend")
+    if packet.repo_stack:
+        score += 10
+        reasons.append("repo_stack")
+    if packet.test_marker_count > 0:
+        score += 10
+        reasons.append("test_markers")
+    if packet.file_context_files > 0:
+        score += 5
+        reasons.append("file_context")
+
+    score = min(score, 100)
+
+    if score >= 80:
+        level = "strong"
+    elif score >= 60:
+        level = "good"
+    elif score >= 35:
+        level = "fair"
+    else:
+        level = "weak"
+        warnings.append("context packet may be insufficient for generation")
+
+    return NativeContextQualityScore(
+        score=score,
+        max_score=100,
+        level=level,
+        reasons=reasons,
+        warnings=warnings,
+    )

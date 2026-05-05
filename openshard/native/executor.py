@@ -12,6 +12,7 @@ from openshard.native.context import (
     NativeCommandPolicyPreview,
     NativeContextBudget,
     NativeContextPacket,
+    NativeContextQualityScore,
     NativeDiffReview,
     NativeEvidence,
     NativeFileContext,
@@ -25,6 +26,7 @@ from openshard.native.context import (
     build_initial_context_budget,
     build_native_command_policy_preview,
     build_native_context_packet,
+    build_native_context_quality_score,
     build_native_diff_review,
     build_native_final_report,
     build_native_patch_proposal,
@@ -75,6 +77,7 @@ class NativeRunMeta:
     command_policy_preview: NativeCommandPolicyPreview | None = None
     file_context: NativeFileContext | None = None
     context_packet: NativeContextPacket | None = None
+    context_quality_score: NativeContextQualityScore | None = None
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
     "the", "a", "an", "in", "on", "at", "to", "for", "of",
     "is", "are", "was", "were", "be", "been", "being",
@@ -580,6 +583,7 @@ class NativeAgentExecutor:
         return proposal
 
     def build_context_packet(self, task: str) -> NativeContextPacket:
+        file_ctx = self.native_meta.file_context
         packet = build_native_context_packet(
             task=task,
             repo_context_summary=self.native_meta.repo_context_summary,
@@ -588,6 +592,7 @@ class NativeAgentExecutor:
             native_backend=self.native_meta.native_backend,
             native_backend_available=self.native_meta.native_backend_available,
             native_backend_proof=self.native_meta.native_backend_proof,
+            file_context_files=file_ctx.files_read if file_ctx is not None else 0,
         )
         self.native_meta.context_packet = packet
         self.record_loop_step(
@@ -599,6 +604,24 @@ class NativeAgentExecutor:
             },
         )
         return packet
+
+    def build_context_quality_score(self) -> NativeContextQualityScore:
+        packet = self.native_meta.context_packet
+        if packet is None:
+            packet = NativeContextPacket()
+        score = build_native_context_quality_score(packet)
+        self.native_meta.context_quality_score = score
+        self.record_loop_step(
+            "context_quality",
+            summary=f"{score.level} {score.score}/{score.max_score}",
+            metadata={
+                "score": score.score,
+                "max_score": score.max_score,
+                "level": score.level,
+                "reasons": score.reasons,
+            },
+        )
+        return score
 
     def generate(
         self,
@@ -616,6 +639,7 @@ class NativeAgentExecutor:
         matches = match_builtin_skills(task, repo_facts=repo_facts)
         self.native_meta.selected_skills = selected_skill_names(matches)
         self.build_context_packet(task)
+        self.build_context_quality_score()
 
         self.native_meta.plan = _build_native_plan(
             task,

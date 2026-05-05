@@ -14,6 +14,8 @@ from openshard.native.context import (
     CompactRunState,
     NativeCommandPolicyPreview,
     NativeContextBudget,
+    NativeContextPacket,
+    NativeContextQualityScore,
     NativeDiffReview,
     NativeEvidence,
     NativeFileSnippet,
@@ -26,6 +28,7 @@ from openshard.native.context import (
     build_compact_run_state,
     build_initial_context_budget,
     build_native_command_policy_preview,
+    build_native_context_quality_score,
     build_native_diff_review,
     build_native_final_report,
     build_native_patch_proposal,
@@ -4627,3 +4630,104 @@ class TestNativeFileContext(unittest.TestCase):
         self.assertIsNotNone(fc)
         self.assertEqual(fc.files_read, 0)
         self.assertTrue(any("tests/" in w for w in fc.warnings))
+
+
+class TestNativeContextQualityScore(unittest.TestCase):
+
+    def test_empty_packet_gives_weak_score(self):
+        packet = NativeContextPacket()
+        result = build_native_context_quality_score(packet)
+        self.assertEqual(result.level, "weak")
+        self.assertLess(result.score, 35)
+
+    def test_strong_packet_gives_high_score(self):
+        packet = NativeContextPacket(
+            sources=["repo_context", "read_search", "skills"],
+            repo_stack=["python"],
+            test_marker_count=2,
+            selected_skills=["testing"],
+            backend="builtin",
+            compact_paths=["file:src/foo.py"],
+            file_context_files=1,
+        )
+        result = build_native_context_quality_score(packet)
+        self.assertGreaterEqual(result.score, 80)
+        self.assertEqual(result.level, "strong")
+
+    def test_reasons_are_compact_strings(self):
+        packet = NativeContextPacket(
+            sources=["repo_context"],
+            backend="builtin",
+        )
+        result = build_native_context_quality_score(packet)
+        for reason in result.reasons:
+            self.assertIsInstance(reason, str)
+            self.assertLess(len(reason), 50)
+
+    def test_warnings_is_list_no_raw_content(self):
+        packet = NativeContextPacket()
+        result = build_native_context_quality_score(packet)
+        self.assertIsInstance(result.warnings, list)
+        for w in result.warnings:
+            self.assertIsInstance(w, str)
+
+    def test_score_capped_at_100(self):
+        packet = NativeContextPacket(
+            sources=["repo_context", "read_search", "skills"],
+            repo_stack=["python", "django"],
+            test_marker_count=3,
+            selected_skills=["testing", "linting"],
+            backend="deepagents",
+            compact_paths=["file:a.py", "file:b.py"],
+            file_context_files=2,
+        )
+        result = build_native_context_quality_score(packet)
+        self.assertLessEqual(result.score, 100)
+
+    def test_native_run_meta_has_context_quality_score_field(self):
+        meta = NativeRunMeta()
+        self.assertIsNone(meta.context_quality_score)
+
+    def test_file_context_score_uses_file_context_files_not_compact_paths(self):
+        packet_with_file_path_but_zero_count = NativeContextPacket(
+            compact_paths=["file:src/foo.py"],
+            file_context_files=0,
+        )
+        result = build_native_context_quality_score(packet_with_file_path_but_zero_count)
+        self.assertNotIn("file_context", result.reasons)
+
+        packet_with_count_but_no_file_prefix = NativeContextPacket(
+            compact_paths=["test-marker:tests/"],
+            file_context_files=1,
+        )
+        result2 = build_native_context_quality_score(packet_with_count_but_no_file_prefix)
+        self.assertIn("file_context", result2.reasons)
+
+    def _make_executor(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor
+
+    def test_build_context_quality_score_sets_meta_field(self):
+        executor = self._make_executor()
+        executor.native_meta.context_packet = NativeContextPacket(
+            sources=["repo_context"],
+            backend="builtin",
+        )
+        score = executor.build_context_quality_score()
+        self.assertIsNotNone(executor.native_meta.context_quality_score)
+        self.assertIsInstance(score, NativeContextQualityScore)
+
+    def test_build_context_quality_score_works_without_packet(self):
+        executor = self._make_executor()
+        executor.native_meta.context_packet = None
+        score = executor.build_context_quality_score()
+        self.assertEqual(score.level, "weak")
+
+    def test_loop_trace_records_context_quality_phase(self):
+        executor = self._make_executor()
+        executor.native_meta.context_packet = NativeContextPacket()
+        executor.build_context_quality_score()
+        phases = executor.native_meta.native_loop_trace.phases()
+        self.assertIn("context_quality", phases)
