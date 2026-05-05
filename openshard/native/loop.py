@@ -10,6 +10,7 @@ NativeLoopPhase = Literal[
     "read_search",
     "file_context",
     "context_packet",
+    "context_quality",
     "plan",
     "backend_proof",
     "generation",

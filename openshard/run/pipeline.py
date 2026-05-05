@@ -1034,6 +1034,11 @@ class RunPipeline:
                     if _native_meta is not None and _native_meta.file_context is not None
                     else None
                 ),
+                "context_quality_score": (
+                    asdict(_native_meta.context_quality_score)
+                    if _native_meta is not None and _native_meta.context_quality_score is not None
+                    else None
+                ),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,

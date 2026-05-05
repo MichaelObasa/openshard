@@ -450,6 +450,14 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
             lines.append(f"  context packet: {_cp_sources} sources, {_cp_paths} paths")
             has_content = True
 
+    cqs = getattr(native_meta, "context_quality_score", None)
+    if cqs is not None:
+        _cqs_level = getattr(cqs, "level", "unknown")
+        _cqs_score = getattr(cqs, "score", 0)
+        _cqs_max = getattr(cqs, "max_score", 100)
+        lines.append(f"  context quality: {_cqs_level} {_cqs_score}/{_cqs_max}")
+        has_content = True
+
     patch_proposal = getattr(native_meta, "patch_proposal", None)
     if patch_proposal is not None:
         _count = getattr(patch_proposal, "file_count", 0)
@@ -539,8 +547,8 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "patch_proposal": entry.get("patch_proposal"),
         "command_policy_preview": entry.get("command_policy_preview"),
         "context_packet": entry.get("context_packet"),
-
         "file_context": entry.get("file_context"),
+        "context_quality_score": entry.get("context_quality_score"),
     })
 
 

@@ -840,5 +840,64 @@ class TestNativeFileContextRendering(unittest.TestCase):
         except Exception as exc:
             self.fail(f"Rendering raised {exc}")
         self.assertIsInstance(out, str)
+
+
+class TestContextQualityScoreRendering(unittest.TestCase):
+
+    def _base_entry(self):
+        return {
+            "workflow": "native",
+            "executor": "native",
+            "native_loop_steps": [],
+            "native_loop_trace": [],
+        }
+
+    def test_context_quality_line_rendered(self):
+        entry = self._base_entry()
+        entry["context_quality_score"] = {
+            "score": 70,
+            "max_score": 100,
+            "level": "good",
+            "reasons": ["repo_context", "read_search"],
+            "warnings": [],
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("context quality: good 70/100", out)
+
+    def test_context_quality_absent_does_not_crash(self):
+        entry = self._base_entry()
+        try:
+            out = _render(entry, detail="more")
+        except Exception as exc:
+            self.fail(f"Rendering raised {exc}")
+        self.assertNotIn("context quality:", out)
+
+    def test_context_quality_none_does_not_crash(self):
+        entry = self._base_entry()
+        entry["context_quality_score"] = None
+        try:
+            out = _render(entry, detail="more")
+        except Exception as exc:
+            self.fail(f"Rendering raised {exc}")
+        self.assertNotIn("context quality:", out)
+
+    def test_native_meta_from_entry_populates_context_quality_score(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+        entry = self._base_entry()
+        entry["context_quality_score"] = {
+            "score": 45,
+            "max_score": 100,
+            "level": "fair",
+            "reasons": ["backend"],
+            "warnings": [],
+        }
+        meta = _native_meta_from_entry(entry)
+        self.assertIsNotNone(meta)
+        cqs = getattr(meta, "context_quality_score", None)
+        self.assertIsNotNone(cqs)
+        self.assertEqual(getattr(cqs, "score", None), 45)
+        self.assertEqual(getattr(cqs, "level", None), "fair")
+
+
 if __name__ == "__main__":
     unittest.main()
