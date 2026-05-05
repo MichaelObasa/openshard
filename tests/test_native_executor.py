@@ -35,6 +35,7 @@ from openshard.native.context import (
     build_native_final_report,
     build_native_patch_proposal,
     build_native_verification_command_summary,
+    render_native_context_quality_advisory,
     render_native_evidence,
     render_native_observation,
     render_native_plan,
@@ -4832,3 +4833,67 @@ class TestNativeContextQualityAdvisory(unittest.TestCase):
         self.assertIsNotNone(cqa)
         self.assertEqual(cqa["level"], "good")
         self.assertFalse(cqa["should_block"])
+
+
+class TestNativeContextQualityAdvisoryUse(unittest.TestCase):
+    """Tests for render_native_context_quality_advisory and its injection into generate()."""
+
+    def _make_executor(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor, fake_gen
+
+    def _advisory(self, level: str = "weak") -> NativeContextQualityAdvisory:
+        return NativeContextQualityAdvisory(
+            level=level,
+            recommendation=f"context is {level}; prefer smaller changes",
+            should_block=False,
+            warnings=[f"{level} warning text"],
+        )
+
+    def test_render_none_returns_empty_string(self):
+        self.assertEqual(render_native_context_quality_advisory(None), "")
+
+    def test_render_includes_level_recommendation_and_should_block(self):
+        advisory = self._advisory("fair")
+        rendered = render_native_context_quality_advisory(advisory)
+        self.assertIn("level: fair", rendered)
+        self.assertIn("recommendation:", rendered)
+        self.assertIn("should block:", rendered)
+
+    def test_render_does_not_include_warnings(self):
+        advisory = self._advisory("weak")
+        rendered = render_native_context_quality_advisory(advisory)
+        for warning in advisory.warnings:
+            self.assertNotIn(warning, rendered)
+
+    def test_generate_passes_advisory_to_generator_context(self):
+        executor, fake_gen = self._make_executor()
+        executor.generate("add a docstring")
+        _, kwargs = fake_gen.generate.call_args
+        self.assertIn("OpenShard Native context advisory:", kwargs["skills_context"])
+
+    def test_generate_preserves_existing_skills_context(self):
+        executor, fake_gen = self._make_executor()
+        executor.generate("add a docstring", skills_context="caller hint")
+        _, kwargs = fake_gen.generate.call_args
+        self.assertIn("caller hint", kwargs["skills_context"])
+        self.assertIn("OpenShard Native context advisory:", kwargs["skills_context"])
+
+    def test_advisory_context_does_not_include_raw_content(self):
+        forbidden = [
+            "SECRET_RAW_FILE_CONTENT",
+            "RAW_DIFF",
+            "STDERR",
+            "CHAIN_OF_THOUGHT",
+        ]
+        advisory = NativeContextQualityAdvisory(
+            level="weak",
+            recommendation="context is weak; prefer smaller changes",
+            should_block=False,
+            warnings=["SECRET_RAW_FILE_CONTENT", "RAW_DIFF", "STDERR", "CHAIN_OF_THOUGHT"],
+        )
+        rendered = render_native_context_quality_advisory(advisory)
+        for token in forbidden:
+            self.assertNotIn(token, rendered)

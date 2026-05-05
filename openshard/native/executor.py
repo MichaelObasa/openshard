@@ -34,6 +34,7 @@ from openshard.native.context import (
     build_native_patch_proposal,
     build_native_verification_command_summary,
     render_native_context_packet,
+    render_native_context_quality_advisory,
     render_native_evidence,
     render_native_observation,
     render_native_plan,
@@ -688,6 +689,12 @@ class NativeAgentExecutor:
         packet_context = render_native_context_packet(self.native_meta.context_packet)
         if packet_context:
             context_parts.append(packet_context)
+
+        advisory_context = render_native_context_quality_advisory(
+            self.native_meta.context_quality_advisory
+        )
+        if advisory_context:
+            context_parts.append(advisory_context)
 
         if skills_context:
             context_parts.append(skills_context)

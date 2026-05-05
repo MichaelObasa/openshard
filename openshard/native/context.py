@@ -603,6 +603,22 @@ def build_native_context_quality_advisory(
     )
 
 
+def render_native_context_quality_advisory(
+    advisory: NativeContextQualityAdvisory | None,
+) -> str:
+    if advisory is None:
+        return ""
+
+    lines = ["OpenShard Native context advisory:"]
+    if advisory.level:
+        lines.append(f"- level: {advisory.level}")
+    if advisory.recommendation:
+        lines.append(f"- recommendation: {advisory.recommendation}")
+    lines.append(f"- should block: {str(advisory.should_block).lower()}")
+
+    return "\n".join(lines)
+
+
 def build_native_context_quality_score(packet: NativeContextPacket) -> NativeContextQualityScore:
     score = 0
     reasons: list[str] = []
