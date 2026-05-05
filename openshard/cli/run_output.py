@@ -418,6 +418,12 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         lines.append(f"  read/search: {len(read_search_findings)} findings")
         has_content = True
 
+    patch_proposal = getattr(native_meta, "patch_proposal", None)
+    if patch_proposal is not None:
+        _count = getattr(patch_proposal, "file_count", 0)
+        lines.append(f"  proposal: {_count} files")
+        has_content = True
+
     if detail == "full":
         loop_trace = getattr(native_meta, "native_loop_trace", None)
         if loop_trace is None:
@@ -489,6 +495,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "native_backend_notes": entry.get("native_backend_notes", []),
         "native_backend_proof": entry.get("native_backend_proof"),
         "read_search_findings": entry.get("read_search_findings", []),
+        "patch_proposal": entry.get("patch_proposal"),
     })
 
 

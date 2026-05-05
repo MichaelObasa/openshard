@@ -14,11 +14,13 @@ from openshard.native.context import (
     NativeFileSnippet,
     NativeFinalReport,
     NativeObservation,
+    NativePatchProposal,
     NativePlan,
     NativeVerificationLoop,
     build_initial_context_budget,
     build_native_diff_review,
     build_native_final_report,
+    build_native_patch_proposal,
     render_native_evidence,
     render_native_observation,
     render_native_plan,
@@ -59,6 +61,7 @@ class NativeRunMeta:
     native_backend_notes: list[str] = field(default_factory=list)
     native_backend_proof: dict | None = None
     read_search_findings: list[str] = field(default_factory=list)
+    patch_proposal: NativePatchProposal | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -437,6 +440,19 @@ class NativeAgentExecutor:
         self.native_meta.final_report = report
         self.record_loop_step("final_report")
         return report
+
+    def build_patch_proposal(self, files: list[Any]) -> NativePatchProposal:
+        proposal = build_native_patch_proposal(files)
+        self.native_meta.patch_proposal = proposal
+        self.record_loop_step(
+            "proposal",
+            summary=f"{proposal.file_count} proposed file changes",
+            metadata={
+                "files": proposal.file_count,
+                "change_types": len(set(proposal.change_types)),
+            },
+        )
+        return proposal
 
     def generate(
         self,

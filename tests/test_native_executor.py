@@ -18,12 +18,14 @@ from openshard.native.context import (
     NativeFileSnippet,
     NativeFinalReport,
     NativeObservation,
+    NativePatchProposal,
     NativePlan,
     NativeVerificationLoop,
     build_compact_run_state,
     build_initial_context_budget,
     build_native_diff_review,
     build_native_final_report,
+    build_native_patch_proposal,
     render_native_evidence,
     render_native_observation,
     render_native_plan,
@@ -2976,6 +2978,140 @@ def _render_native_demo_block_str(meta: NativeRunMeta | None) -> str:
         _print_native_demo_block(meta)
 
     return CliRunner().invoke(cmd).output
+
+
+class TestNativePatchProposal(unittest.TestCase):
+    """Unit tests for NativePatchProposal builder and executor integration."""
+
+    def _make_file(self, path, change_type="update", summary="a change", content="body"):
+        f = MagicMock()
+        f.path = path
+        f.change_type = change_type
+        f.summary = summary
+        f.content = content
+        return f
+
+    def test_builder_defaults_empty(self):
+        proposal = build_native_patch_proposal([])
+        self.assertEqual(proposal.file_count, 0)
+        self.assertEqual(proposal.files, [])
+        self.assertEqual(proposal.change_types, [])
+        self.assertEqual(proposal.summaries, [])
+        self.assertEqual(proposal.warnings, [])
+
+    def test_builder_counts_files(self):
+        files = [self._make_file("a.py"), self._make_file("b.py")]
+        proposal = build_native_patch_proposal(files)
+        self.assertEqual(proposal.file_count, 2)
+
+    def test_builder_records_paths(self):
+        files = [self._make_file("src/foo.py"), self._make_file("src/bar.py")]
+        proposal = build_native_patch_proposal(files)
+        self.assertEqual(proposal.files, ["src/foo.py", "src/bar.py"])
+
+    def test_builder_records_change_types(self):
+        files = [self._make_file("a.py", change_type="create"), self._make_file("b.py", change_type="update")]
+        proposal = build_native_patch_proposal(files)
+        self.assertEqual(proposal.change_types, ["create", "update"])
+
+    def test_builder_records_summaries(self):
+        files = [self._make_file("a.py", summary="added handler"), self._make_file("b.py", summary="fixed bug")]
+        proposal = build_native_patch_proposal(files)
+        self.assertEqual(proposal.summaries, ["added handler", "fixed bug"])
+
+    def test_builder_does_not_store_content(self):
+        from dataclasses import asdict
+        files = [self._make_file("a.py", content="secret content")]
+        proposal = build_native_patch_proposal(files)
+        d = asdict(proposal)
+        self.assertNotIn("content", d)
+
+    def test_executor_build_patch_proposal_stores_meta(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen), \
+             patch("openshard.native.executor.NativeToolRunner"):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=None)
+        files = [self._make_file("x.py"), self._make_file("y.py")]
+        executor.build_patch_proposal(files)
+        self.assertIsNotNone(executor.native_meta.patch_proposal)
+        self.assertEqual(executor.native_meta.patch_proposal.file_count, 2)
+
+    def test_executor_build_patch_proposal_records_loop_step(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen), \
+             patch("openshard.native.executor.NativeToolRunner"):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=None)
+        executor.build_patch_proposal([self._make_file("a.py")])
+        self.assertIn("proposal", executor.native_meta.native_loop_steps)
+
+    def test_pipeline_calls_build_patch_proposal_on_native_write(self):
+        from openshard.execution.generator import ChangedFile
+        safe_file = ChangedFile(path="out.txt", content="ok", change_type="create", summary="created")
+        native_mock = _make_native_mock()
+        r = MagicMock()
+        r.files = [safe_file]
+        r.summary = "done"
+        r.notes = []
+        r.usage = None
+        native_mock.generate.return_value = r
+
+        plan = _safe_plan()
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.build_verification_plan", return_value=plan), \
+                 patch("openshard.run.pipeline._run_verification_plan", return_value=(0, "")), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                result = runner.invoke(cli, ["run", "--workflow", "native", "--write", "fix the bug"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        native_mock.build_patch_proposal.assert_called_once()
+
+    def test_metadata_serializes_patch_proposal(self):
+        from openshard.execution.generator import ChangedFile
+        safe_file = ChangedFile(path="out.txt", content="ok", change_type="create", summary="created")
+        native_mock = _make_native_mock()
+
+        def _set_proposal(*_a, **_kw):
+            native_mock.native_meta.patch_proposal = NativePatchProposal(
+                file_count=1, files=["out.txt"], change_types=["create"], summaries=["created"]
+            )
+
+        native_mock.build_patch_proposal.side_effect = _set_proposal
+        r = MagicMock()
+        r.files = [safe_file]
+        r.summary = "done"
+        r.notes = []
+        r.usage = None
+        native_mock.generate.return_value = r
+        logged = {}
+
+        def _capture_log(*a, **kw):
+            logged.update(kw.get("extra_metadata") or {})
+
+        plan = _safe_plan()
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run", side_effect=_capture_log), \
+                 patch("openshard.run.pipeline.build_verification_plan", return_value=plan), \
+                 patch("openshard.run.pipeline._run_verification_plan", return_value=(0, "")), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                result = runner.invoke(cli, ["run", "--workflow", "native", "--write", "fix the bug"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("patch_proposal", logged)
+        pp = logged["patch_proposal"]
+        self.assertIsNotNone(pp)
+        self.assertIsInstance(pp, dict)
+        self.assertEqual(pp["file_count"], 1)
 
 
 class TestNativeSummaryRenderer(unittest.TestCase):
