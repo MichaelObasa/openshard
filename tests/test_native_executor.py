@@ -1028,6 +1028,165 @@ class TestRenderNativeObservation(unittest.TestCase):
         self.assertIn("search matches: 0", result)
 
 
+class TestReadSearchLoop(unittest.TestCase):
+    """Tests for NativeAgentExecutor._run_read_search_loop()."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor
+
+    def test_returns_early_without_runner(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=Path("."))
+        executor._runner = None
+        executor._run_read_search_loop("fix the failing test")
+        self.assertEqual(executor.native_meta.read_search_findings, [])
+        self.assertNotIn("read_search", executor.native_meta.native_loop_steps)
+
+    def test_no_runner_guard_prevents_read_search_step(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=Path("."))
+        executor._runner = None
+        executor._run_read_search_loop("add a cli argument")
+        self.assertNotIn("read_search", executor.native_meta.native_loop_steps)
+        self.assertEqual(executor.native_meta.read_search_findings, [])
+
+    def test_loop_step_recorded_with_runner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_read_search_loop("fix the bug")
+        self.assertIn("read_search", executor.native_meta.native_loop_steps)
+
+    def test_strategy_test_for_test_keyword(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_read_search_loop("fix the failing test")
+        event = next(e for e in executor.native_meta.native_loop_trace.events if e.phase == "read_search")
+        self.assertEqual(event.metadata["strategy"], "test")
+
+    def test_strategy_test_for_pytest_keyword(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_read_search_loop("run pytest suite")
+        event = next(e for e in executor.native_meta.native_loop_trace.events if e.phase == "read_search")
+        self.assertEqual(event.metadata["strategy"], "test")
+
+    def test_strategy_cli_for_cli_keyword(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_read_search_loop("add a cli argument")
+        event = next(e for e in executor.native_meta.native_loop_trace.events if e.phase == "read_search")
+        self.assertEqual(event.metadata["strategy"], "cli")
+
+    def test_strategy_default_for_generic_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_read_search_loop("refactor the payment module")
+        event = next(e for e in executor.native_meta.native_loop_trace.events if e.phase == "read_search")
+        self.assertEqual(event.metadata["strategy"], "default")
+
+    def test_findings_bounded_by_max(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tests").mkdir()
+            for i in range(10):
+                (root / "tests" / f"test_mod{i}.py").write_text(f"def test_{i}(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_preflight()
+            executor._run_read_search_loop("fix the failing test")
+        self.assertLessEqual(len(executor.native_meta.read_search_findings), 5)
+
+    def test_steps_bounded_by_max(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor = self._make_executor_with_repo(root)
+            executor._run_preflight()
+            executor._run_read_search_loop("fix the bug")
+        event = next(e for e in executor.native_meta.native_loop_trace.events if e.phase == "read_search")
+        self.assertLessEqual(event.metadata["steps"], 3)
+
+    def test_findings_contain_test_marker_labels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tests").mkdir()
+            (root / "tests" / "test_auth.py").write_text("def test_login(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_preflight()
+            executor._run_read_search_loop("fix the failing test")
+        any_test_marker = any(
+            f.startswith("test-marker:") for f in executor.native_meta.read_search_findings
+        )
+        self.assertTrue(any_test_marker)
+
+    def test_no_raw_content_in_trace_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("SECRET_KEY = 'abc123'\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_preflight()
+            executor._run_read_search_loop("fix the bug")
+        event = next(e for e in executor.native_meta.native_loop_trace.events if e.phase == "read_search")
+        meta_str = str(event.metadata)
+        self.assertNotIn("SECRET_KEY", meta_str)
+        self.assertNotIn("abc123", meta_str)
+
+    def test_generate_calls_read_search_loop(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            fake_gen = _make_generator_mock()
+            with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+                executor = NativeAgentExecutor(provider=MagicMock(), repo_root=root)
+            executor.generate("fix the bug")
+        self.assertIn("read_search", executor.native_meta.native_loop_steps)
+
+    def test_read_search_findings_default_empty(self):
+        meta = NativeRunMeta()
+        self.assertEqual(meta.read_search_findings, [])
+
+    def test_truncated_flag_set_when_findings_overflow(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tests").mkdir()
+            for i in range(20):
+                (root / "tests" / f"test_file{i}.py").write_text(f"def test_{i}(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_preflight()
+            executor._run_read_search_loop("fix the failing test")
+        event = next(e for e in executor.native_meta.native_loop_trace.events if e.phase == "read_search")
+        if len(executor.native_meta.read_search_findings) == 5:
+            self.assertIn("truncated", event.metadata)
+
+    def test_metadata_contains_counts_not_raw_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_read_search_loop("fix the bug")
+        event = next(e for e in executor.native_meta.native_loop_trace.events if e.phase == "read_search")
+        self.assertIn("steps", event.metadata)
+        self.assertIn("findings", event.metadata)
+        self.assertIn("files_checked", event.metadata)
+        self.assertIn("matched_terms", event.metadata)
+        self.assertIn("truncated", event.metadata)
+        self.assertIn("strategy", event.metadata)
+        self.assertIsInstance(event.metadata["steps"], int)
+        self.assertIsInstance(event.metadata["findings"], int)
+        self.assertIsInstance(event.metadata["files_checked"], int)
+        self.assertIsInstance(event.metadata["matched_terms"], int)
+        self.assertIsInstance(event.metadata["truncated"], bool)
+        self.assertIsInstance(event.metadata["strategy"], str)
+
+
 class TestNativeObservationInjection(unittest.TestCase):
     """Tests that render_native_observation output is injected into generate()."""
 

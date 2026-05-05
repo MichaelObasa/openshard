@@ -498,5 +498,65 @@ class TestNativeLoopTraceRendering(unittest.TestCase):
             self.assertEqual(len(getattr(raw_trace, "events", [])), 1)
 
 
+class TestReadSearchFindingsRendering(unittest.TestCase):
+    """Tests for read/search: N findings line in [native] block."""
+
+    def _entry_with_findings(self, findings: list[str]) -> dict:
+        entry = _native_entry()
+        entry["read_search_findings"] = findings
+        entry["native_loop_steps"] = [
+            "repo_context", "observation", "read_search", "plan", "generation"
+        ]
+        return entry
+
+    def test_read_search_line_shown_when_findings_present(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_findings(["test-marker:tests/", "file:src/auth.py"])
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        self.assertIn("  read/search: 2 findings", lines)
+
+    def test_read_search_line_absent_when_findings_empty(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_findings([])
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertNotIn("read/search:", joined)
+
+    def test_read_search_line_absent_when_field_missing(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = _native_entry()
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertNotIn("read/search:", joined)
+
+    def test_read_search_count_reflects_actual_list_length(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        findings = [
+            "test-marker:tests/a.py",
+            "test-marker:tests/b.py",
+            "package:pyproject.toml",
+            "file:src/main.py",
+            "file:src/utils.py",
+        ]
+        entry = self._entry_with_findings(findings)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        self.assertIn("  read/search: 5 findings", lines)
+
+    def test_render_block_via_full_render_shows_read_search(self):
+        entry = self._entry_with_findings(["file:src/main.py"])
+        out = _render(entry, detail="more")
+        self.assertIn("read/search: 1 findings", out)
+
+    def test_raw_finding_labels_not_shown_in_default_block(self):
+        entry = self._entry_with_findings(["test-marker:tests/secret_config.py"])
+        out = _render(entry, detail="more")
+        self.assertNotIn("test-marker:tests/secret_config.py", out)
+        self.assertIn("read/search:", out)
+
+
 if __name__ == "__main__":
     unittest.main()
