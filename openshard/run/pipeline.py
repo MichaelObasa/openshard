@@ -940,6 +940,13 @@ class RunPipeline:
 
         _print_summary(start, generator, retry_triggered, final_files,
                        usage=usage, retry_usage=retry_usage, detail=detail, model=_routed_model, stage_runs=stage_runs)
+        if (
+            effective_executor == "native"
+            and hasattr(generator, "build_verification_command_summary")
+            and generator.native_meta.verification_loop is not None
+            and generator.native_meta.verification_loop.attempted
+        ):
+            generator.build_verification_command_summary(_verification_plan)
         if effective_executor == "native" and hasattr(generator, "build_final_report"):
             generator.build_final_report()
         _native_meta = generator.native_meta if effective_executor == "native" else None
@@ -967,6 +974,12 @@ class RunPipeline:
                 "verification_loop": (
                     asdict(_native_meta.verification_loop)
                     if _native_meta.verification_loop is not None
+                    else None
+                ),
+                "verification_command_summary": (
+                    asdict(_native_meta.verification_command_summary)
+                    if _native_meta is not None
+                    and _native_meta.verification_command_summary is not None
                     else None
                 ),
                 "final_report": (

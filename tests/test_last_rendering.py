@@ -616,5 +616,62 @@ class TestPatchProposalRendering(unittest.TestCase):
         self.assertNotIn("content", d)
 
 
+class TestVerificationCommandSummaryRendering(unittest.TestCase):
+    """Tests for verification commands: N safe, N approval, N blocked line in [native] block."""
+
+    def _entry_with_summary(self, command_count: int, safe_count: int, needs_approval_count: int, blocked_count: int) -> dict:
+        entry = _native_entry()
+        entry["verification_command_summary"] = {
+            "attempted": True,
+            "command_count": command_count,
+            "safe_count": safe_count,
+            "needs_approval_count": needs_approval_count,
+            "blocked_count": blocked_count,
+            "passed": True,
+            "retried": False,
+            "warnings": [],
+        }
+        return entry
+
+    def test_renders_verification_command_counts(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_summary(2, 2, 0, 0)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertIn("verification commands: 2 safe, 0 approval, 0 blocked", joined)
+
+    def test_no_verification_commands_line_when_count_zero(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_summary(0, 0, 0, 0)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertNotIn("verification commands:", joined)
+
+    def test_old_entry_without_verification_command_summary_does_not_crash(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = _native_entry()
+        entry.pop("verification_command_summary", None)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        self.assertIsInstance(lines, list)
+
+    def test_saved_run_inspection_renders_command_counts(self):
+        entry = self._entry_with_summary(3, 2, 1, 0)
+        out = _render(entry, detail="more")
+        self.assertIn("verification commands:", out)
+        self.assertIn("2 safe", out)
+
+    def test_no_command_strings_in_output(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_summary(1, 1, 0, 0)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertNotIn("python -m pytest", joined)
+        self.assertNotIn("argv", joined)
+
+
 if __name__ == "__main__":
     unittest.main()

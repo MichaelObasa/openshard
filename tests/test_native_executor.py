@@ -20,12 +20,14 @@ from openshard.native.context import (
     NativeObservation,
     NativePatchProposal,
     NativePlan,
+    NativeVerificationCommandSummary,
     NativeVerificationLoop,
     build_compact_run_state,
     build_initial_context_budget,
     build_native_diff_review,
     build_native_final_report,
     build_native_patch_proposal,
+    build_native_verification_command_summary,
     render_native_evidence,
     render_native_observation,
     render_native_plan,
@@ -2623,6 +2625,185 @@ class TestNativeVerificationLoop(unittest.TestCase):
         self.assertIsNotNone(vl)
         self.assertTrue(vl["retried"])
         self.assertTrue(vl["passed"])
+
+
+class TestNativeVerificationCommandSummary(unittest.TestCase):
+    """Unit tests for NativeVerificationCommandSummary and its builder."""
+
+    def _cmd(self, safety_label: str):
+        from openshard.verification.plan import (
+            CommandSafety, VerificationCommand, VerificationKind, VerificationSource,
+        )
+        return VerificationCommand(
+            name="pytest",
+            argv=["python", "-m", "pytest"],
+            kind=VerificationKind.test,
+            source=VerificationSource.detected,
+            safety=CommandSafety(safety_label),
+            reason="test",
+        )
+
+    def _plan(self, *safety_labels):
+        from openshard.verification.plan import VerificationPlan
+        return VerificationPlan(commands=[self._cmd(s) for s in safety_labels])
+
+    def test_builder_defaults_when_no_loop_no_plan(self):
+        s = build_native_verification_command_summary(
+            verification_loop=None, verification_plan=None
+        )
+        self.assertIsInstance(s, NativeVerificationCommandSummary)
+        self.assertFalse(s.attempted)
+        self.assertEqual(s.command_count, 0)
+        self.assertEqual(s.safe_count, 0)
+        self.assertEqual(s.needs_approval_count, 0)
+        self.assertEqual(s.blocked_count, 0)
+        self.assertFalse(s.passed)
+        self.assertFalse(s.retried)
+        self.assertEqual(s.warnings, [])
+
+    def test_builder_copies_attempted_passed_retried(self):
+        loop = NativeVerificationLoop(attempted=True, passed=True, retried=True)
+        s = build_native_verification_command_summary(
+            verification_loop=loop, verification_plan=None
+        )
+        self.assertTrue(s.attempted)
+        self.assertTrue(s.passed)
+        self.assertTrue(s.retried)
+
+    def test_builder_counts_command_count(self):
+        plan = self._plan("safe", "safe", "safe")
+        s = build_native_verification_command_summary(
+            verification_loop=None, verification_plan=plan
+        )
+        self.assertEqual(s.command_count, 3)
+
+    def test_builder_counts_safe_commands(self):
+        plan = self._plan("safe", "safe", "needs_approval")
+        s = build_native_verification_command_summary(
+            verification_loop=None, verification_plan=plan
+        )
+        self.assertEqual(s.safe_count, 2)
+
+    def test_builder_counts_needs_approval_commands(self):
+        plan = self._plan("safe", "needs_approval", "needs_approval")
+        s = build_native_verification_command_summary(
+            verification_loop=None, verification_plan=plan
+        )
+        self.assertEqual(s.needs_approval_count, 2)
+
+    def test_builder_counts_blocked_commands(self):
+        plan = self._plan("safe", "blocked")
+        s = build_native_verification_command_summary(
+            verification_loop=None, verification_plan=plan
+        )
+        self.assertEqual(s.blocked_count, 1)
+
+    def test_builder_does_not_store_command_strings(self):
+        plan = self._plan("safe")
+        s = build_native_verification_command_summary(
+            verification_loop=None, verification_plan=plan
+        )
+        for forbidden in ("argv", "name", "commands", "stdout", "stderr", "output"):
+            self.assertFalse(
+                hasattr(s, forbidden),
+                f"summary should not have attribute '{forbidden}'",
+            )
+
+    def test_builder_warning_when_attempted_but_no_commands(self):
+        loop = NativeVerificationLoop(attempted=True, passed=False, retried=False)
+        plan = self._plan()
+        s = build_native_verification_command_summary(
+            verification_loop=loop, verification_plan=plan
+        )
+        self.assertTrue(any("no commands" in w for w in s.warnings))
+
+    def test_executor_stores_verification_command_summary(self):
+        meta = NativeRunMeta()
+        meta.verification_loop = NativeVerificationLoop(attempted=True, passed=True, retried=False)
+        executor = MagicMock(spec=NativeAgentExecutor)
+        executor.native_meta = meta
+        executor.record_loop_step = MagicMock()
+        executor.build_verification_command_summary = NativeAgentExecutor.build_verification_command_summary.__get__(executor)
+        plan = self._plan("safe")
+        executor.build_verification_command_summary(plan)
+        self.assertIsNotNone(meta.verification_command_summary)
+        self.assertIsInstance(meta.verification_command_summary, NativeVerificationCommandSummary)
+
+    def test_executor_records_verification_summary_loop_step(self):
+        meta = NativeRunMeta()
+        meta.verification_loop = NativeVerificationLoop(attempted=True, passed=True, retried=False)
+        executor = MagicMock(spec=NativeAgentExecutor)
+        executor.native_meta = meta
+        executor.record_loop_step = lambda step, **kw: (
+            meta.native_loop_steps.append(step)
+            if step not in meta.native_loop_steps else None
+        )
+        executor.build_verification_command_summary = NativeAgentExecutor.build_verification_command_summary.__get__(executor)
+        plan = self._plan("safe")
+        executor.build_verification_command_summary(plan)
+        self.assertIn("verification_summary", meta.native_loop_steps)
+
+    def test_pipeline_serializes_verification_command_summary(self):
+        native_mock = _make_native_mock()
+
+        def _side_build_summary(plan):
+            s = build_native_verification_command_summary(
+                verification_loop=native_mock.native_meta.verification_loop,
+                verification_plan=plan,
+            )
+            native_mock.native_meta.verification_command_summary = s
+            return s
+
+        native_mock.build_verification_command_summary.side_effect = _side_build_summary
+
+        result, _, logged = self._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "")]
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("verification_command_summary", logged)
+        vcs = logged["verification_command_summary"]
+        self.assertIsNotNone(vcs)
+        self.assertIsInstance(vcs, dict)
+        for key in ("command_count", "safe_count", "needs_approval_count", "blocked_count", "passed", "retried", "attempted"):
+            self.assertIn(key, vcs, f"key '{key}' missing from verification_command_summary")
+
+    def _run_write_simple(self, native_mock, plan=None, verify_returns=None):
+        from openshard.execution.generator import ChangedFile
+        safe_file = ChangedFile(
+            path="out.txt", content="ok", change_type="create", summary="created"
+        )
+        if not native_mock.generate.side_effect:
+            r = MagicMock()
+            r.files = [safe_file]
+            r.summary = "done"
+            r.notes = []
+            r.usage = None
+            native_mock.generate.return_value = r
+        plan = plan if plan is not None else _safe_plan()
+        verify_returns = verify_returns if verify_returns is not None else [(0, "")]
+        logged = {}
+
+        def _capture_log(*a, **kw):
+            logged.update(kw.get("extra_metadata") or {})
+
+        verify_iter = iter(verify_returns)
+
+        def _verify_side(*a, **kw):
+            return next(verify_iter)
+
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run", side_effect=_capture_log), \
+                 patch("openshard.run.pipeline.build_verification_plan", return_value=plan), \
+                 patch("openshard.run.pipeline._run_verification_plan", side_effect=_verify_side), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                result = runner.invoke(cli, ["run", "--workflow", "native", "--write", "fix the bug"])
+        return result, native_mock, logged
 
 
 class TestNativeFinalReportBuilder(unittest.TestCase):
