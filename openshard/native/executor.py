@@ -72,12 +72,8 @@ class NativeRunMeta:
     read_search_findings: list[str] = field(default_factory=list)
     patch_proposal: NativePatchProposal | None = None
     command_policy_preview: NativeCommandPolicyPreview | None = None
- osn-context-packet
-    context_packet: NativeContextPacket | None = None
     file_context: NativeFileContext | None = None
- main
-
-
+    context_packet: NativeContextPacket | None = None
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
     "the", "a", "an", "in", "on", "at", "to", "for", "of",
     "is", "are", "was", "were", "be", "been", "being",
@@ -615,11 +611,8 @@ class NativeAgentExecutor:
             self._run_backend_proof_phase(task)
         self._run_observe_phase(task, repo_facts=repo_facts)
         self._run_read_search_loop(task)
- osn-context-packet
-        self.build_context_packet(task)
-
         self._run_file_context_phase()
- main
+        self.build_context_packet(task)
         matches = match_builtin_skills(task, repo_facts=repo_facts)
         self.native_meta.selected_skills = selected_skill_names(matches)
 

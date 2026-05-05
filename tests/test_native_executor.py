@@ -4253,7 +4253,6 @@ class TestDeepAgentsReadonlyProof(unittest.TestCase):
         for key in ("backend", "available", "mode", "summary", "notes"):
             self.assertIn(key, result)
         self.assertIsInstance(result["summary"], str)
-osn-context-packet
         self.assertIsInstance(result["notes"], list)
 
 
@@ -4532,4 +4531,3 @@ class TestNativeFileContext(unittest.TestCase):
         self.assertIsNotNone(fc)
         self.assertEqual(fc.files_read, 0)
         self.assertTrue(any("tests/" in w for w in fc.warnings))
- main
