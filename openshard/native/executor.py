@@ -8,6 +8,7 @@ from openshard.analysis.repo import RepoFacts
 from openshard.execution.generator import ExecutionGenerator, ExecutionResult
 from openshard.native.context import (
     CompactRunState,
+    NativeCommandPolicyPreview,
     NativeContextBudget,
     NativeDiffReview,
     NativeEvidence,
@@ -19,6 +20,7 @@ from openshard.native.context import (
     NativeVerificationCommandSummary,
     NativeVerificationLoop,
     build_initial_context_budget,
+    build_native_command_policy_preview,
     build_native_diff_review,
     build_native_final_report,
     build_native_patch_proposal,
@@ -65,6 +67,7 @@ class NativeRunMeta:
     native_backend_proof: dict | None = None
     read_search_findings: list[str] = field(default_factory=list)
     patch_proposal: NativePatchProposal | None = None
+    command_policy_preview: NativeCommandPolicyPreview | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -430,6 +433,26 @@ class NativeAgentExecutor:
         self.native_meta.diff_review = review
         self.record_loop_step("diff_review")
         return review
+
+    def build_command_policy_preview(
+        self, verification_plan: Any | None
+    ) -> NativeCommandPolicyPreview:
+        preview = build_native_command_policy_preview(verification_plan)
+        self.native_meta.command_policy_preview = preview
+        self.record_loop_step(
+            "command_policy",
+            summary=(
+                f"{preview.safe_count} safe / "
+                f"{preview.needs_approval_count} approval / "
+                f"{preview.blocked_count} blocked"
+            ),
+            metadata={
+                "safe": preview.safe_count,
+                "needs_approval": preview.needs_approval_count,
+                "blocked": preview.blocked_count,
+            },
+        )
+        return preview
 
     def build_verification_command_summary(
         self, verification_plan: Any | None

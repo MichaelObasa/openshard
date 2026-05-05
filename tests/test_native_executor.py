@@ -12,6 +12,7 @@ from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
 from openshard.native.context import (
     CompactRunState,
+    NativeCommandPolicyPreview,
     NativeContextBudget,
     NativeDiffReview,
     NativeEvidence,
@@ -24,6 +25,7 @@ from openshard.native.context import (
     NativeVerificationLoop,
     build_compact_run_state,
     build_initial_context_budget,
+    build_native_command_policy_preview,
     build_native_diff_review,
     build_native_final_report,
     build_native_patch_proposal,
@@ -2766,6 +2768,152 @@ class TestNativeVerificationCommandSummary(unittest.TestCase):
         self.assertIsInstance(vcs, dict)
         for key in ("command_count", "safe_count", "needs_approval_count", "blocked_count", "passed", "retried", "attempted"):
             self.assertIn(key, vcs, f"key '{key}' missing from verification_command_summary")
+
+    def _run_write_simple(self, native_mock, plan=None, verify_returns=None):
+        from openshard.execution.generator import ChangedFile
+        safe_file = ChangedFile(
+            path="out.txt", content="ok", change_type="create", summary="created"
+        )
+        if not native_mock.generate.side_effect:
+            r = MagicMock()
+            r.files = [safe_file]
+            r.summary = "done"
+            r.notes = []
+            r.usage = None
+            native_mock.generate.return_value = r
+        plan = plan if plan is not None else _safe_plan()
+        verify_returns = verify_returns if verify_returns is not None else [(0, "")]
+        logged = {}
+
+        def _capture_log(*a, **kw):
+            logged.update(kw.get("extra_metadata") or {})
+
+        verify_iter = iter(verify_returns)
+
+        def _verify_side(*a, **kw):
+            return next(verify_iter)
+
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run", side_effect=_capture_log), \
+                 patch("openshard.run.pipeline.build_verification_plan", return_value=plan), \
+                 patch("openshard.run.pipeline._run_verification_plan", side_effect=_verify_side), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                result = runner.invoke(cli, ["run", "--workflow", "native", "--write", "fix the bug"])
+        return result, native_mock, logged
+
+
+class TestNativeCommandPolicyPreview(unittest.TestCase):
+    """Unit tests for NativeCommandPolicyPreview and its builder."""
+
+    def _cmd(self, safety_label: str):
+        from openshard.verification.plan import (
+            CommandSafety, VerificationCommand, VerificationKind, VerificationSource,
+        )
+        return VerificationCommand(
+            name="pytest",
+            argv=["python", "-m", "pytest"],
+            kind=VerificationKind.test,
+            source=VerificationSource.detected,
+            safety=CommandSafety(safety_label),
+            reason="test",
+        )
+
+    def _plan(self, *safety_labels):
+        from openshard.verification.plan import VerificationPlan
+        return VerificationPlan(commands=[self._cmd(s) for s in safety_labels])
+
+    def test_builder_defaults_no_plan(self):
+        p = build_native_command_policy_preview(None)
+        self.assertIsInstance(p, NativeCommandPolicyPreview)
+        self.assertEqual(p.safe_count, 0)
+        self.assertEqual(p.needs_approval_count, 0)
+        self.assertEqual(p.blocked_count, 0)
+        self.assertEqual(p.command_classes, [])
+        self.assertEqual(p.warnings, [])
+
+    def test_builder_counts_safe(self):
+        plan = self._plan("safe", "safe")
+        p = build_native_command_policy_preview(plan)
+        self.assertEqual(p.safe_count, 2)
+
+    def test_builder_counts_needs_approval(self):
+        plan = self._plan("safe", "needs_approval", "needs_approval")
+        p = build_native_command_policy_preview(plan)
+        self.assertEqual(p.needs_approval_count, 2)
+
+    def test_builder_counts_blocked(self):
+        plan = self._plan("safe", "blocked")
+        p = build_native_command_policy_preview(plan)
+        self.assertEqual(p.blocked_count, 1)
+
+    def test_builder_no_command_strings(self):
+        plan = self._plan("safe")
+        p = build_native_command_policy_preview(plan)
+        from dataclasses import asdict
+        d = asdict(p)
+        for forbidden in ("argv", "name", "commands", "stdout", "stderr", "output"):
+            self.assertNotIn(forbidden, d, f"preview should not have key '{forbidden}'")
+
+    def test_builder_command_classes_unique_and_sorted(self):
+        plan = self._plan("safe", "safe", "blocked")
+        p = build_native_command_policy_preview(plan)
+        self.assertEqual(p.command_classes, ["blocked", "safe"])
+
+    def test_builder_warning_when_no_classified_commands(self):
+        plan = self._plan()
+        p = build_native_command_policy_preview(plan)
+        self.assertTrue(any("no commands" in w for w in p.warnings))
+
+    def test_executor_stores_preview(self):
+        meta = NativeRunMeta()
+        executor = MagicMock(spec=NativeAgentExecutor)
+        executor.native_meta = meta
+        executor.record_loop_step = MagicMock()
+        executor.build_command_policy_preview = NativeAgentExecutor.build_command_policy_preview.__get__(executor)
+        plan = self._plan("safe")
+        executor.build_command_policy_preview(plan)
+        self.assertIsNotNone(meta.command_policy_preview)
+        self.assertIsInstance(meta.command_policy_preview, NativeCommandPolicyPreview)
+
+    def test_executor_records_command_policy_loop_step(self):
+        meta = NativeRunMeta()
+        executor = MagicMock(spec=NativeAgentExecutor)
+        executor.native_meta = meta
+        executor.record_loop_step = lambda step, **kw: (
+            meta.native_loop_steps.append(step)
+            if step not in meta.native_loop_steps else None
+        )
+        executor.build_command_policy_preview = NativeAgentExecutor.build_command_policy_preview.__get__(executor)
+        plan = self._plan("safe")
+        executor.build_command_policy_preview(plan)
+        self.assertIn("command_policy", meta.native_loop_steps)
+
+    def test_pipeline_serializes_command_policy_preview(self):
+        native_mock = _make_native_mock()
+
+        def _side_build_preview(plan):
+            p = build_native_command_policy_preview(plan)
+            native_mock.native_meta.command_policy_preview = p
+            return p
+
+        native_mock.build_command_policy_preview.side_effect = _side_build_preview
+
+        result, _, logged = self._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "")]
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("command_policy_preview", logged)
+        cpp = logged["command_policy_preview"]
+        self.assertIsNotNone(cpp)
+        self.assertIsInstance(cpp, dict)
+        for key in ("safe_count", "needs_approval_count", "blocked_count", "command_classes", "warnings"):
+            self.assertIn(key, cpp, f"key '{key}' missing from command_policy_preview")
 
     def _run_write_simple(self, native_mock, plan=None, verify_returns=None):
         from openshard.execution.generator import ChangedFile

@@ -122,6 +122,46 @@ def build_native_verification_command_summary(
 
 
 @dataclass
+class NativeCommandPolicyPreview:
+    safe_count: int = 0
+    needs_approval_count: int = 0
+    blocked_count: int = 0
+    command_classes: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_command_policy_preview(
+    verification_plan: Any | None,
+) -> NativeCommandPolicyPreview:
+    if verification_plan is None or not hasattr(verification_plan, "commands"):
+        return NativeCommandPolicyPreview()
+    safe = needs_approval = blocked = 0
+    classes: set[str] = set()
+    for cmd in verification_plan.commands:
+        safety = getattr(cmd, "safety", None)
+        if safety is None:
+            continue
+        label = str(safety.value) if hasattr(safety, "value") else str(safety)
+        if label == "safe":
+            safe += 1
+        elif label == "needs_approval":
+            needs_approval += 1
+        elif label == "blocked":
+            blocked += 1
+        classes.add(label)
+    warnings: list[str] = []
+    if safe + needs_approval + blocked == 0:
+        warnings.append("no commands with safety classification found")
+    return NativeCommandPolicyPreview(
+        safe_count=safe,
+        needs_approval_count=needs_approval,
+        blocked_count=blocked,
+        command_classes=sorted(classes),
+        warnings=warnings,
+    )
+
+
+@dataclass
 class NativeFinalReport:
     used_native_context: bool = False
     observed_tools: list[str] = field(default_factory=list)

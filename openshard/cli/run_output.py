@@ -407,6 +407,21 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         )
         has_content = True
 
+    cpp = getattr(native_meta, "command_policy_preview", None)
+    if cpp is not None:
+        _cpp_total = (
+            getattr(cpp, "safe_count", 0)
+            + getattr(cpp, "needs_approval_count", 0)
+            + getattr(cpp, "blocked_count", 0)
+        )
+        if _cpp_total > 0:
+            lines.append(
+                f"  command policy: {getattr(cpp, 'safe_count', 0)} safe, "
+                f"{getattr(cpp, 'needs_approval_count', 0)} approval, "
+                f"{getattr(cpp, 'blocked_count', 0)} blocked"
+            )
+            has_content = True
+
     diff_review = getattr(native_meta, "diff_review", None)
     if diff_review is not None and getattr(diff_review, "has_diff", False):
         has_content = True
@@ -506,6 +521,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "native_backend_proof": entry.get("native_backend_proof"),
         "read_search_findings": entry.get("read_search_findings", []),
         "patch_proposal": entry.get("patch_proposal"),
+        "command_policy_preview": entry.get("command_policy_preview"),
     })
 
 
