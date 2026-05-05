@@ -458,6 +458,13 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         lines.append(f"  context quality: {_cqs_level} {_cqs_score}/{_cqs_max}")
         has_content = True
 
+    cqa = getattr(native_meta, "context_quality_advisory", None)
+    if cqa is not None:
+        recommendation = getattr(cqa, "recommendation", "")
+        if recommendation:
+            lines.append(f"  context advisory: {recommendation}")
+            has_content = True
+
     patch_proposal = getattr(native_meta, "patch_proposal", None)
     if patch_proposal is not None:
         _count = getattr(patch_proposal, "file_count", 0)
@@ -549,6 +556,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "context_packet": entry.get("context_packet"),
         "file_context": entry.get("file_context"),
         "context_quality_score": entry.get("context_quality_score"),
+        "context_quality_advisory": entry.get("context_quality_advisory"),
     })
 
 

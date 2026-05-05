@@ -15,6 +15,7 @@ from openshard.native.context import (
     NativeCommandPolicyPreview,
     NativeContextBudget,
     NativeContextPacket,
+    NativeContextQualityAdvisory,
     NativeContextQualityScore,
     NativeDiffReview,
     NativeEvidence,
@@ -28,6 +29,7 @@ from openshard.native.context import (
     build_compact_run_state,
     build_initial_context_budget,
     build_native_command_policy_preview,
+    build_native_context_quality_advisory,
     build_native_context_quality_score,
     build_native_diff_review,
     build_native_final_report,
@@ -4731,3 +4733,102 @@ class TestNativeContextQualityScore(unittest.TestCase):
         executor.build_context_quality_score()
         phases = executor.native_meta.native_loop_trace.phases()
         self.assertIn("context_quality", phases)
+
+
+class TestNativeContextQualityAdvisory(unittest.TestCase):
+    """Tests for NativeContextQualityAdvisory and build_native_context_quality_advisory."""
+
+    def _make_executor(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor
+
+    def _score(self, level: str) -> NativeContextQualityScore:
+        return NativeContextQualityScore(score=50, max_score=100, level=level)
+
+    def test_builder_none_score_returns_unknown(self):
+        advisory = build_native_context_quality_advisory(None)
+        self.assertIsInstance(advisory, NativeContextQualityAdvisory)
+        self.assertEqual(advisory.level, "unknown")
+        self.assertFalse(advisory.should_block)
+        self.assertTrue(len(advisory.warnings) > 0)
+
+    def test_strong_score_recommendation(self):
+        advisory = build_native_context_quality_advisory(self._score("strong"))
+        self.assertEqual(advisory.level, "strong")
+        self.assertIn("strong", advisory.recommendation)
+        self.assertEqual(advisory.warnings, [])
+        self.assertFalse(advisory.should_block)
+
+    def test_good_score_recommendation(self):
+        advisory = build_native_context_quality_advisory(self._score("good"))
+        self.assertEqual(advisory.level, "good")
+        self.assertIn("good", advisory.recommendation)
+        self.assertEqual(advisory.warnings, [])
+        self.assertFalse(advisory.should_block)
+
+    def test_fair_score_has_warning_not_blocking(self):
+        advisory = build_native_context_quality_advisory(self._score("fair"))
+        self.assertEqual(advisory.level, "fair")
+        self.assertFalse(advisory.should_block)
+        self.assertTrue(len(advisory.warnings) > 0)
+
+    def test_weak_score_has_warning_not_blocking(self):
+        advisory = build_native_context_quality_advisory(self._score("weak"))
+        self.assertEqual(advisory.level, "weak")
+        self.assertFalse(advisory.should_block)
+        self.assertTrue(len(advisory.warnings) > 0)
+
+    def test_advisory_no_raw_content(self):
+        for level in ("strong", "good", "fair", "weak"):
+            advisory = build_native_context_quality_advisory(self._score(level))
+            self.assertNotIn("diff --git", advisory.recommendation)
+            self.assertNotIn("\n", advisory.recommendation)
+            for w in advisory.warnings:
+                self.assertNotIn("diff --git", w)
+                self.assertLess(len(w), 200)
+
+    def test_native_run_meta_advisory_default_none(self):
+        meta = NativeRunMeta()
+        self.assertIsNone(meta.context_quality_advisory)
+
+    def test_build_context_quality_advisory_sets_meta(self):
+        executor = self._make_executor()
+        executor.native_meta.context_quality_score = self._score("good")
+        advisory = executor.build_context_quality_advisory()
+        self.assertIsNotNone(executor.native_meta.context_quality_advisory)
+        self.assertIsInstance(advisory, NativeContextQualityAdvisory)
+        self.assertEqual(executor.native_meta.context_quality_advisory.level, "good")
+
+    def test_build_context_quality_advisory_records_loop_step(self):
+        executor = self._make_executor()
+        executor.native_meta.context_quality_score = self._score("fair")
+        executor.build_context_quality_advisory()
+        phases = executor.native_meta.native_loop_trace.phases()
+        self.assertIn("context_quality_advisory", phases)
+
+    def test_generate_builds_advisory(self):
+        executor = self._make_executor()
+        executor.generate("add a docstring")
+        self.assertIsNotNone(executor.native_meta.context_quality_advisory)
+        self.assertIsInstance(
+            executor.native_meta.context_quality_advisory, NativeContextQualityAdvisory
+        )
+
+    def test_pipeline_serializes_context_quality_advisory(self):
+        native_mock = _make_native_mock()
+        native_mock.native_meta.context_quality_advisory = NativeContextQualityAdvisory(
+            level="good",
+            recommendation="context is good enough for normal generation",
+            should_block=False,
+            warnings=[],
+        )
+        _, _, logged = TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertIn("context_quality_advisory", logged)
+        cqa = logged["context_quality_advisory"]
+        self.assertIsNotNone(cqa)
+        self.assertEqual(cqa["level"], "good")
+        self.assertFalse(cqa["should_block"])
