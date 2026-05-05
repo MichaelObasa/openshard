@@ -1013,6 +1013,11 @@ class RunPipeline:
                 "native_backend_notes": list(getattr(_native_meta, "native_backend_notes", [])),
                 "native_backend_proof": getattr(_native_meta, "native_backend_proof", None),
                 "read_search_findings": list(getattr(_native_meta, "read_search_findings", [])),
+                "context_packet": (
+                    asdict(_native_meta.context_packet)
+                    if _native_meta is not None and _native_meta.context_packet is not None
+                    else None
+                ),
                 "patch_proposal": (
                     asdict(_native_meta.patch_proposal)
                     if _native_meta.patch_proposal is not None

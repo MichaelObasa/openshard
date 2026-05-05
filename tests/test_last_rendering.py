@@ -727,6 +727,78 @@ class TestCommandPolicyPreviewRendering(unittest.TestCase):
         self.assertNotIn("argv", joined)
 
 
+osn-context-packet
+class TestNativeContextPacketRendering(unittest.TestCase):
+    """Tests for context packet: N sources, N paths line in [native] block."""
+
+    def _entry_with_packet(self, sources: list[str], compact_paths: list[str]) -> dict:
+        entry = _native_entry()
+        entry["context_packet"] = {
+            "task_preview": "fix the bug",
+            "sources": sources,
+            "repo_stack": [],
+            "test_marker_count": 0,
+            "package_file_count": 0,
+            "read_search_count": len(compact_paths),
+            "selected_skills": [],
+            "backend": "builtin",
+            "backend_available": True,
+            "backend_proof_mode": "",
+            "compact_paths": compact_paths,
+            "warnings": [],
+        }
+        return entry
+
+    def test_context_packet_line_rendered(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_packet(
+            sources=["backend", "repo_context"],
+            compact_paths=["file:src/x.py"],
+        )
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        self.assertIn("  context packet: 2 sources, 1 paths", lines)
+
+    def test_context_packet_not_rendered_when_missing(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = _native_entry()
+        entry.pop("context_packet", None)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertNotIn("context packet:", joined)
+
+    def test_context_packet_not_rendered_when_no_sources(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_packet(sources=[], compact_paths=[])
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertNotIn("context packet:", joined)
+
+    def test_saved_run_inspection_passes_context_packet(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+        entry = self._entry_with_packet(
+            sources=["backend", "read_search"],
+            compact_paths=["file:src/main.py", "test-marker:tests/"],
+        )
+        meta = _native_meta_from_entry(entry)
+        cp = getattr(meta, "context_packet", None)
+        self.assertIsNotNone(cp)
+        self.assertEqual(getattr(cp, "sources", None), ["backend", "read_search"])
+
+    def test_raw_paths_not_rendered_in_default_output(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_packet(
+            sources=["backend", "read_search"],
+            compact_paths=["file:src/main.py", "test-marker:tests/"],
+        )
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertNotIn("file:src/main.py", joined)
+        self.assertNotIn("test-marker:tests/", joined)
+
 class TestNativeFileContextRendering(unittest.TestCase):
     """Rendering tests for NativeFileContext compact line."""
 
@@ -771,6 +843,7 @@ class TestNativeFileContextRendering(unittest.TestCase):
         except Exception as exc:
             self.fail(f"Rendering raised {exc}")
         self.assertIsInstance(out, str)
+main
 
 
 if __name__ == "__main__":

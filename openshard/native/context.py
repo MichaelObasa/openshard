@@ -414,3 +414,81 @@ def build_compact_run_state(
         blockers=blockers or [],
         next_step=next_step,
     )
+
+
+@dataclass
+class NativeContextPacket:
+    task_preview: str = ""
+    sources: list[str] = field(default_factory=list)
+    repo_stack: list[str] = field(default_factory=list)
+    test_marker_count: int = 0
+    package_file_count: int = 0
+    read_search_count: int = 0
+    selected_skills: list[str] = field(default_factory=list)
+    backend: str = "builtin"
+    backend_available: bool = True
+    backend_proof_mode: str = ""
+    compact_paths: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_context_packet(
+    *,
+    task: str,
+    repo_context_summary: Any | None = None,
+    read_search_findings: list[str] | None = None,
+    selected_skills: list[str] | None = None,
+    native_backend: str = "builtin",
+    native_backend_available: bool = True,
+    native_backend_proof: dict | None = None,
+) -> NativeContextPacket:
+    sources: list[str] = []
+    warnings: list[str] = []
+    task_preview = (task or "")[:300]
+    repo_stack: list[str] = []
+    test_marker_count = 0
+    package_file_count = 0
+
+    if repo_context_summary is not None:
+        sources.append("repo_context")
+        repo_stack = list(getattr(repo_context_summary, "likely_stack_markers", []) or [])
+        test_marker_count = len(getattr(repo_context_summary, "test_markers", []) or [])
+        package_file_count = len(getattr(repo_context_summary, "package_files", []) or [])
+
+    findings = list(read_search_findings or [])
+    if findings:
+        sources.append("read_search")
+
+    compact_paths: list[str] = []
+    for item in findings:
+        if len(compact_paths) >= 8:
+            warnings.append("context packet paths truncated")
+            break
+        if item.startswith(("file:", "test-marker:", "package:")):
+            compact_paths.append(item)
+
+    skills = list(selected_skills or [])
+    if skills:
+        sources.append("skills")
+
+    proof_mode = ""
+    if native_backend_proof:
+        proof_mode = str(native_backend_proof.get("mode", ""))
+
+    if native_backend:
+        sources.append("backend")
+
+    return NativeContextPacket(
+        task_preview=task_preview,
+        sources=sorted(set(sources)),
+        repo_stack=repo_stack[:8],
+        test_marker_count=test_marker_count,
+        package_file_count=package_file_count,
+        read_search_count=len(findings),
+        selected_skills=skills[:8],
+        backend=native_backend,
+        backend_available=native_backend_available,
+        backend_proof_mode=proof_mode,
+        compact_paths=compact_paths,
+        warnings=warnings,
+    )
