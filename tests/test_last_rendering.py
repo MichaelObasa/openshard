@@ -558,5 +558,63 @@ class TestReadSearchFindingsRendering(unittest.TestCase):
         self.assertIn("read/search:", out)
 
 
+class TestPatchProposalRendering(unittest.TestCase):
+    """Tests for proposal: N files line in [native] block."""
+
+    def _entry_with_proposal(self, file_count: int) -> dict:
+        entry = _native_entry()
+        entry["patch_proposal"] = {
+            "file_count": file_count,
+            "files": [f"file{i}.py" for i in range(file_count)],
+            "change_types": ["update"] * file_count,
+            "summaries": ["a change"] * file_count,
+            "warnings": [],
+        }
+        return entry
+
+    def test_proposal_line_shown_when_present(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_proposal(2)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        self.assertIn("  proposal: 2 files", lines)
+
+    def test_proposal_line_shows_count_only(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_proposal(3)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertIn("proposal: 3 files", joined)
+        self.assertNotIn("file0.py", joined)
+        self.assertNotIn("update", joined.split("proposal:")[1] if "proposal:" in joined else "")
+
+    def test_saved_run_inspection_renders_proposal_count(self):
+        entry = self._entry_with_proposal(1)
+        out = _render(entry, detail="more")
+        self.assertIn("proposal: 1 files", out)
+
+    def test_old_entry_without_patch_proposal_does_not_crash(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = _native_entry()
+        entry.pop("patch_proposal", None)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertNotIn("proposal:", joined)
+
+    def test_proposal_metadata_contains_no_raw_content(self):
+        from dataclasses import asdict
+        from openshard.native.context import NativePatchProposal
+        proposal = NativePatchProposal(
+            file_count=1,
+            files=["a.py"],
+            change_types=["create"],
+            summaries=["created"],
+        )
+        d = asdict(proposal)
+        self.assertNotIn("content", d)
+
+
 if __name__ == "__main__":
     unittest.main()

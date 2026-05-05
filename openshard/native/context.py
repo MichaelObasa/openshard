@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -98,6 +99,35 @@ class NativeFinalReport:
     added_lines: int = 0
     removed_lines: int = 0
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class NativePatchProposal:
+    file_count: int = 0
+    files: list[str] = field(default_factory=list)
+    change_types: list[str] = field(default_factory=list)
+    summaries: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_patch_proposal(files: list[Any]) -> NativePatchProposal:
+    paths: list[str] = []
+    change_types: list[str] = []
+    summaries: list[str] = []
+    for f in files:
+        path = getattr(f, "path", None)
+        change_type = getattr(f, "change_type", "update")
+        summary = getattr(f, "summary", "")
+        if path:
+            paths.append(path)
+            change_types.append(change_type or "update")
+            summaries.append(summary or "")
+    return NativePatchProposal(
+        file_count=len(paths),
+        files=paths,
+        change_types=change_types,
+        summaries=summaries,
+    )
 
 
 def build_initial_context_budget(

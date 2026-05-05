@@ -777,6 +777,8 @@ class RunPipeline:
                     confirm_or_abort(_fw_dec.reason)
                 elif _rp_dec.required:
                     confirm_or_abort(_rp_dec.reason)
+                if effective_executor == "native" and hasattr(generator, "build_patch_proposal"):
+                    generator.build_patch_proposal(exec_result.files)
                 _write_files(exec_result.files, workspace)
                 if effective_executor == "native":
                     if hasattr(generator, "record_loop_step"):
@@ -991,6 +993,11 @@ class RunPipeline:
                 "native_backend_notes": list(getattr(_native_meta, "native_backend_notes", [])),
                 "native_backend_proof": getattr(_native_meta, "native_backend_proof", None),
                 "read_search_findings": list(getattr(_native_meta, "read_search_findings", [])),
+                "patch_proposal": (
+                    asdict(_native_meta.patch_proposal)
+                    if _native_meta.patch_proposal is not None
+                    else None
+                ),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
