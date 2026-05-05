@@ -12,6 +12,7 @@ from openshard.native.context import (
     NativeCommandPolicyPreview,
     NativeContextBudget,
     NativeContextPacket,
+    NativeContextQualityAdvisory,
     NativeContextQualityScore,
     NativeDiffReview,
     NativeEvidence,
@@ -26,6 +27,7 @@ from openshard.native.context import (
     build_initial_context_budget,
     build_native_command_policy_preview,
     build_native_context_packet,
+    build_native_context_quality_advisory,
     build_native_context_quality_score,
     build_native_diff_review,
     build_native_final_report,
@@ -78,6 +80,7 @@ class NativeRunMeta:
     file_context: NativeFileContext | None = None
     context_packet: NativeContextPacket | None = None
     context_quality_score: NativeContextQualityScore | None = None
+    context_quality_advisory: NativeContextQualityAdvisory | None = None
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
     "the", "a", "an", "in", "on", "at", "to", "for", "of",
     "is", "are", "was", "were", "be", "been", "being",
@@ -623,6 +626,22 @@ class NativeAgentExecutor:
         )
         return score
 
+    def build_context_quality_advisory(self) -> NativeContextQualityAdvisory:
+        advisory = build_native_context_quality_advisory(
+            self.native_meta.context_quality_score
+        )
+        self.native_meta.context_quality_advisory = advisory
+        self.record_loop_step(
+            "context_quality_advisory",
+            summary=advisory.recommendation,
+            metadata={
+                "level": advisory.level,
+                "should_block": advisory.should_block,
+                "warnings": len(advisory.warnings),
+            },
+        )
+        return advisory
+
     def generate(
         self,
         task: str,
@@ -640,6 +659,7 @@ class NativeAgentExecutor:
         self.native_meta.selected_skills = selected_skill_names(matches)
         self.build_context_packet(task)
         self.build_context_quality_score()
+        self.build_context_quality_advisory()
 
         self.native_meta.plan = _build_native_plan(
             task,

@@ -558,6 +558,51 @@ class NativeContextQualityScore:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass
+class NativeContextQualityAdvisory:
+    level: str = "unknown"
+    recommendation: str = ""
+    should_block: bool = False
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_context_quality_advisory(
+    score: NativeContextQualityScore | None,
+) -> NativeContextQualityAdvisory:
+    if score is None:
+        return NativeContextQualityAdvisory(
+            level="unknown",
+            recommendation="context quality is unknown",
+            should_block=False,
+            warnings=["context quality score missing"],
+        )
+
+    level = score.level
+
+    if level == "strong":
+        recommendation = "context is strong enough for normal generation"
+        warnings: list[str] = []
+    elif level == "good":
+        recommendation = "context is good enough for normal generation"
+        warnings = []
+    elif level == "fair":
+        recommendation = "context is usable but may need cautious generation"
+        warnings = ["consider smaller changes if the task is risky"]
+    elif level == "weak":
+        recommendation = "context is weak; prefer smaller changes or gather more context"
+        warnings = ["context packet may be insufficient for confident generation"]
+    else:
+        recommendation = "context quality is unknown"
+        warnings = ["unknown context quality level"]
+
+    return NativeContextQualityAdvisory(
+        level=level,
+        recommendation=recommendation,
+        should_block=False,
+        warnings=warnings,
+    )
+
+
 def build_native_context_quality_score(packet: NativeContextPacket) -> NativeContextQualityScore:
     score = 0
     reasons: list[str] = []

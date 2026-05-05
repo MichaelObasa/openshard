@@ -899,5 +899,66 @@ class TestContextQualityScoreRendering(unittest.TestCase):
         self.assertEqual(getattr(cqs, "level", None), "fair")
 
 
+class TestContextQualityAdvisoryRendering(unittest.TestCase):
+
+    def _base_entry(self):
+        return {
+            "workflow": "native",
+            "executor": "native",
+            "native_loop_steps": [],
+            "native_loop_trace": [],
+        }
+
+    def test_advisory_line_rendered_when_present(self):
+        entry = self._base_entry()
+        entry["context_quality_advisory"] = {
+            "level": "good",
+            "recommendation": "context is good enough for normal generation",
+            "should_block": False,
+            "warnings": [],
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("context advisory: context is good enough for normal generation", out)
+
+    def test_advisory_line_absent_when_missing(self):
+        entry = self._base_entry()
+        out = _render(entry, detail="more")
+        self.assertNotIn("context advisory:", out)
+
+    def test_advisory_line_absent_when_none(self):
+        entry = self._base_entry()
+        entry["context_quality_advisory"] = None
+        out = _render(entry, detail="more")
+        self.assertNotIn("context advisory:", out)
+
+    def test_saved_run_inspection_passes_advisory_through(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+        entry = self._base_entry()
+        entry["context_quality_advisory"] = {
+            "level": "weak",
+            "recommendation": "context is weak; prefer smaller changes or gather more context",
+            "should_block": False,
+            "warnings": ["context packet may be insufficient for confident generation"],
+        }
+        meta = _native_meta_from_entry(entry)
+        self.assertIsNotNone(meta)
+        cqa = getattr(meta, "context_quality_advisory", None)
+        self.assertIsNotNone(cqa)
+        self.assertEqual(getattr(cqa, "level", None), "weak")
+        self.assertIn("weak", getattr(cqa, "recommendation", ""))
+
+    def test_warnings_not_rendered_by_default(self):
+        entry = self._base_entry()
+        entry["context_quality_advisory"] = {
+            "level": "fair",
+            "recommendation": "context is usable but may need cautious generation",
+            "should_block": False,
+            "warnings": ["consider smaller changes if the task is risky"],
+        }
+        out = _render(entry, detail="more")
+        self.assertNotIn("consider smaller changes", out)
+        self.assertIn("context advisory:", out)
+
+
 if __name__ == "__main__":
     unittest.main()
