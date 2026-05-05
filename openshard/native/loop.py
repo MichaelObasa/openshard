@@ -13,6 +13,7 @@ NativeLoopPhase = Literal[
     "generation",
     "proposal",
     "write",
+    "command_policy",
     "verification",
     "verification_summary",
     "diff_review",

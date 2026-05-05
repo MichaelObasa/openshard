@@ -673,5 +673,59 @@ class TestVerificationCommandSummaryRendering(unittest.TestCase):
         self.assertNotIn("argv", joined)
 
 
+class TestCommandPolicyPreviewRendering(unittest.TestCase):
+    """Tests for command policy: N safe, N approval, N blocked line in [native] block."""
+
+    def _entry_with_preview(self, safe_count: int, needs_approval_count: int, blocked_count: int) -> dict:
+        entry = _native_entry()
+        entry["command_policy_preview"] = {
+            "safe_count": safe_count,
+            "needs_approval_count": needs_approval_count,
+            "blocked_count": blocked_count,
+            "command_classes": ["safe"] if safe_count > 0 else [],
+            "warnings": [],
+        }
+        return entry
+
+    def test_renders_counts(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_preview(2, 0, 0)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertIn("command policy: 2 safe, 0 approval, 0 blocked", joined)
+
+    def test_no_line_when_total_zero(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_preview(0, 0, 0)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertNotIn("command policy:", joined)
+
+    def test_old_entry_no_crash(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = _native_entry()
+        entry.pop("command_policy_preview", None)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        self.assertIsInstance(lines, list)
+
+    def test_saved_run_shows_counts(self):
+        entry = self._entry_with_preview(3, 1, 0)
+        out = _render(entry, detail="more")
+        self.assertIn("command policy:", out)
+        self.assertIn("3 safe", out)
+
+    def test_no_command_strings_in_output(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_preview(1, 0, 0)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertNotIn("python -m pytest", joined)
+        self.assertNotIn("argv", joined)
+
+
 if __name__ == "__main__":
     unittest.main()

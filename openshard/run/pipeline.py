@@ -388,6 +388,13 @@ class RunPipeline:
 
         _verification_plan = build_verification_plan(_cfg, _repo_facts)
 
+        if (
+            effective_executor == "native"
+            and _verification_plan.has_commands
+            and hasattr(generator, "build_command_policy_preview")
+        ):
+            generator.build_command_policy_preview(_verification_plan)
+
         if _use_stages is None:
             _category = routing_decision.category if routing_decision else "standard"
             _workflow_history_summary: WorkflowHistorySummary | None = None
@@ -1009,6 +1016,12 @@ class RunPipeline:
                 "patch_proposal": (
                     asdict(_native_meta.patch_proposal)
                     if _native_meta.patch_proposal is not None
+                    else None
+                ),
+                "command_policy_preview": (
+                    asdict(_native_meta.command_policy_preview)
+                    if _native_meta is not None
+                    and _native_meta.command_policy_preview is not None
                     else None
                 ),
             }
