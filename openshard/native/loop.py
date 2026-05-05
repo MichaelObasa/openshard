@@ -12,6 +12,7 @@ NativeLoopPhase = Literal[
     "context_packet",
     "context_quality",
     "context_quality_advisory",
+    "change_budget",
     "plan",
     "backend_proof",
     "generation",

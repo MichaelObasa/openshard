@@ -960,5 +960,69 @@ class TestContextQualityAdvisoryRendering(unittest.TestCase):
         self.assertIn("context advisory:", out)
 
 
+class TestNativeChangeBudgetRendering(unittest.TestCase):
+
+    def _base_entry(self):
+        return {
+            "workflow": "native",
+            "executor": "native",
+            "native_loop_steps": [],
+            "native_loop_trace": [],
+        }
+
+    def test_change_budget_line_rendered(self):
+        entry = self._base_entry()
+        entry["change_budget"] = {
+            "level": "good",
+            "max_files": 3,
+            "max_change_size": "normal",
+            "guidance": "normal generation is acceptable; avoid unnecessary broad refactors",
+            "warnings": [],
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("change budget: 3 files, normal", out)
+
+    def test_change_budget_absent_when_missing(self):
+        entry = self._base_entry()
+        out = _render(entry, detail="more")
+        self.assertNotIn("change budget:", out)
+
+    def test_change_budget_absent_when_none(self):
+        entry = self._base_entry()
+        entry["change_budget"] = None
+        out = _render(entry, detail="more")
+        self.assertNotIn("change budget:", out)
+
+    def test_native_meta_from_entry_passes_change_budget(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+        entry = self._base_entry()
+        entry["change_budget"] = {
+            "level": "fair",
+            "max_files": 2,
+            "max_change_size": "small",
+            "guidance": "prefer a cautious, focused change",
+            "warnings": ["context is usable but not strong"],
+        }
+        meta = _native_meta_from_entry(entry)
+        self.assertIsNotNone(meta)
+        cb = getattr(meta, "change_budget", None)
+        self.assertIsNotNone(cb)
+        self.assertEqual(getattr(cb, "max_files", None), 2)
+        self.assertEqual(getattr(cb, "level", None), "fair")
+
+    def test_guidance_not_rendered_in_default_output(self):
+        entry = self._base_entry()
+        entry["change_budget"] = {
+            "level": "weak",
+            "max_files": 1,
+            "max_change_size": "small",
+            "guidance": "UNIQUE_GUIDANCE_STRING_NOT_IN_OUTPUT",
+            "warnings": [],
+        }
+        out = _render(entry, detail="more")
+        self.assertNotIn("UNIQUE_GUIDANCE_STRING_NOT_IN_OUTPUT", out)
+        self.assertIn("change budget:", out)
+
+
 if __name__ == "__main__":
     unittest.main()

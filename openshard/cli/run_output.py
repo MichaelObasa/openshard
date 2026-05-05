@@ -465,6 +465,14 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
             lines.append(f"  context advisory: {recommendation}")
             has_content = True
 
+    budget = getattr(native_meta, "change_budget", None)
+    if budget is not None:
+        max_files = getattr(budget, "max_files", 0)
+        size = getattr(budget, "max_change_size", "")
+        if max_files:
+            lines.append(f"  change budget: {max_files} files, {size}")
+            has_content = True
+
     patch_proposal = getattr(native_meta, "patch_proposal", None)
     if patch_proposal is not None:
         _count = getattr(patch_proposal, "file_count", 0)
@@ -557,6 +565,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "file_context": entry.get("file_context"),
         "context_quality_score": entry.get("context_quality_score"),
         "context_quality_advisory": entry.get("context_quality_advisory"),
+        "change_budget": entry.get("change_budget"),
     })
 
 

@@ -1045,6 +1045,11 @@ class RunPipeline:
                     and _native_meta.context_quality_advisory is not None
                     else None
                 ),
+                "change_budget": (
+                    asdict(_native_meta.change_budget)
+                    if _native_meta is not None and _native_meta.change_budget is not None
+                    else None
+                ),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
