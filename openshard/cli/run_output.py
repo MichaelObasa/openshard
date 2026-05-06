@@ -506,6 +506,19 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
             lines.append(f"  context advisory: {recommendation}")
             has_content = True
 
+    _report_for_usage = getattr(native_meta, "final_report", None)
+    if _report_for_usage is not None:
+        _used = "yes" if getattr(_report_for_usage, "used_native_context", False) else "no"
+        _usage_parts = [f"used={_used}"]
+        _ev = getattr(_report_for_usage, "evidence_items", 0)
+        _sn = getattr(_report_for_usage, "snippet_files", 0)
+        if _ev:
+            _usage_parts.append(f"evidence={_ev} items")
+        if _sn:
+            _usage_parts.append(f"{_sn} snippets")
+        lines.append(f"  context usage: {', '.join(_usage_parts)}")
+        has_content = True
+
     budget = getattr(native_meta, "change_budget", None)
     if budget is not None:
         max_files = getattr(budget, "max_files", 0)
@@ -590,8 +603,18 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         _fc_files = getattr(fc, "files_read", 0)
         if _fc_files > 0:
             _fc_chars = getattr(fc, "total_chars", 0)
-            lines.append(f"  file context: {_fc_files} files, {_fc_chars} chars")
+            _fc_trunc = ", truncated" if getattr(fc, "truncated", False) else ""
+            lines.append(f"  file context: {_fc_files} files, {_fc_chars} chars{_fc_trunc}")
             has_content = True
+
+    _cqs_w = getattr(getattr(native_meta, "context_quality_score", None), "warnings", []) or []
+    _cp_w = getattr(getattr(native_meta, "context_packet", None), "warnings", []) or []
+    _fc_w = getattr(getattr(native_meta, "file_context", None), "warnings", []) or []
+    _ctx_warning_count = len(_cqs_w) + len(_cp_w) + len(_fc_w)
+    if _ctx_warning_count > 0:
+        _w_word = "warning" if _ctx_warning_count == 1 else "warnings"
+        lines.append(f"  context warnings: {_ctx_warning_count} {_w_word}")
+        has_content = True
 
     if detail == "full":
         loop_trace = getattr(native_meta, "native_loop_trace", None)
