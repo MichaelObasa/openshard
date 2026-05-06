@@ -11,6 +11,7 @@ from openshard.native.context import (
     CompactRunState,
     NativeCommandPolicyPreview,
     NativeContextBudget,
+    NativeApprovalRequest,
     NativeChangeBudget,
     NativeChangeBudgetPreview,
     NativeChangeBudgetSoftGate,
@@ -28,6 +29,7 @@ from openshard.native.context import (
     NativeVerificationCommandSummary,
     NativeVerificationLoop,
     build_initial_context_budget,
+    build_native_budget_gate_approval_request,
     build_native_command_policy_preview,
     build_native_context_packet,
     build_native_change_budget,
@@ -92,6 +94,7 @@ class NativeRunMeta:
     change_budget: NativeChangeBudget | None = None
     change_budget_preview: NativeChangeBudgetPreview | None = None
     change_budget_soft_gate: NativeChangeBudgetSoftGate | None = None
+    approval_request: NativeApprovalRequest | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -632,6 +635,25 @@ class NativeAgentExecutor:
             },
         )
         return gate
+
+    def build_budget_gate_approval_request(self) -> NativeApprovalRequest:
+        request = build_native_budget_gate_approval_request(
+            gate=self.native_meta.change_budget_soft_gate,
+            preview=self.native_meta.change_budget_preview,
+        )
+        self.native_meta.approval_request = request
+        self.record_loop_step(
+            "approval_request",
+            summary=f"{request.source} approval={request.requires_approval}",
+            metadata={
+                "source": request.source,
+                "requires_approval": request.requires_approval,
+                "action": request.action,
+                "proposed_files": request.proposed_files,
+                "budget_max_files": request.budget_max_files,
+            },
+        )
+        return request
 
     def build_context_packet(self, task: str) -> NativeContextPacket:
         file_ctx = self.native_meta.file_context

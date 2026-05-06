@@ -12,6 +12,7 @@ from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
 from openshard.native.context import (
     CompactRunState,
+    NativeApprovalRequest,
     NativeChangeBudget,
     NativeChangeBudgetPreview,
     NativeChangeBudgetSoftGate,
@@ -31,6 +32,7 @@ from openshard.native.context import (
     NativeVerificationLoop,
     build_compact_run_state,
     build_initial_context_budget,
+    build_native_budget_gate_approval_request,
     build_native_change_budget,
     build_native_change_budget_preview,
     build_native_change_budget_soft_gate,
@@ -93,6 +95,12 @@ def _make_native_mock():
     g.native_meta = NativeRunMeta()
     g.build_change_budget_soft_gate.return_value = NativeChangeBudgetSoftGate(
         requires_approval=False, reason="", action="allow"
+    )
+    g.build_budget_gate_approval_request.return_value = NativeApprovalRequest(
+        source="change_budget_soft_gate",
+        requires_approval=False,
+        reason="",
+        action="allow",
     )
     return g
 
@@ -5298,3 +5306,156 @@ class TestNativeChangeBudgetSoftGate(unittest.TestCase):
                 native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
             )
         mock_confirm.assert_called_once_with("proposal exceeds advisory change budget")
+
+
+class TestNativeApprovalRequest(unittest.TestCase):
+    """Tests for NativeApprovalRequest, build_native_budget_gate_approval_request, and pipeline integration."""
+
+    def _gate(self, requires: bool, action: str = "allow", warnings: list | None = None) -> NativeChangeBudgetSoftGate:
+        return NativeChangeBudgetSoftGate(
+            requires_approval=requires,
+            reason="proposal exceeds advisory change budget" if requires else "within budget",
+            action=action,
+            warnings=warnings or [],
+        )
+
+    def _preview(self, proposed: int = 4, max_files: int = 2) -> NativeChangeBudgetPreview:
+        return NativeChangeBudgetPreview(
+            budget_max_files=max_files,
+            proposed_files=proposed,
+            within_budget=proposed <= max_files,
+            would_exceed_budget=proposed > max_files,
+            action="warn" if proposed > max_files else "allow",
+        )
+
+    # --- builder unit tests ---
+
+    def test_builder_missing_gate_allows_with_warning(self):
+        result = build_native_budget_gate_approval_request(gate=None, preview=None)
+        self.assertFalse(result.requires_approval)
+        self.assertEqual(result.action, "allow")
+        self.assertTrue(len(result.warnings) > 0)
+        self.assertEqual(result.source, "change_budget_soft_gate")
+
+    def test_builder_no_approval_needed(self):
+        gate = self._gate(requires=False, action="allow")
+        preview = self._preview(proposed=1, max_files=3)
+        result = build_native_budget_gate_approval_request(gate=gate, preview=preview)
+        self.assertFalse(result.requires_approval)
+        self.assertEqual(result.action, "allow")
+        self.assertEqual(result.prompt, "")
+        self.assertEqual(result.proposed_files, 1)
+        self.assertEqual(result.budget_max_files, 3)
+
+    def test_builder_required_approval_builds_prompt(self):
+        gate = self._gate(requires=True, action="require_approval", warnings=["exceeds budget"])
+        preview = self._preview(proposed=4, max_files=2)
+        result = build_native_budget_gate_approval_request(gate=gate, preview=preview)
+        self.assertTrue(result.requires_approval)
+        self.assertIn("4", result.prompt)
+        self.assertIn("2", result.prompt)
+        self.assertIn("Proceed?", result.prompt)
+        self.assertEqual(result.proposed_files, 4)
+        self.assertEqual(result.budget_max_files, 2)
+
+    def test_builder_counts_only_no_raw_content(self):
+        gate = self._gate(requires=True, action="require_approval")
+        preview = self._preview(proposed=3, max_files=1)
+        result = build_native_budget_gate_approval_request(gate=gate, preview=preview)
+        self.assertIsInstance(result, NativeApprovalRequest)
+        self.assertFalse(hasattr(result, "files"))
+        self.assertFalse(hasattr(result, "diff"))
+        self.assertFalse(hasattr(result, "content"))
+
+    # --- executor integration tests ---
+
+    def test_executor_stores_approval_request(self):
+        from openshard.native.executor import NativeAgentExecutor
+        from unittest.mock import patch as _patch
+        fake_gen = _make_generator_mock()
+        with _patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        executor.native_meta.change_budget_soft_gate = self._gate(requires=False)
+        executor.native_meta.change_budget_preview = self._preview(proposed=1, max_files=3)
+        request = executor.build_budget_gate_approval_request()
+        self.assertIsInstance(request, NativeApprovalRequest)
+        self.assertIsNotNone(executor.native_meta.approval_request)
+        self.assertIs(executor.native_meta.approval_request, request)
+
+    def test_executor_records_approval_request_loop_step(self):
+        from openshard.native.executor import NativeAgentExecutor
+        from unittest.mock import patch as _patch
+        fake_gen = _make_generator_mock()
+        with _patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        executor.native_meta.change_budget_soft_gate = self._gate(requires=True, action="require_approval")
+        executor.native_meta.change_budget_preview = self._preview(proposed=4, max_files=2)
+        executor.build_budget_gate_approval_request()
+        phases = executor.native_meta.native_loop_trace.phases()
+        self.assertIn("approval_request", phases)
+
+    # --- pipeline integration tests ---
+
+    def test_pipeline_builds_approval_request_after_soft_gate(self):
+        native_mock = _make_native_mock()
+        native_mock.build_change_budget_soft_gate.return_value = NativeChangeBudgetSoftGate(
+            requires_approval=False, reason="within budget", action="allow"
+        )
+        TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        native_mock.build_budget_gate_approval_request.assert_called()
+
+    def test_pipeline_uses_approval_request_prompt_for_confirm(self):
+        native_mock = _make_native_mock()
+        native_mock.build_change_budget_soft_gate.return_value = NativeChangeBudgetSoftGate(
+            requires_approval=True,
+            reason="proposal exceeds advisory change budget",
+            action="require_approval",
+        )
+        structured_prompt = "Proposal exceeds advisory change budget: 4 files proposed, budget allows 2. Proceed?"
+        native_mock.build_budget_gate_approval_request.return_value = NativeApprovalRequest(
+            source="change_budget_soft_gate",
+            requires_approval=True,
+            reason="proposal exceeds advisory change budget",
+            action="require_approval",
+            proposed_files=4,
+            budget_max_files=2,
+            prompt=structured_prompt,
+        )
+        with patch("openshard.run.pipeline.confirm_or_abort") as mock_confirm:
+            TestNativeVerificationLoop()._run_write_simple(
+                native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+            )
+        mock_confirm.assert_called_once_with(structured_prompt)
+
+    def test_pipeline_serializes_approval_request(self):
+        native_mock = _make_native_mock()
+        approval = NativeApprovalRequest(
+            source="change_budget_soft_gate",
+            requires_approval=False,
+            reason="within budget",
+            action="allow",
+            proposed_files=1,
+            budget_max_files=3,
+        )
+        native_mock.native_meta.approval_request = approval
+        _, _, logged = TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertIn("approval_request", logged)
+        ar = logged["approval_request"]
+        self.assertIsNotNone(ar)
+        self.assertEqual(ar["source"], "change_budget_soft_gate")
+        self.assertEqual(ar["requires_approval"], False)
+
+    def test_no_prompt_rendered_when_approval_not_required(self):
+        native_mock = _make_native_mock()
+        native_mock.build_change_budget_soft_gate.return_value = NativeChangeBudgetSoftGate(
+            requires_approval=False, reason="within budget", action="allow"
+        )
+        with patch("openshard.run.pipeline.confirm_or_abort") as mock_confirm:
+            TestNativeVerificationLoop()._run_write_simple(
+                native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+            )
+        mock_confirm.assert_not_called()

@@ -790,8 +790,16 @@ class RunPipeline:
                     generator.build_change_budget_preview()
                 if effective_executor == "native" and hasattr(generator, "build_change_budget_soft_gate"):
                     _soft_gate = generator.build_change_budget_soft_gate()
+                    _approval_request = None
+                    if effective_executor == "native" and hasattr(generator, "build_budget_gate_approval_request"):
+                        _approval_request = generator.build_budget_gate_approval_request()
                     if _soft_gate.requires_approval:
-                        confirm_or_abort(_soft_gate.reason)
+                        approval_prompt = (
+                            _approval_request.prompt
+                            if _approval_request is not None and _approval_request.prompt
+                            else _soft_gate.reason
+                        )
+                        confirm_or_abort(approval_prompt)
                 _write_files(exec_result.files, workspace)
                 if effective_executor == "native":
                     if hasattr(generator, "record_loop_step"):
@@ -1064,6 +1072,11 @@ class RunPipeline:
                 "change_budget_soft_gate": (
                     asdict(_native_meta.change_budget_soft_gate)
                     if _native_meta is not None and _native_meta.change_budget_soft_gate is not None
+                    else None
+                ),
+                "approval_request": (
+                    asdict(_native_meta.approval_request)
+                    if _native_meta is not None and _native_meta.approval_request is not None
                     else None
                 ),
             }
