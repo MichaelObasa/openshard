@@ -1372,5 +1372,184 @@ class TestBaselineLineInLastDefault(unittest.TestCase):
         self.assertNotIn("x higher", out)
 
 
+class TestContextUsageRendering(unittest.TestCase):
+    """Rendering tests for context usage, file context truncated, and context warnings."""
+
+    def _base_entry(self):
+        return {
+            "workflow": "native",
+            "executor": "native",
+            "native_loop_steps": [],
+            "native_loop_trace": [],
+            "read_search_findings": [],
+            "write_path": "pipeline",
+        }
+
+    def _entry_with_usage(
+        self,
+        used=True,
+        evidence_items=0,
+        snippet_files=0,
+        fc_truncated=False,
+        fc_files=0,
+        cqs_warnings=None,
+        cp_warnings=None,
+        fc_warnings=None,
+    ):
+        entry = self._base_entry()
+        entry["final_report"] = {
+            "used_native_context": used,
+            "observed_tools": [],
+            "selected_skills": [],
+            "plan_intent": None,
+            "plan_risk": None,
+            "evidence_items": evidence_items,
+            "snippet_files": snippet_files,
+            "verification_attempted": False,
+            "verification_passed": False,
+            "verification_retried": False,
+            "diff_files": [],
+            "added_lines": 0,
+            "removed_lines": 0,
+            "warnings": [],
+        }
+        if fc_files > 0 or fc_truncated or fc_warnings:
+            entry["file_context"] = {
+                "files_read": fc_files,
+                "paths": [],
+                "total_chars": 1000 * fc_files,
+                "truncated": fc_truncated,
+                "warnings": fc_warnings or [],
+            }
+        if cqs_warnings is not None:
+            entry["context_quality_score"] = {
+                "score": 50,
+                "max_score": 100,
+                "level": "fair",
+                "reasons": [],
+                "warnings": cqs_warnings,
+            }
+        if cp_warnings is not None:
+            entry["context_packet"] = {
+                "task_preview": "",
+                "sources": ["repo_context"],
+                "repo_stack": [],
+                "test_marker_count": 0,
+                "package_file_count": 0,
+                "read_search_count": 0,
+                "selected_skills": [],
+                "backend": "builtin",
+                "backend_available": True,
+                "backend_proof_mode": "",
+                "compact_paths": [],
+                "file_context_files": 0,
+                "warnings": cp_warnings,
+            }
+        return entry
+
+    # --- context usage line ---
+
+    def test_context_usage_line_rendered_when_used(self):
+        entry = self._entry_with_usage(used=True)
+        out = _render(entry, detail="more")
+        self.assertIn("context usage: used=yes", out)
+
+    def test_context_usage_line_rendered_when_not_used(self):
+        entry = self._entry_with_usage(used=False)
+        out = _render(entry, detail="more")
+        self.assertIn("context usage: used=no", out)
+
+    def test_context_usage_includes_evidence_count(self):
+        entry = self._entry_with_usage(used=True, evidence_items=5)
+        out = _render(entry, detail="more")
+        self.assertIn("evidence=5 items", out)
+
+    def test_context_usage_omits_zero_evidence(self):
+        entry = self._entry_with_usage(used=True, evidence_items=0)
+        out = _render(entry, detail="more")
+        self.assertNotIn("evidence=0", out)
+
+    def test_context_usage_includes_snippet_count(self):
+        entry = self._entry_with_usage(used=True, snippet_files=2)
+        out = _render(entry, detail="more")
+        self.assertIn("2 snippets", out)
+
+    def test_context_usage_omits_zero_snippets(self):
+        entry = self._entry_with_usage(used=True, snippet_files=0)
+        out = _render(entry, detail="more")
+        self.assertNotIn("0 snippets", out)
+
+    def test_context_usage_absent_when_no_final_report(self):
+        entry = self._base_entry()
+        out = _render(entry, detail="more")
+        self.assertNotIn("context usage:", out)
+
+    def test_context_usage_not_in_default_output(self):
+        entry = self._entry_with_usage(used=True, evidence_items=3)
+        out = _render(entry, detail="default")
+        self.assertNotIn("context usage:", out)
+
+    def test_saved_run_context_usage_reconstructed(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+        entry = self._entry_with_usage(used=True, evidence_items=4, snippet_files=1)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta)
+        joined = "\n".join(lines)
+        self.assertIn("context usage: used=yes, evidence=4 items, 1 snippets", joined)
+
+    # --- file context truncated ---
+
+    def test_file_context_shows_truncated_flag(self):
+        entry = self._entry_with_usage(fc_files=2, fc_truncated=True)
+        out = _render(entry, detail="more")
+        self.assertIn("file context: 2 files, 2000 chars, truncated", out)
+
+    def test_file_context_no_truncated_flag_when_false(self):
+        entry = self._entry_with_usage(fc_files=2, fc_truncated=False)
+        out = _render(entry, detail="more")
+        self.assertIn("file context: 2 files, 2000 chars", out)
+        self.assertNotIn("truncated", out)
+
+    # --- context warnings ---
+
+    def test_context_warnings_count_shown_for_one(self):
+        entry = self._entry_with_usage(cqs_warnings=["context packet may be insufficient"])
+        out = _render(entry, detail="more")
+        self.assertIn("context warnings: 1 warning", out)
+
+    def test_context_warnings_count_shown_for_multiple(self):
+        entry = self._entry_with_usage(
+            cqs_warnings=["weak quality"],
+            cp_warnings=["no repo context", "no skills"],
+        )
+        out = _render(entry, detail="more")
+        self.assertIn("context warnings: 3 warnings", out)
+
+    def test_context_warnings_raw_text_not_rendered(self):
+        warning_text = "context packet may be insufficient for generation"
+        entry = self._entry_with_usage(cqs_warnings=[warning_text])
+        out = _render(entry, detail="more")
+        self.assertNotIn(warning_text, out)
+
+    def test_context_warnings_from_packet(self):
+        entry = self._entry_with_usage(cp_warnings=["no repo context found"])
+        out = _render(entry, detail="more")
+        self.assertIn("context warnings: 1 warning", out)
+
+    def test_context_warnings_from_file_context(self):
+        entry = self._entry_with_usage(fc_files=1, fc_warnings=["read failed for one file"])
+        out = _render(entry, detail="more")
+        self.assertIn("context warnings: 1 warning", out)
+
+    def test_context_warnings_absent_when_none(self):
+        entry = self._entry_with_usage(
+            cqs_warnings=[],
+            cp_warnings=[],
+            fc_warnings=[],
+        )
+        out = _render(entry, detail="more")
+        self.assertNotIn("context warnings:", out)
+
+
 if __name__ == "__main__":
     unittest.main()
