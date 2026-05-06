@@ -49,6 +49,7 @@ def _meta(**kwargs):
         change_budget_soft_gate=None,
         approval_request=None,
         approval_receipt=None,
+        clarification_request=None,
     )
     defaults.update(kwargs)
     return SimpleNamespace(**defaults)
@@ -61,7 +62,7 @@ class TestBuildNativeVerificationPlan(unittest.TestCase):
         self.assertEqual(vp.task_type, "unknown")
         self.assertEqual(vp.risk_level, "unknown")
         self.assertEqual(vp.likely_files_or_folders, [])
-        self.assertEqual(vp.clarification_needed, [])
+        self.assertGreater(len(vp.clarification_needed), 0)
         self.assertEqual(vp.failure_handling, "halt and report")
 
     def test_task_type_feature(self):
@@ -149,9 +150,13 @@ class TestBuildNativeVerificationPlan(unittest.TestCase):
         vp = _build()
         self.assertTrue(any("blocked" in r for r in vp.approval_rules))
 
-    def test_clarification_needed_always_empty(self):
+    def test_clarification_needed_empty_when_task_type_known(self):
         vp = _build(task="fix the bug")
         self.assertEqual(vp.clarification_needed, [])
+
+    def test_clarification_needed_populated_when_task_type_unknown(self):
+        vp = _build(task="do the thing")
+        self.assertGreater(len(vp.clarification_needed), 0)
 
     def test_failure_handling_default(self):
         vp = _build()
@@ -184,7 +189,7 @@ class TestNativeVerificationPlanSerialization(unittest.TestCase):
         self.assertIsNotNone(json.dumps(asdict(vp)))
 
     def test_empty_lists_serialize_as_list(self):
-        vp = _build()
+        vp = _build(task="implement feature")
         d = asdict(vp)
         self.assertEqual(d["likely_files_or_folders"], [])
         self.assertEqual(d["clarification_needed"], [])

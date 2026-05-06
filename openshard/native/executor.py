@@ -9,6 +9,7 @@ from openshard.analysis.repo import RepoFacts
 from openshard.execution.generator import ExecutionGenerator, ExecutionResult
 from openshard.native.context import (
     CompactRunState,
+    NativeClarificationRequest,
     NativeCommandPolicyPreview,
     NativeContextBudget,
     NativeApprovalReceipt,
@@ -33,6 +34,7 @@ from openshard.native.context import (
     build_initial_context_budget,
     build_native_approval_receipt,
     build_native_budget_gate_approval_request,
+    build_native_clarification_request,
     build_native_command_policy_preview,
     build_native_context_packet,
     build_native_change_budget,
@@ -101,6 +103,7 @@ class NativeRunMeta:
     approval_request: NativeApprovalRequest | None = None
     approval_receipt: NativeApprovalReceipt | None = None
     verification_plan: NativeVerificationPlan | None = None
+    clarification_request: NativeClarificationRequest | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -786,6 +789,13 @@ class NativeAgentExecutor:
             repo_facts=repo_facts,
         )
         self.record_loop_step("verification_plan")
+
+        self.native_meta.clarification_request = build_native_clarification_request(
+            task=task,
+            verification_plan=self.native_meta.verification_plan,
+        )
+        if self.native_meta.clarification_request.needed:
+            self.record_loop_step("clarification_request")
 
         context_parts = []
 
