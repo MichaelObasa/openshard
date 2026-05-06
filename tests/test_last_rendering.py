@@ -1145,5 +1145,82 @@ class TestNativeChangeBudgetSoftGateRendering(unittest.TestCase):
         self.assertNotIn("proposal has 4 files but budget allows 2", out)
 
 
+class TestNativeApprovalRequestRendering(unittest.TestCase):
+    """Tests for approval request: source, required=bool line in [native] block."""
+
+    def _base_entry(self):
+        return {
+            "workflow": "native",
+            "executor": "native",
+            "native_loop_steps": [],
+            "native_loop_trace": [],
+        }
+
+    def _entry_with_approval(self, requires_approval: bool, source: str = "change_budget_soft_gate") -> dict:
+        entry = self._base_entry()
+        entry["approval_request"] = {
+            "source": source,
+            "requires_approval": requires_approval,
+            "reason": "proposal exceeds advisory change budget" if requires_approval else "within budget",
+            "action": "require_approval" if requires_approval else "allow",
+            "proposed_files": 4 if requires_approval else 1,
+            "budget_max_files": 2,
+            "prompt": (
+                "Proposal exceeds advisory change budget: 4 files proposed, budget allows 2. Proceed?"
+                if requires_approval else ""
+            ),
+            "warnings": [],
+        }
+        return entry
+
+    def test_approval_request_line_rendered(self):
+        entry = self._entry_with_approval(requires_approval=True)
+        out = _render(entry, detail="more")
+        self.assertIn("approval request:", out)
+        self.assertIn("change_budget_soft_gate", out)
+        self.assertIn("required=true", out)
+
+    def test_approval_request_absent_when_missing(self):
+        entry = self._base_entry()
+        out = _render(entry, detail="more")
+        self.assertNotIn("approval request:", out)
+
+    def test_approval_request_absent_when_none(self):
+        entry = self._base_entry()
+        entry["approval_request"] = None
+        out = _render(entry, detail="more")
+        self.assertNotIn("approval request:", out)
+
+    def test_native_meta_from_entry_passes_approval_request(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+        entry = self._entry_with_approval(requires_approval=False)
+        meta = _native_meta_from_entry(entry)
+        self.assertIsNotNone(meta)
+        approval = getattr(meta, "approval_request", None)
+        self.assertIsNotNone(approval)
+        self.assertEqual(getattr(approval, "source", None), "change_budget_soft_gate")
+        self.assertEqual(getattr(approval, "requires_approval", None), False)
+
+    def test_prompt_not_rendered_by_default(self):
+        entry = self._entry_with_approval(requires_approval=True)
+        out = _render(entry, detail="more")
+        self.assertNotIn("Proceed?", out)
+
+    def test_warnings_not_rendered_by_default(self):
+        entry = self._base_entry()
+        entry["approval_request"] = {
+            "source": "change_budget_soft_gate",
+            "requires_approval": True,
+            "reason": "proposal exceeds advisory change budget",
+            "action": "require_approval",
+            "proposed_files": 4,
+            "budget_max_files": 2,
+            "prompt": "Proposal exceeds advisory change budget: 4 files proposed, budget allows 2. Proceed?",
+            "warnings": ["proposal has 4 files but budget allows 2"],
+        }
+        out = _render(entry, detail="more")
+        self.assertNotIn("proposal has 4 files but budget allows 2", out)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -752,6 +752,62 @@ def build_native_change_budget_soft_gate(
     )
 
 
+@dataclass
+class NativeApprovalRequest:
+    source: str = ""
+    requires_approval: bool = False
+    reason: str = ""
+    action: str = "allow"
+    proposed_files: int = 0
+    budget_max_files: int = 0
+    prompt: str = ""
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_budget_gate_approval_request(
+    *,
+    gate: NativeChangeBudgetSoftGate | None,
+    preview: NativeChangeBudgetPreview | None,
+) -> NativeApprovalRequest:
+    if gate is None:
+        return NativeApprovalRequest(
+            source="change_budget_soft_gate",
+            requires_approval=False,
+            reason="change budget soft gate missing",
+            action="allow",
+            warnings=["change budget soft gate missing"],
+        )
+
+    proposed_files = preview.proposed_files if preview is not None else 0
+    budget_max_files = preview.budget_max_files if preview is not None else 0
+
+    if not gate.requires_approval:
+        return NativeApprovalRequest(
+            source="change_budget_soft_gate",
+            requires_approval=False,
+            reason=gate.reason,
+            action=gate.action,
+            proposed_files=proposed_files,
+            budget_max_files=budget_max_files,
+        )
+
+    prompt = (
+        "Proposal exceeds advisory change budget: "
+        f"{proposed_files} files proposed, budget allows {budget_max_files}. Proceed?"
+    )
+
+    return NativeApprovalRequest(
+        source="change_budget_soft_gate",
+        requires_approval=True,
+        reason=gate.reason,
+        action=gate.action,
+        proposed_files=proposed_files,
+        budget_max_files=budget_max_files,
+        prompt=prompt,
+        warnings=list(gate.warnings),
+    )
+
+
 def render_native_change_budget(budget: NativeChangeBudget | None) -> str:
     if budget is None:
         return ""

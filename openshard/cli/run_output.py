@@ -490,6 +490,14 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
             lines.append(f"  budget gate: {action}, approval={str(requires).lower()}")
             has_content = True
 
+    approval = getattr(native_meta, "approval_request", None)
+    if approval is not None:
+        requires = getattr(approval, "requires_approval", False)
+        source = getattr(approval, "source", "")
+        if source:
+            lines.append(f"  approval request: {source}, required={str(requires).lower()}")
+            has_content = True
+
     patch_proposal = getattr(native_meta, "patch_proposal", None)
     if patch_proposal is not None:
         _count = getattr(patch_proposal, "file_count", 0)
@@ -585,6 +593,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "change_budget": entry.get("change_budget"),
         "change_budget_preview": entry.get("change_budget_preview"),
         "change_budget_soft_gate": entry.get("change_budget_soft_gate"),
+        "approval_request": entry.get("approval_request"),
     })
 
 
