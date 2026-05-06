@@ -1103,6 +1103,13 @@ class RunPipeline:
             click.echo(f"  [log] warning: {exc}")
 
         if _native_meta is not None and detail == "default":
+            from openshard.cost.baseline import format_baseline_line
+            _pt = getattr(usage, "prompt_tokens", 0) or 0
+            _ct = getattr(usage, "completion_tokens", 0) or 0
+            _actual = getattr(usage, "estimated_cost", None)
+            _bl = format_baseline_line(_pt, _ct, actual_cost=_actual)
+            if _bl is not None:
+                click.echo(_bl)
             from openshard.cli.run_output import _print_native_receipt
             _print_native_receipt(_native_meta)
 

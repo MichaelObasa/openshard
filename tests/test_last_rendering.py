@@ -1299,5 +1299,78 @@ class TestNativeApprovalReceiptRendering(unittest.TestCase):
         self.assertNotIn("proposal exceeds advisory change budget", out)
 
 
+class TestBaselineLineInLastDefault(unittest.TestCase):
+    """Baseline estimate line: native + default detail only."""
+
+    def _entry_with_tokens(self, pt: int, ct: int, cost: float | None = None) -> dict:
+        entry = _native_entry()
+        entry["prompt_tokens"] = pt
+        entry["completion_tokens"] = ct
+        entry["total_tokens"] = pt + ct
+        if cost is not None:
+            entry["estimated_cost"] = cost
+        return entry
+
+    def test_baseline_shown_in_native_default_with_tokens(self):
+        out = _render(self._entry_with_tokens(1_000_000, 1_000_000), detail="default")
+        self.assertIn("Baseline estimate:", out)
+
+    def test_baseline_contains_sonnet46(self):
+        out = _render(self._entry_with_tokens(1_000_000, 1_000_000), detail="default")
+        self.assertIn("Sonnet 4.6", out)
+
+    def test_baseline_contains_gpt55(self):
+        out = _render(self._entry_with_tokens(1_000_000, 1_000_000), detail="default")
+        self.assertIn("GPT-5.5", out)
+
+    def test_baseline_hidden_in_native_more(self):
+        out = _render(self._entry_with_tokens(1_000_000, 1_000_000), detail="more")
+        self.assertNotIn("Baseline estimate:", out)
+
+    def test_baseline_hidden_in_native_full(self):
+        out = _render(self._entry_with_tokens(1_000_000, 1_000_000), detail="full")
+        self.assertNotIn("Baseline estimate:", out)
+
+    def test_baseline_omitted_when_tokens_zero(self):
+        out = _render(self._entry_with_tokens(0, 0), detail="default")
+        self.assertNotIn("Baseline estimate:", out)
+
+    def test_baseline_omitted_when_tokens_missing_from_entry(self):
+        entry = {"task": "old run", "workflow": "native", "executor": "native"}
+        out = _render(entry, detail="default")
+        self.assertNotIn("Baseline estimate:", out)
+
+    def test_baseline_omitted_for_non_native_entry(self):
+        entry = {
+            "task": "non-native run",
+            "prompt_tokens": 1_000_000,
+            "completion_tokens": 1_000_000,
+        }
+        out = _render(entry, detail="default")
+        self.assertNotIn("Baseline estimate:", out)
+
+    def test_baseline_appears_after_time_line(self):
+        out = _render(self._entry_with_tokens(1_000_000, 1_000_000), detail="default")
+        time_idx = out.index("Time:")
+        baseline_idx = out.index("Baseline estimate:")
+        self.assertGreater(baseline_idx, time_idx)
+
+    def test_baseline_appears_before_receipt_line(self):
+        out = _render(self._entry_with_tokens(1_000_000, 1_000_000), detail="default")
+        baseline_idx = out.index("Baseline estimate:")
+        receipt_idx = out.index("Receipt saved")
+        self.assertLess(baseline_idx, receipt_idx)
+
+    def test_multiplier_shown_when_cost_present(self):
+        out = _render(self._entry_with_tokens(1_000_000, 1_000_000, cost=0.01), detail="default")
+        self.assertIn("x higher", out)
+
+    def test_multiplier_absent_when_no_cost(self):
+        entry = self._entry_with_tokens(1_000_000, 1_000_000)
+        entry.pop("estimated_cost", None)
+        out = _render(entry, detail="default")
+        self.assertNotIn("x higher", out)
+
+
 if __name__ == "__main__":
     unittest.main()
