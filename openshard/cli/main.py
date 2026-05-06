@@ -38,6 +38,8 @@ from openshard.cli.run_output import (
     _print_shrunk as _print_shrunk,
     _print_dry_run as _print_dry_run,
     _render_native_inspection,
+    _native_meta_from_entry,
+    _render_native_receipt,
     _RATIONALE_SHORT,
 )
 from openshard.evals.registry import load_eval_tasks
@@ -723,6 +725,13 @@ def _render_log_entry(entry: dict, detail: str) -> None:
     cost = entry.get("estimated_cost")
     cost_str = f"${cost:.4f}" if cost is not None else "-"
     click.echo(f"\nTime: {duration:.1f}s   Cost: {cost_str}")
+
+    if detail == "default":
+        _nm = _native_meta_from_entry(entry)
+        if _nm is not None:
+            receipt = _render_native_receipt(_nm)
+            if receipt:
+                click.echo(receipt)
 
 
 @cli.command()
