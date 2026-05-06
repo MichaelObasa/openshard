@@ -87,7 +87,6 @@ class TestFormatBaselineLine(unittest.TestCase):
         self.assertIn("~3.6x higher", result)
 
     def test_multiplier_in_parens_after_price(self):
-        import re
         result = format_baseline_line(1_000_000, 1_000_000, actual_cost=0.01)
         # Each entry should look like "Label $X.XXX (~Nx higher)"
         self.assertRegex(result, r"\$\d+\.\d{3} \(~[\d.]+x higher\)")
