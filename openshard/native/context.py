@@ -853,6 +853,110 @@ def render_native_change_budget(budget: NativeChangeBudget | None) -> str:
     return "\n".join(lines)
 
 
+_ALLOWED_VERIFICATION_COMMANDS: list[str] = [
+    "pytest",
+    "npm test",
+    "cargo test",
+    "go test",
+    "rspec",
+    "mvn test",
+]
+
+_BLOCKED_EXEC_COMMANDS: list[str] = [
+    "curl", "wget", "rm", "sudo", "chmod", "chown",
+]
+
+_TASK_TYPE_KEYWORDS: dict[str, list[str]] = {
+    "test": ["test", "tests", "spec", "unittest"],
+    "bugfix": ["fix", "bug", "patch", "broken", "crash", "error", "issue"],
+    "refactor": ["refactor", "clean", "reorganize", "restructure", "rename"],
+    "feature": ["add", "implement", "create", "build", "new", "introduce"],
+    "docs": ["docs", "document", "readme"],
+    "config": ["config", "setting", "env", "configure"],
+}
+
+_SUCCESS_CRITERIA_BY_TYPE: dict[str, list[str]] = {
+    "test": ["test suite passes", "verification passed"],
+    "bugfix": ["verification passed", "target file changed"],
+    "refactor": ["verification passed", "files within budget", "no new failures"],
+    "feature": ["verification passed", "files within budget"],
+    "docs": ["files within budget"],
+    "config": ["verification passed", "files within budget"],
+    "unknown": ["verification passed", "files within budget"],
+}
+
+
+@dataclass
+class NativeVerificationPlan:
+    task_type: str = "unknown"
+    risk_level: str = "unknown"
+    likely_files_or_folders: list[str] = field(default_factory=list)
+    allowed_commands: list[str] = field(default_factory=list)
+    blocked_commands: list[str] = field(default_factory=list)
+    suggested_verification_commands: list[str] = field(default_factory=list)
+    approval_rules: list[str] = field(default_factory=list)
+    success_criteria: list[str] = field(default_factory=list)
+    failure_handling: str = "halt and report"
+    clarification_needed: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_verification_plan(
+    task: str,
+    plan: NativePlan | None,
+    change_budget: NativeChangeBudget | None,
+    read_search_findings: list[str],
+    repo_facts: Any | None,
+) -> NativeVerificationPlan:
+    task_lower = task.lower()
+    task_type = "unknown"
+    for t_type, keywords in _TASK_TYPE_KEYWORDS.items():
+        if any(kw in task_lower for kw in keywords):
+            task_type = t_type
+            break
+
+    risk_level = getattr(plan, "risk", "unknown") if plan is not None else "unknown"
+
+    seen: set[str] = set()
+    likely: list[str] = []
+    for finding in read_search_findings:
+        path: str | None = None
+        if finding.startswith("file:"):
+            path = finding[len("file:"):]
+        elif finding.startswith("test-marker:"):
+            path = finding[len("test-marker:"):]
+        if path and path not in seen:
+            seen.add(path)
+            likely.append(path)
+            if len(likely) >= 5:
+                break
+
+    test_cmd = getattr(repo_facts, "test_command", None) if repo_facts is not None else None
+    suggested: list[str] = [test_cmd.strip()] if (test_cmd and isinstance(test_cmd, str) and test_cmd.strip()) else []
+
+    approval_rules: list[str] = [
+        "blocked commands require approval",
+        "shell metacharacters require approval",
+    ]
+    if change_budget is not None and getattr(change_budget, "max_files", 0):
+        approval_rules.insert(0, f"changes exceeding {change_budget.max_files} file(s) require approval")
+
+    success_criteria = list(_SUCCESS_CRITERIA_BY_TYPE.get(task_type, _SUCCESS_CRITERIA_BY_TYPE["unknown"]))
+
+    return NativeVerificationPlan(
+        task_type=task_type,
+        risk_level=risk_level,
+        likely_files_or_folders=likely,
+        allowed_commands=list(_ALLOWED_VERIFICATION_COMMANDS),
+        blocked_commands=list(_BLOCKED_EXEC_COMMANDS),
+        suggested_verification_commands=suggested,
+        approval_rules=approval_rules,
+        success_criteria=success_criteria,
+        failure_handling="halt and report",
+        clarification_needed=[],
+    )
+
+
 def build_native_context_quality_score(packet: NativeContextPacket) -> NativeContextQualityScore:
     score = 0
     reasons: list[str] = []

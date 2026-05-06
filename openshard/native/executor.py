@@ -29,6 +29,7 @@ from openshard.native.context import (
     NativePlan,
     NativeVerificationCommandSummary,
     NativeVerificationLoop,
+    NativeVerificationPlan,
     build_initial_context_budget,
     build_native_approval_receipt,
     build_native_budget_gate_approval_request,
@@ -43,6 +44,7 @@ from openshard.native.context import (
     build_native_final_report,
     build_native_patch_proposal,
     build_native_verification_command_summary,
+    build_native_verification_plan,
     render_native_change_budget,
     render_native_context_packet,
     render_native_context_quality_advisory,
@@ -98,6 +100,7 @@ class NativeRunMeta:
     change_budget_soft_gate: NativeChangeBudgetSoftGate | None = None
     approval_request: NativeApprovalRequest | None = None
     approval_receipt: NativeApprovalReceipt | None = None
+    verification_plan: NativeVerificationPlan | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -774,6 +777,15 @@ class NativeAgentExecutor:
             selected_skills=self.native_meta.selected_skills,
         )
         self.record_loop_step("plan")
+
+        self.native_meta.verification_plan = build_native_verification_plan(
+            task=task,
+            plan=self.native_meta.plan,
+            change_budget=self.native_meta.change_budget,
+            read_search_findings=self.native_meta.read_search_findings,
+            repo_facts=repo_facts,
+        )
+        self.record_loop_step("verification_plan")
 
         context_parts = []
 

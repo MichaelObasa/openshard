@@ -514,6 +514,25 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
             lines.append(f"  change budget: {max_files} files, {size}")
             has_content = True
 
+    vplan = getattr(native_meta, "verification_plan", None)
+    if vplan is not None:
+        _vplan_type = getattr(vplan, "task_type", "unknown")
+        _vplan_risk = getattr(vplan, "risk_level", "unknown")
+        lines.append(f"  verification plan: {_vplan_type}, risk={_vplan_risk}")
+        has_content = True
+        _vplan_scope = getattr(vplan, "likely_files_or_folders", []) or []
+        if _vplan_scope:
+            _scope_str = ", ".join(_vplan_scope[:3])
+            if len(_vplan_scope) > 3:
+                _scope_str += f" (+{len(_vplan_scope) - 3})"
+            lines.append(f"  vplan scope: {_scope_str}")
+        _vplan_cmds = getattr(vplan, "suggested_verification_commands", []) or []
+        if _vplan_cmds:
+            lines.append(f"  vplan verify: {_vplan_cmds[0]}")
+        _vplan_blocked = getattr(vplan, "blocked_commands", []) or []
+        if _vplan_blocked:
+            lines.append("  vplan policy: blocked destructive/network commands")
+
     budget_preview = getattr(native_meta, "change_budget_preview", None)
     if budget_preview is not None:
         _proposed = getattr(budget_preview, "proposed_files", 0)
@@ -644,6 +663,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "change_budget_soft_gate": entry.get("change_budget_soft_gate"),
         "approval_request": entry.get("approval_request"),
         "approval_receipt": entry.get("approval_receipt"),
+        "verification_plan": entry.get("verification_plan"),
     })
 
 

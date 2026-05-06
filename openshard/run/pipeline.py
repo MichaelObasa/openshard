@@ -1086,6 +1086,11 @@ class RunPipeline:
                     if _native_meta is not None and _native_meta.approval_receipt is not None
                     else None
                 ),
+                "verification_plan": (
+                    asdict(_native_meta.verification_plan)
+                    if _native_meta is not None and _native_meta.verification_plan is not None
+                    else None
+                ),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
