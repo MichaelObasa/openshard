@@ -12,6 +12,7 @@ from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
 from openshard.native.context import (
     CompactRunState,
+    NativeApprovalReceipt,
     NativeApprovalRequest,
     NativeChangeBudget,
     NativeChangeBudgetPreview,
@@ -32,6 +33,7 @@ from openshard.native.context import (
     NativeVerificationLoop,
     build_compact_run_state,
     build_initial_context_budget,
+    build_native_approval_receipt,
     build_native_budget_gate_approval_request,
     build_native_change_budget,
     build_native_change_budget_preview,
@@ -5459,3 +5461,121 @@ class TestNativeApprovalRequest(unittest.TestCase):
                 native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
             )
         mock_confirm.assert_not_called()
+
+
+class TestNativeApprovalReceipt(unittest.TestCase):
+    """Tests for NativeApprovalReceipt, build_native_approval_receipt, and pipeline integration."""
+
+    def _request(self, requires: bool = True, source: str = "change_budget_soft_gate") -> NativeApprovalRequest:
+        return NativeApprovalRequest(
+            source=source,
+            requires_approval=requires,
+            reason="proposal exceeds advisory change budget" if requires else "within budget",
+            action="require_approval" if requires else "allow",
+        )
+
+    # --- builder unit tests ---
+
+    def test_builder_missing_request_returns_safe_default(self):
+        result = build_native_approval_receipt(None, granted=True)
+        self.assertFalse(result.requested)
+        self.assertEqual(result.action, "allow")
+        self.assertEqual(result.reason, "approval request missing")
+        self.assertEqual(result.source, "")
+
+    def test_builder_copies_source_action_reason(self):
+        request = self._request(requires=True)
+        result = build_native_approval_receipt(request, granted=True)
+        self.assertEqual(result.source, request.source)
+        self.assertEqual(result.action, request.action)
+        self.assertEqual(result.reason, request.reason)
+
+    def test_builder_granted_true_records_granted_true(self):
+        request = self._request(requires=True)
+        result = build_native_approval_receipt(request, granted=True)
+        self.assertTrue(result.granted)
+
+    # --- executor integration tests ---
+
+    def test_executor_stores_approval_receipt(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        executor.native_meta.approval_request = self._request(requires=True)
+        receipt = executor.build_approval_receipt(granted=True)
+        self.assertIsInstance(receipt, NativeApprovalReceipt)
+        self.assertIsNotNone(executor.native_meta.approval_receipt)
+        self.assertIs(executor.native_meta.approval_receipt, receipt)
+
+    def test_executor_records_approval_receipt_loop_step(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        executor.native_meta.approval_request = self._request(requires=True)
+        executor.build_approval_receipt(granted=True)
+        phases = executor.native_meta.native_loop_trace.phases()
+        self.assertIn("approval_receipt", phases)
+
+    # --- pipeline integration tests ---
+
+    def test_pipeline_builds_receipt_after_confirm_or_abort_succeeds(self):
+        native_mock = _make_native_mock()
+        native_mock.build_change_budget_soft_gate.return_value = NativeChangeBudgetSoftGate(
+            requires_approval=True,
+            reason="proposal exceeds advisory change budget",
+            action="require_approval",
+        )
+        native_mock.build_budget_gate_approval_request.return_value = NativeApprovalRequest(
+            source="change_budget_soft_gate",
+            requires_approval=True,
+            reason="proposal exceeds advisory change budget",
+            action="require_approval",
+            prompt="Proposal exceeds advisory change budget: 4 files proposed. Proceed?",
+        )
+        with patch("openshard.run.pipeline.confirm_or_abort"):
+            TestNativeVerificationLoop()._run_write_simple(
+                native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+            )
+        native_mock.build_approval_receipt.assert_called_once_with(granted=True)
+
+    def test_pipeline_does_not_build_receipt_when_approval_not_required(self):
+        native_mock = _make_native_mock()
+        native_mock.build_change_budget_soft_gate.return_value = NativeChangeBudgetSoftGate(
+            requires_approval=False, reason="within budget", action="allow"
+        )
+        TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        native_mock.build_approval_receipt.assert_not_called()
+
+    def test_pipeline_serializes_approval_receipt(self):
+        native_mock = _make_native_mock()
+        receipt = NativeApprovalReceipt(
+            source="change_budget_soft_gate",
+            requested=True,
+            granted=True,
+            action="require_approval",
+            reason="proposal exceeds advisory change budget",
+        )
+        native_mock.native_meta.approval_receipt = receipt
+        _, _, logged = TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertIn("approval_receipt", logged)
+        ar = logged["approval_receipt"]
+        self.assertIsNotNone(ar)
+        self.assertEqual(ar["source"], "change_budget_soft_gate")
+        self.assertTrue(ar["granted"])
+
+    # --- no-leakage tests ---
+
+    def test_receipt_does_not_store_prompt_text(self):
+        result = build_native_approval_receipt(self._request(), granted=True)
+        self.assertIsInstance(result, NativeApprovalReceipt)
+        self.assertFalse(hasattr(result, "prompt"))
+
+    def test_receipt_does_not_store_raw_content(self):
+        result = build_native_approval_receipt(self._request(), granted=True)
+        self.assertFalse(hasattr(result, "files"))
+        self.assertFalse(hasattr(result, "diff"))
+        self.assertFalse(hasattr(result, "content"))

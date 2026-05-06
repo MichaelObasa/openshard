@@ -800,6 +800,8 @@ class RunPipeline:
                             else _soft_gate.reason
                         )
                         confirm_or_abort(approval_prompt)
+                        if effective_executor == "native" and hasattr(generator, "build_approval_receipt"):
+                            generator.build_approval_receipt(granted=True)
                 _write_files(exec_result.files, workspace)
                 if effective_executor == "native":
                     if hasattr(generator, "record_loop_step"):
@@ -1077,6 +1079,11 @@ class RunPipeline:
                 "approval_request": (
                     asdict(_native_meta.approval_request)
                     if _native_meta is not None and _native_meta.approval_request is not None
+                    else None
+                ),
+                "approval_receipt": (
+                    asdict(_native_meta.approval_receipt)
+                    if _native_meta is not None and _native_meta.approval_receipt is not None
                     else None
                 ),
             }
