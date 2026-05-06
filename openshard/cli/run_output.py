@@ -334,6 +334,47 @@ def _print_native_summary(native_meta: Any, detail: str = "default") -> None:
         click.echo(f"  warning: {warning}")
 
 
+def _render_native_receipt(native_meta: Any) -> str:
+    """Return a clean one-line execution receipt for a native run. Pure, no I/O."""
+    parts: list[str] = []
+
+    report = getattr(native_meta, "final_report", None)
+    diff_review = getattr(native_meta, "diff_review", None)
+
+    n_files = 0
+    if report is not None and getattr(report, "diff_files", None):
+        n_files = len(report.diff_files)
+    elif diff_review is not None:
+        n_files = len(getattr(diff_review, "changed_files", []) or [])
+
+    if n_files == 1:
+        parts.append("1 file changed")
+    elif n_files > 0:
+        parts.append(f"{n_files} files changed")
+
+    if report is not None and getattr(report, "verification_attempted", False):
+        parts.append(
+            "Verification passed"
+            if getattr(report, "verification_passed", False)
+            else "Verification failed"
+        )
+
+    approval_receipt = getattr(native_meta, "approval_receipt", None)
+    if approval_receipt is not None and getattr(approval_receipt, "granted", False):
+        parts.append("Write approved")
+    else:
+        parts.append("No risky writes")
+
+    parts.append("Receipt saved")
+    return ". ".join(parts) + "."
+
+
+def _print_native_receipt(native_meta: Any) -> None:
+    receipt = _render_native_receipt(native_meta)
+    if receipt:
+        click.echo(receipt)
+
+
 def _loop_event_value(event: Any, key: str, default: Any = "") -> Any:
     if isinstance(event, dict):
         return event.get(key, default)

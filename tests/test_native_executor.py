@@ -3572,8 +3572,8 @@ class TestNativeSummaryRenderer(unittest.TestCase):
         out = _render_native_summary(r)
         self.assertNotIn("src/secret_internal_path.py", out)
 
-    # 13 — integration: native workflow shows summary when final_report exists
-    def test_pipeline_native_shows_summary(self):
+    # 13 — integration: native workflow shows receipt in default mode, summary in --more
+    def test_pipeline_native_shows_receipt_in_default(self):
         from openshard.execution.generator import ChangedFile
 
         native_mock = _make_native_mock()
@@ -3605,6 +3605,44 @@ class TestNativeSummaryRenderer(unittest.TestCase):
                  patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
                 runner = CliRunner()
                 result = runner.invoke(cli, ["run", "--workflow", "native", "--write", "fix the bug"])
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("Receipt saved", result.output)
+        self.assertNotIn("[native summary]", result.output)
+        self.assertNotIn("[native]", result.output)
+
+    def test_pipeline_native_shows_summary_with_more(self):
+        from openshard.execution.generator import ChangedFile
+
+        native_mock = _make_native_mock()
+        safe_file = ChangedFile(path="out.txt", content="ok", change_type="create", summary="created")
+        r = MagicMock()
+        r.files = [safe_file]
+        r.summary = "done"
+        r.notes = []
+        r.usage = None
+        native_mock.generate.return_value = r
+
+        def _set_report():
+            native_mock.native_meta.final_report = NativeFinalReport(
+                used_native_context=True,
+                selected_skills=["repo mapping"],
+            )
+
+        native_mock.build_final_report.side_effect = _set_report
+
+        with tempfile.TemporaryDirectory() as ws:
+            with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+                 patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+                 patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                 patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                 patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+                 patch("openshard.run.pipeline._log_run"), \
+                 patch("openshard.run.pipeline.build_verification_plan", return_value=_safe_plan()), \
+                 patch("openshard.run.pipeline._run_verification_plan", return_value=(0, "")), \
+                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=ws):
+                runner = CliRunner()
+                result = runner.invoke(cli, ["run", "--workflow", "native", "--write", "--more", "fix the bug"])
 
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("[native summary]", result.output)

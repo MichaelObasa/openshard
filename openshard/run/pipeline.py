@@ -973,10 +973,10 @@ class RunPipeline:
         if effective_executor == "native" and hasattr(generator, "build_final_report"):
             generator.build_final_report()
         _native_meta = generator.native_meta if effective_executor == "native" else None
-        if _native_meta is not None:
+        if _native_meta is not None and detail != "default":
             from openshard.cli.run_output import _print_native_demo_block, _print_native_summary
-            _print_native_demo_block(_native_meta)
-            _print_native_summary(_native_meta)
+            _print_native_demo_block(_native_meta, detail=detail)
+            _print_native_summary(_native_meta, detail=detail)
         _extra_metadata: dict | None = None
         if _native_meta is not None:
             _extra_metadata = {
@@ -1101,6 +1101,10 @@ class RunPipeline:
                      extra_metadata=_extra_metadata)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
+
+        if _native_meta is not None and detail == "default":
+            from openshard.cli.run_output import _print_native_receipt
+            _print_native_receipt(_native_meta)
 
         result_obj.exit_code = 0
         result_obj.generator = generator

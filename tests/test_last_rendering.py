@@ -241,6 +241,27 @@ class TestLastNativeInspection(unittest.TestCase):
         self.assertNotIn("[native]", out)
         self.assertNotIn("[native summary]", out)
 
+    def test_default_shows_receipt_line(self):
+        out = _render(_native_entry(), detail="default")
+        self.assertIn("Receipt saved", out)
+
+    def test_default_receipt_files_count(self):
+        out = _render(_native_entry(), detail="default")
+        self.assertIn("2 files changed", out)
+
+    def test_default_receipt_verification_passed(self):
+        out = _render(_native_entry(), detail="default")
+        self.assertIn("Verification passed", out)
+
+    def test_default_receipt_no_risky_writes(self):
+        out = _render(_native_entry(), detail="default")
+        self.assertIn("No risky writes", out)
+
+    def test_default_receipt_not_shown_for_non_native(self):
+        entry = {"task": "standard run", "workflow": "standard"}
+        out = _render(entry, detail="default")
+        self.assertNotIn("Receipt saved", out)
+
     def test_non_native_entry_no_native_blocks(self):
         entry = {"task": "standard run", "workflow": "standard"}
         out = _render(entry, detail="more")
