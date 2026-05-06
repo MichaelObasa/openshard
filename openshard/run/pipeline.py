@@ -1091,6 +1091,11 @@ class RunPipeline:
                     if _native_meta is not None and _native_meta.verification_plan is not None
                     else None
                 ),
+                "clarification_request": (
+                    asdict(_native_meta.clarification_request)
+                    if _native_meta is not None and _native_meta.clarification_request is not None
+                    else None
+                ),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,

@@ -901,6 +901,16 @@ class NativeVerificationPlan:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass
+class NativeClarificationRequest:
+    needed: bool = False
+    question: str | None = None
+    options: list[str] = field(default_factory=list)
+    allows_custom: bool = False
+    reason: str | None = None
+    task_field: str | None = None
+
+
 def build_native_verification_plan(
     task: str,
     plan: NativePlan | None,
@@ -943,6 +953,10 @@ def build_native_verification_plan(
 
     success_criteria = list(_SUCCESS_CRITERIA_BY_TYPE.get(task_type, _SUCCESS_CRITERIA_BY_TYPE["unknown"]))
 
+    clarification_needed: list[str] = []
+    if task_type == "unknown":
+        clarification_needed = ["task type is ambiguous — no recognizable action keyword found"]
+
     return NativeVerificationPlan(
         task_type=task_type,
         risk_level=risk_level,
@@ -953,7 +967,32 @@ def build_native_verification_plan(
         approval_rules=approval_rules,
         success_criteria=success_criteria,
         failure_handling="halt and report",
-        clarification_needed=[],
+        clarification_needed=clarification_needed,
+    )
+
+
+def build_native_clarification_request(
+    task: str,
+    verification_plan: NativeVerificationPlan,
+) -> NativeClarificationRequest:
+    if verification_plan.task_type != "unknown" and not verification_plan.clarification_needed:
+        return NativeClarificationRequest(needed=False)
+
+    reason = verification_plan.clarification_needed[0] if verification_plan.clarification_needed else None
+    return NativeClarificationRequest(
+        needed=True,
+        question="What type of change is this task requesting?",
+        options=[
+            "Feature (add / implement something new)",
+            "Bugfix (fix / patch a problem)",
+            "Refactor (clean / reorganize existing code)",
+            "Test (add or update tests)",
+            "Documentation",
+            "Configuration / environment change",
+        ],
+        allows_custom=True,
+        reason=reason,
+        task_field="task_type",
     )
 
 

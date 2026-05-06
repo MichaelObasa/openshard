@@ -533,6 +533,19 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         if _vplan_blocked:
             lines.append("  vplan policy: blocked destructive/network commands")
 
+    clarification_request = getattr(native_meta, "clarification_request", None)
+    if clarification_request is not None and getattr(clarification_request, "needed", False):
+        _cr_question = getattr(clarification_request, "question", None) or ""
+        _cr_opts = getattr(clarification_request, "options", []) or []
+        _cr_custom = getattr(clarification_request, "allows_custom", False)
+        _cr_label = f'"{_cr_question}"' if _cr_question else "clarification needed"
+        lines.append(f"  clarification: needed — {_cr_label}")
+        _opt_str = f"{len(_cr_opts)} option{'s' if len(_cr_opts) != 1 else ''}"
+        if _cr_custom:
+            _opt_str += " + custom answer allowed"
+        lines.append(f"  clarification options: {_opt_str}")
+        has_content = True
+
     budget_preview = getattr(native_meta, "change_budget_preview", None)
     if budget_preview is not None:
         _proposed = getattr(budget_preview, "proposed_files", 0)
@@ -664,6 +677,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "approval_request": entry.get("approval_request"),
         "approval_receipt": entry.get("approval_receipt"),
         "verification_plan": entry.get("verification_plan"),
+        "clarification_request": entry.get("clarification_request"),
     })
 
 
