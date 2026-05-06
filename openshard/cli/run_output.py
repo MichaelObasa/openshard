@@ -498,6 +498,14 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
             lines.append(f"  approval request: {source}, required={str(requires).lower()}")
             has_content = True
 
+    receipt = getattr(native_meta, "approval_receipt", None)
+    if receipt is not None:
+        source = getattr(receipt, "source", "")
+        granted = getattr(receipt, "granted", False)
+        if source:
+            lines.append(f"  approval receipt: {source}, granted={str(granted).lower()}")
+            has_content = True
+
     patch_proposal = getattr(native_meta, "patch_proposal", None)
     if patch_proposal is not None:
         _count = getattr(patch_proposal, "file_count", 0)
@@ -594,6 +602,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "change_budget_preview": entry.get("change_budget_preview"),
         "change_budget_soft_gate": entry.get("change_budget_soft_gate"),
         "approval_request": entry.get("approval_request"),
+        "approval_receipt": entry.get("approval_receipt"),
     })
 
 

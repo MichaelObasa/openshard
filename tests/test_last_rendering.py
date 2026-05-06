@@ -1222,5 +1222,61 @@ class TestNativeApprovalRequestRendering(unittest.TestCase):
         self.assertNotIn("proposal has 4 files but budget allows 2", out)
 
 
+class TestNativeApprovalReceiptRendering(unittest.TestCase):
+    """Tests for approval receipt: source, granted=bool line in [native] block."""
+
+    def _base_entry(self):
+        return {
+            "workflow": "native",
+            "executor": "native",
+            "native_loop_steps": [],
+            "native_loop_trace": [],
+        }
+
+    def _entry_with_receipt(self, granted: bool, source: str = "change_budget_soft_gate") -> dict:
+        entry = self._base_entry()
+        entry["approval_receipt"] = {
+            "source": source,
+            "requested": True,
+            "granted": granted,
+            "action": "require_approval" if not granted else "allow",
+            "reason": "proposal exceeds advisory change budget",
+        }
+        return entry
+
+    def test_receipt_line_rendered(self):
+        entry = self._entry_with_receipt(granted=True)
+        out = _render(entry, detail="more")
+        self.assertIn("approval receipt:", out)
+        self.assertIn("change_budget_soft_gate", out)
+        self.assertIn("granted=true", out)
+
+    def test_absent_when_missing(self):
+        entry = self._base_entry()
+        out = _render(entry, detail="more")
+        self.assertNotIn("approval receipt:", out)
+
+    def test_absent_when_none(self):
+        entry = self._base_entry()
+        entry["approval_receipt"] = None
+        out = _render(entry, detail="more")
+        self.assertNotIn("approval receipt:", out)
+
+    def test_native_meta_from_entry_passes_receipt_through(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+        entry = self._entry_with_receipt(granted=True)
+        meta = _native_meta_from_entry(entry)
+        self.assertIsNotNone(meta)
+        receipt = getattr(meta, "approval_receipt", None)
+        self.assertIsNotNone(receipt)
+        self.assertEqual(getattr(receipt, "source", None), "change_budget_soft_gate")
+        self.assertTrue(getattr(receipt, "granted", None))
+
+    def test_reason_not_rendered_by_default(self):
+        entry = self._entry_with_receipt(granted=True)
+        out = _render(entry, detail="more")
+        self.assertNotIn("proposal exceeds advisory change budget", out)
+
+
 if __name__ == "__main__":
     unittest.main()

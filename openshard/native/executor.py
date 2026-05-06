@@ -11,6 +11,7 @@ from openshard.native.context import (
     CompactRunState,
     NativeCommandPolicyPreview,
     NativeContextBudget,
+    NativeApprovalReceipt,
     NativeApprovalRequest,
     NativeChangeBudget,
     NativeChangeBudgetPreview,
@@ -29,6 +30,7 @@ from openshard.native.context import (
     NativeVerificationCommandSummary,
     NativeVerificationLoop,
     build_initial_context_budget,
+    build_native_approval_receipt,
     build_native_budget_gate_approval_request,
     build_native_command_policy_preview,
     build_native_context_packet,
@@ -95,6 +97,7 @@ class NativeRunMeta:
     change_budget_preview: NativeChangeBudgetPreview | None = None
     change_budget_soft_gate: NativeChangeBudgetSoftGate | None = None
     approval_request: NativeApprovalRequest | None = None
+    approval_receipt: NativeApprovalReceipt | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -654,6 +657,24 @@ class NativeAgentExecutor:
             },
         )
         return request
+
+    def build_approval_receipt(self, *, granted: bool) -> NativeApprovalReceipt:
+        receipt = build_native_approval_receipt(
+            self.native_meta.approval_request,
+            granted=granted,
+        )
+        self.native_meta.approval_receipt = receipt
+        self.record_loop_step(
+            "approval_receipt",
+            summary=f"{receipt.source} granted={receipt.granted}",
+            metadata={
+                "source": receipt.source,
+                "requested": receipt.requested,
+                "granted": receipt.granted,
+                "action": receipt.action,
+            },
+        )
+        return receipt
 
     def build_context_packet(self, task: str) -> NativeContextPacket:
         file_ctx = self.native_meta.file_context

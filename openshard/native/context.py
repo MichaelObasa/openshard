@@ -764,6 +764,37 @@ class NativeApprovalRequest:
     warnings: list[str] = field(default_factory=list)
 
 
+@dataclass
+class NativeApprovalReceipt:
+    source: str = ""
+    requested: bool = False
+    granted: bool = False
+    action: str = "allow"
+    reason: str = ""
+
+
+def build_native_approval_receipt(
+    request: NativeApprovalRequest | None,
+    *,
+    granted: bool,
+) -> NativeApprovalReceipt:
+    if request is None:
+        return NativeApprovalReceipt(
+            source="",
+            requested=False,
+            granted=granted,
+            action="allow",
+            reason="approval request missing",
+        )
+    return NativeApprovalReceipt(
+        source=request.source,
+        requested=request.requires_approval,
+        granted=granted,
+        action=request.action,
+        reason=request.reason,
+    )
+
+
 def build_native_budget_gate_approval_request(
     *,
     gate: NativeChangeBudgetSoftGate | None,
