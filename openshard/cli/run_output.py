@@ -616,6 +616,23 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         lines.append(f"  context warnings: {_ctx_warning_count} {_w_word}")
         has_content = True
 
+    cus = getattr(native_meta, "context_usage_summary", None)
+    if cus is not None:
+        _cus_parts = [
+            f"{getattr(cus, 'total_chars', 0)} chars",
+            f"{getattr(cus, 'selected_files_count', 0)} files",
+            f"{getattr(cus, 'compact_paths_count', 0)} paths",
+            f"{getattr(cus, 'evidence_items_count', 0)} evidence",
+            f"{getattr(cus, 'snippet_count', 0)} snippets",
+        ]
+        if getattr(cus, "any_truncated", False):
+            _cus_parts.append("truncated")
+        _cus_warn = getattr(cus, "failure_warning_count", 0)
+        if _cus_warn:
+            _cus_parts.append(f"{_cus_warn} warnings")
+        lines.append(f"  context summary: {', '.join(_cus_parts)}")
+        has_content = True
+
     if detail == "full":
         loop_trace = getattr(native_meta, "native_loop_trace", None)
         if loop_trace is None:
@@ -701,6 +718,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "approval_receipt": entry.get("approval_receipt"),
         "verification_plan": entry.get("verification_plan"),
         "clarification_request": entry.get("clarification_request"),
+        "context_usage_summary": entry.get("context_usage_summary"),
     })
 
 

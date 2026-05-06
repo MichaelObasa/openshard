@@ -1096,6 +1096,11 @@ class RunPipeline:
                     if _native_meta is not None and _native_meta.clarification_request is not None
                     else None
                 ),
+                "context_usage_summary": (
+                    asdict(_native_meta.context_usage_summary)
+                    if _native_meta is not None and _native_meta.context_usage_summary is not None
+                    else None
+                ),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,

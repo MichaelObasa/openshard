@@ -20,6 +20,7 @@ from openshard.native.context import (
     NativeContextPacket,
     NativeContextQualityAdvisory,
     NativeContextQualityScore,
+    NativeContextUsageSummary,
     NativeDiffReview,
     NativeEvidence,
     NativeFileContext,
@@ -42,6 +43,7 @@ from openshard.native.context import (
     build_native_change_budget_soft_gate,
     build_native_context_quality_advisory,
     build_native_context_quality_score,
+    build_native_context_usage_summary,
     build_native_diff_review,
     build_native_final_report,
     build_native_patch_proposal,
@@ -104,6 +106,7 @@ class NativeRunMeta:
     approval_receipt: NativeApprovalReceipt | None = None
     verification_plan: NativeVerificationPlan | None = None
     clarification_request: NativeClarificationRequest | None = None
+    context_usage_summary: NativeContextUsageSummary | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -836,6 +839,20 @@ class NativeAgentExecutor:
             self.native_meta.context_budget.estimated_tokens_used += (
                 len(combined_context) // 4
             )
+
+        self.native_meta.context_usage_summary = build_native_context_usage_summary(
+            repo_context_summary=self.native_meta.repo_context_summary,
+            file_context=self.native_meta.file_context,
+            context_packet=self.native_meta.context_packet,
+            evidence=self.native_meta.evidence,
+            observation=self.native_meta.observation,
+            plan=self.native_meta.plan,
+            context_quality_score=self.native_meta.context_quality_score,
+            final_report=self.native_meta.final_report,
+            diff_review=self.native_meta.diff_review,
+            verification_loop=self.native_meta.verification_loop,
+            total_chars=len(combined_context) if combined_context else 0,
+        )
 
         result = self._gen.generate(
             task, model=model, repo_facts=repo_facts, skills_context=combined_context

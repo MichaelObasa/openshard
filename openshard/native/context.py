@@ -911,6 +911,90 @@ class NativeClarificationRequest:
     task_field: str | None = None
 
 
+@dataclass
+class NativeContextUsageSummary:
+    repo_summary_included: bool = False
+    selected_files_count: int = 0
+    compact_paths_count: int = 0
+    evidence_items_count: int = 0
+    snippet_count: int = 0
+    failure_warning_count: int = 0
+    any_truncated: bool = False
+    truncated_components: list[str] = field(default_factory=list)
+    total_chars: int = 0
+    compacted: bool = False
+
+
+def build_native_context_usage_summary(
+    *,
+    repo_context_summary: Any | None,
+    file_context: Any | None,
+    context_packet: Any | None,
+    evidence: Any | None,
+    observation: Any | None,
+    plan: Any | None,
+    context_quality_score: Any | None,
+    final_report: Any | None,
+    diff_review: Any | None,
+    verification_loop: Any | None,
+    total_chars: int = 0,
+) -> NativeContextUsageSummary:
+    repo_summary_included = repo_context_summary is not None
+    selected_files_count = getattr(file_context, "files_read", 0) if file_context is not None else 0
+    compact_paths = getattr(context_packet, "compact_paths", []) or [] if context_packet is not None else []
+    compact_paths_count = len(compact_paths)
+    evidence_items_count = len(getattr(evidence, "search_results", []) or []) if evidence is not None else 0
+    snippet_count = len(getattr(evidence, "file_snippets", []) or []) if evidence is not None else 0
+
+    failure_warning_count = 0
+    for src in (observation, plan, context_packet, file_context, context_quality_score, final_report):
+        if src is not None:
+            failure_warning_count += len(getattr(src, "warnings", []) or [])
+
+    truncated_components: list[str] = []
+    for name, obj in (
+        ("evidence", evidence),
+        ("diff_review", diff_review),
+        ("verification_loop", verification_loop),
+        ("file_context", file_context),
+    ):
+        if obj is not None and getattr(obj, "truncated", False):
+            truncated_components.append(name)
+    any_truncated = bool(truncated_components)
+    compacted = any_truncated or compact_paths_count >= 8
+
+    return NativeContextUsageSummary(
+        repo_summary_included=repo_summary_included,
+        selected_files_count=selected_files_count,
+        compact_paths_count=compact_paths_count,
+        evidence_items_count=evidence_items_count,
+        snippet_count=snippet_count,
+        failure_warning_count=failure_warning_count,
+        any_truncated=any_truncated,
+        truncated_components=truncated_components,
+        total_chars=total_chars,
+        compacted=compacted,
+    )
+
+
+def render_native_context_usage_summary(meta: NativeContextUsageSummary | None) -> str:
+    if meta is None:
+        return ""
+    lines = ["[context usage summary]"]
+    lines.append(f"repo summary: {'yes' if meta.repo_summary_included else 'no'}")
+    lines.append(f"files: {meta.selected_files_count}")
+    lines.append(f"compact paths: {meta.compact_paths_count}")
+    lines.append(f"evidence: {meta.evidence_items_count} items, {meta.snippet_count} snippets")
+    lines.append(f"warnings: {meta.failure_warning_count}")
+    if meta.any_truncated and meta.truncated_components:
+        lines.append(f"truncated: yes ({', '.join(meta.truncated_components)})")
+    else:
+        lines.append("truncated: no")
+    lines.append(f"total chars: {meta.total_chars}")
+    lines.append(f"compacted: {'yes' if meta.compacted else 'no'}")
+    return "\n".join(lines)
+
+
 def build_native_verification_plan(
     task: str,
     plan: NativePlan | None,
