@@ -482,6 +482,14 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
             lines.append(f"  budget preview: {_proposed}/{_max_files} files, {_action}")
             has_content = True
 
+    gate = getattr(native_meta, "change_budget_soft_gate", None)
+    if gate is not None:
+        action = getattr(gate, "action", "")
+        requires = getattr(gate, "requires_approval", False)
+        if action:
+            lines.append(f"  budget gate: {action}, approval={str(requires).lower()}")
+            has_content = True
+
     patch_proposal = getattr(native_meta, "patch_proposal", None)
     if patch_proposal is not None:
         _count = getattr(patch_proposal, "file_count", 0)
@@ -576,6 +584,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "context_quality_advisory": entry.get("context_quality_advisory"),
         "change_budget": entry.get("change_budget"),
         "change_budget_preview": entry.get("change_budget_preview"),
+        "change_budget_soft_gate": entry.get("change_budget_soft_gate"),
     })
 
 

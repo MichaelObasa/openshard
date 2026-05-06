@@ -14,6 +14,7 @@ from openshard.native.context import (
     CompactRunState,
     NativeChangeBudget,
     NativeChangeBudgetPreview,
+    NativeChangeBudgetSoftGate,
     NativeCommandPolicyPreview,
     NativeContextBudget,
     NativeContextPacket,
@@ -32,6 +33,7 @@ from openshard.native.context import (
     build_initial_context_budget,
     build_native_change_budget,
     build_native_change_budget_preview,
+    build_native_change_budget_soft_gate,
     build_native_command_policy_preview,
     build_native_context_quality_advisory,
     build_native_context_quality_score,
@@ -89,6 +91,9 @@ def _make_native_mock():
     g.model = "mock-model"
     g.fixer_model = "mock-fixer"
     g.native_meta = NativeRunMeta()
+    g.build_change_budget_soft_gate.return_value = NativeChangeBudgetSoftGate(
+        requires_approval=False, reason="", action="allow"
+    )
     return g
 
 
@@ -5169,3 +5174,127 @@ class TestNativeChangeBudgetPreview(unittest.TestCase):
             native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
         )
         self.assertEqual(result.exit_code, 0)
+
+
+class TestNativeChangeBudgetSoftGate(unittest.TestCase):
+    """Tests for NativeChangeBudgetSoftGate, build_native_change_budget_soft_gate, and executor/pipeline integration."""
+
+    def _make_executor(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor, fake_gen
+
+    def _preview(self, would_exceed: bool, proposed: int = 4, max_files: int = 2) -> NativeChangeBudgetPreview:
+        return NativeChangeBudgetPreview(
+            budget_max_files=max_files,
+            proposed_files=proposed,
+            within_budget=not would_exceed,
+            would_exceed_budget=would_exceed,
+            action="warn" if would_exceed else "allow",
+            warnings=(
+                [f"proposal has {proposed} files but budget allows {max_files}"]
+                if would_exceed
+                else []
+            ),
+        )
+
+    # --- builder unit tests ---
+
+    def test_builder_missing_preview_allows_with_warning(self):
+        gate = build_native_change_budget_soft_gate(None)
+        self.assertEqual(gate.action, "allow")
+        self.assertFalse(gate.requires_approval)
+        self.assertTrue(len(gate.warnings) > 0)
+
+    def test_builder_within_budget_allows(self):
+        preview = self._preview(would_exceed=False, proposed=1, max_files=3)
+        gate = build_native_change_budget_soft_gate(preview)
+        self.assertFalse(gate.requires_approval)
+        self.assertEqual(gate.action, "allow")
+        self.assertEqual(gate.warnings, [])
+
+    def test_builder_exceeding_budget_requires_approval(self):
+        preview = self._preview(would_exceed=True)
+        gate = build_native_change_budget_soft_gate(preview)
+        self.assertTrue(gate.requires_approval)
+        self.assertEqual(gate.action, "require_approval")
+        self.assertIn("proposal exceeds advisory change budget", gate.reason)
+
+    def test_builder_does_not_store_raw_content(self):
+        gate = build_native_change_budget_soft_gate(self._preview(would_exceed=True))
+        self.assertIsInstance(gate, NativeChangeBudgetSoftGate)
+        self.assertFalse(hasattr(gate, "files"))
+        self.assertFalse(hasattr(gate, "diff"))
+        self.assertFalse(hasattr(gate, "content"))
+
+    # --- executor integration tests ---
+
+    def test_executor_stores_soft_gate(self):
+        executor, _ = self._make_executor()
+        executor.native_meta.change_budget_preview = self._preview(would_exceed=False, proposed=1, max_files=3)
+        gate = executor.build_change_budget_soft_gate()
+        self.assertIsInstance(gate, NativeChangeBudgetSoftGate)
+        self.assertIsNotNone(executor.native_meta.change_budget_soft_gate)
+        self.assertIs(executor.native_meta.change_budget_soft_gate, gate)
+
+    def test_executor_records_soft_gate_loop_step(self):
+        executor, _ = self._make_executor()
+        executor.native_meta.change_budget_preview = self._preview(would_exceed=True)
+        executor.build_change_budget_soft_gate()
+        phases = executor.native_meta.native_loop_trace.phases()
+        self.assertIn("change_budget_soft_gate", phases)
+
+    # --- pipeline integration tests ---
+
+    def test_pipeline_calls_soft_gate_after_budget_preview(self):
+        native_mock = _make_native_mock()
+        native_mock.native_meta.change_budget_preview = self._preview(would_exceed=False, proposed=1, max_files=3)
+        native_mock.build_change_budget_soft_gate.return_value = NativeChangeBudgetSoftGate(
+            requires_approval=False, reason="within budget", action="allow"
+        )
+        TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        native_mock.build_change_budget_soft_gate.assert_called()
+
+    def test_pipeline_serializes_soft_gate(self):
+        native_mock = _make_native_mock()
+        native_mock.native_meta.change_budget_soft_gate = NativeChangeBudgetSoftGate(
+            requires_approval=False,
+            reason="within budget",
+            action="allow",
+            warnings=[],
+        )
+        native_mock.build_change_budget_soft_gate.return_value = native_mock.native_meta.change_budget_soft_gate
+        _, _, logged = TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertIn("change_budget_soft_gate", logged)
+        cbsg = logged["change_budget_soft_gate"]
+        self.assertIsNotNone(cbsg)
+        self.assertEqual(cbsg["action"], "allow")
+        self.assertEqual(cbsg["requires_approval"], False)
+
+    def test_soft_gate_does_not_block_when_within_budget(self):
+        native_mock = _make_native_mock()
+        native_mock.build_change_budget_soft_gate.return_value = NativeChangeBudgetSoftGate(
+            requires_approval=False, reason="within budget", action="allow"
+        )
+        result, _, _ = TestNativeVerificationLoop()._run_write_simple(
+            native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+        )
+        self.assertEqual(result.exit_code, 0)
+
+    def test_soft_gate_requires_approval_when_exceeded(self):
+        native_mock = _make_native_mock()
+        native_mock.build_change_budget_soft_gate.return_value = NativeChangeBudgetSoftGate(
+            requires_approval=True,
+            reason="proposal exceeds advisory change budget",
+            action="require_approval",
+        )
+        with patch("openshard.run.pipeline.confirm_or_abort") as mock_confirm:
+            TestNativeVerificationLoop()._run_write_simple(
+                native_mock, plan=_safe_plan(), verify_returns=[(0, "ok")]
+            )
+        mock_confirm.assert_called_once_with("proposal exceeds advisory change budget")

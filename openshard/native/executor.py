@@ -13,6 +13,7 @@ from openshard.native.context import (
     NativeContextBudget,
     NativeChangeBudget,
     NativeChangeBudgetPreview,
+    NativeChangeBudgetSoftGate,
     NativeContextPacket,
     NativeContextQualityAdvisory,
     NativeContextQualityScore,
@@ -31,6 +32,7 @@ from openshard.native.context import (
     build_native_context_packet,
     build_native_change_budget,
     build_native_change_budget_preview,
+    build_native_change_budget_soft_gate,
     build_native_context_quality_advisory,
     build_native_context_quality_score,
     build_native_diff_review,
@@ -89,6 +91,7 @@ class NativeRunMeta:
     context_quality_advisory: NativeContextQualityAdvisory | None = None
     change_budget: NativeChangeBudget | None = None
     change_budget_preview: NativeChangeBudgetPreview | None = None
+    change_budget_soft_gate: NativeChangeBudgetSoftGate | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -616,6 +619,19 @@ class NativeAgentExecutor:
             },
         )
         return preview
+
+    def build_change_budget_soft_gate(self) -> NativeChangeBudgetSoftGate:
+        gate = build_native_change_budget_soft_gate(self.native_meta.change_budget_preview)
+        self.native_meta.change_budget_soft_gate = gate
+        self.record_loop_step(
+            "change_budget_soft_gate",
+            summary=f"{gate.action} approval={gate.requires_approval}",
+            metadata={
+                "requires_approval": gate.requires_approval,
+                "action": gate.action,
+            },
+        )
+        return gate
 
     def build_context_packet(self, task: str) -> NativeContextPacket:
         file_ctx = self.native_meta.file_context

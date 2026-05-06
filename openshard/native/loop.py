@@ -18,6 +18,7 @@ NativeLoopPhase = Literal[
     "generation",
     "proposal",
     "change_budget_preview",
+    "change_budget_soft_gate",
     "write",
     "command_policy",
     "verification",
