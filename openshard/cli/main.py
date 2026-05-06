@@ -729,6 +729,12 @@ def _render_log_entry(entry: dict, detail: str) -> None:
     if detail == "default":
         _nm = _native_meta_from_entry(entry)
         if _nm is not None:
+            from openshard.cost.baseline import format_baseline_line
+            _pt = entry.get("prompt_tokens") or 0
+            _ct = entry.get("completion_tokens") or 0
+            _bl = format_baseline_line(_pt, _ct, actual_cost=cost)
+            if _bl is not None:
+                click.echo(_bl)
             receipt = _render_native_receipt(_nm)
             if receipt:
                 click.echo(receipt)

@@ -74,6 +74,8 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
     # OpenAI
     "openai/gpt-4o":                        (2.50,  10.00),
     "openai/gpt-4o-mini":                   (0.15,   0.60),
+    # GPT-5 family
+    "openai/gpt-5.5":                       (5.00,  30.00),   # ~est
     # Tiny helpers
     "openai/gpt-5.4-nano":                  (0.10,   0.40),   # ~est
 }
