@@ -413,6 +413,18 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         lines.append(f"  proof: {readable}")
         has_content = True
 
+    deepagents_adapter = getattr(native_meta, "deepagents_adapter", None)
+    if deepagents_adapter is not None:
+        _da_mode = getattr(deepagents_adapter, "mode", "unknown")
+        _da_readable = _da_mode.replace("_", " ")
+        _da_version = getattr(deepagents_adapter, "version", None)
+        _da_suffix = f" [v{_da_version}]" if _da_version else ""
+        lines.append(f"  deepagents adapter: {_da_readable}{_da_suffix}")
+        _da_notes = getattr(deepagents_adapter, "notes", []) or []
+        for note in _da_notes:
+            lines.append(f"  deepagents adapter note: {note}")
+        has_content = True
+
     observation = getattr(native_meta, "observation", None)
     if observation is not None:
         has_content = True
@@ -771,6 +783,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "context_usage_summary": entry.get("context_usage_summary"),
         "failure_memory": entry.get("failure_memory"),
         "osn_loop": entry.get("osn_loop"),
+        "deepagents_adapter": entry.get("deepagents_adapter"),
     })
 
 

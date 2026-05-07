@@ -66,6 +66,7 @@ from openshard.native.repo_context import (
     build_repo_context_summary,
     render_repo_context_summary,
 )
+from openshard.native.backends import DeepAgentsAdapterMeta, build_deepagents_adapter_meta
 from openshard.native.loop import NativeLoopTrace
 from openshard.native.skills import match_builtin_skills, selected_skill_names
 from openshard.native.tool_runner import NativeToolRunner
@@ -114,6 +115,7 @@ class NativeRunMeta:
     context_usage_summary: NativeContextUsageSummary | None = None
     failure_memory: NativeFailureMemory | None = None
     osn_loop: OSNLoopMeta | None = None
+    deepagents_adapter: DeepAgentsAdapterMeta | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -723,6 +725,15 @@ class NativeAgentExecutor:
             metadata={"files_read": files_read, "total_chars": total_chars, "truncated": truncated},
         )
 
+    def _run_deepagents_adapter_phase(self) -> None:
+        meta = build_deepagents_adapter_meta()
+        self.native_meta.deepagents_adapter = meta
+        self.record_loop_step(
+            "deepagents_adapter",
+            summary=f"mode={meta.mode} available={meta.available}",
+            metadata={"mode": meta.mode, "available": meta.available},
+        )
+
     def _run_backend_proof_phase(self, task: str) -> None:
         if self._backend.name != "deepagents":
             return
@@ -980,6 +991,8 @@ class NativeAgentExecutor:
         skills_context: str = "",
     ) -> ExecutionResult:
         self._run_preflight()
+        if self._backend.name == "deepagents":
+            self._run_deepagents_adapter_phase()
         if self._experimental_deepagents_run:
             self._run_backend_proof_phase(task)
         self._run_observe_phase(task, repo_facts=repo_facts)

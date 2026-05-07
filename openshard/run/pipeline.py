@@ -1127,6 +1127,11 @@ class RunPipeline:
                     if _native_meta is not None and _native_meta.osn_loop is not None
                     else None
                 ),
+                "deepagents_adapter": (
+                    asdict(_native_meta.deepagents_adapter)
+                    if _native_meta is not None and _native_meta.deepagents_adapter is not None
+                    else None
+                ),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
