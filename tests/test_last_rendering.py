@@ -1551,5 +1551,94 @@ class TestContextUsageRendering(unittest.TestCase):
         self.assertNotIn("context warnings:", out)
 
 
+class TestNativeFailureMemoryRendering(unittest.TestCase):
+    def _base_entry(self) -> dict:
+        return {
+            "workflow": "native",
+            "executor": "native",
+        }
+
+    def _entry_with_failure_memory(self, lessons: list[dict]) -> dict:
+        entry = self._base_entry()
+        entry["failure_memory"] = {
+            "has_lessons": bool(lessons),
+            "lessons": lessons,
+        }
+        return entry
+
+    def test_no_block_when_failure_memory_absent(self):
+        out = _render(self._base_entry(), detail="more")
+        self.assertNotIn("failure memory:", out)
+
+    def test_no_block_when_has_lessons_false(self):
+        entry = self._base_entry()
+        entry["failure_memory"] = {"has_lessons": False, "lessons": []}
+        out = _render(entry, detail="more")
+        self.assertNotIn("failure memory:", out)
+
+    def test_block_shown_with_two_lessons(self):
+        entry = self._entry_with_failure_memory([
+            {"lesson_type": "weak_context", "reason": "score 20/100"},
+            {"lesson_type": "missing_verification", "reason": "no commands"},
+        ])
+        out = _render(entry, detail="more")
+        self.assertIn("failure memory: 2 lessons", out)
+
+    def test_block_shown_with_singular_lesson(self):
+        entry = self._entry_with_failure_memory([
+            {"lesson_type": "failed_verification", "reason": "exit code 1"},
+        ])
+        out = _render(entry, detail="more")
+        self.assertIn("failure memory: 1 lesson", out)
+
+    def test_compact_rendering_shows_labels_not_reasons(self):
+        entry = self._entry_with_failure_memory([
+            {"lesson_type": "weak_context", "reason": "score 20/100"},
+            {"lesson_type": "missing_verification", "reason": "no commands available"},
+        ])
+        out = _render(entry, detail="more")
+        self.assertIn("weak_context", out)
+        self.assertIn("missing_verification", out)
+        self.assertNotIn("score 20/100", out)
+        self.assertNotIn("no commands available", out)
+
+    def test_full_rendering_shows_reasons(self):
+        entry = self._entry_with_failure_memory([
+            {"lesson_type": "weak_context", "reason": "score 20/100"},
+        ])
+        out = _render(entry, detail="full")
+        self.assertIn("failure memory: 1 lesson", out)
+        self.assertIn("weak_context: score 20/100", out)
+
+    def test_all_known_lesson_types_render_as_labels(self):
+        all_types = [
+            "weak_context",
+            "unknown_task_type",
+            "failed_verification",
+            "unsafe_command",
+            "approval_required",
+            "approval_rejected",
+            "patch_too_broad",
+            "missing_verification",
+            "context_truncated",
+            "warnings_present",
+        ]
+        lessons = [{"lesson_type": t, "reason": f"reason for {t}"} for t in all_types]
+        entry = self._entry_with_failure_memory(lessons)
+        out = _render(entry, detail="more")
+        self.assertIn(f"failure memory: {len(all_types)} lessons", out)
+        for t in all_types:
+            self.assertIn(t, out)
+
+    def test_old_entry_without_failure_memory_is_safe(self):
+        entry = {
+            "workflow": "native",
+            "executor": "native",
+            "diff_review": {"changed_files": 1, "added_lines": 5, "removed_lines": 2, "truncated": False, "warnings": []},
+        }
+        out = _render(entry, detail="more")
+        self.assertNotIn("failure memory:", out)
+
+
 if __name__ == "__main__":
     unittest.main()

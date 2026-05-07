@@ -977,6 +977,19 @@ class RunPipeline:
             from openshard.cli.run_output import _print_native_demo_block, _print_native_summary
             _print_native_demo_block(_native_meta, detail=detail)
             _print_native_summary(_native_meta, detail=detail)
+        if _native_meta is not None:
+            from openshard.native.context import build_native_failure_memory
+            _native_meta.failure_memory = build_native_failure_memory(
+                context_quality_score=_native_meta.context_quality_score,
+                clarification_request=_native_meta.clarification_request,
+                verification_loop=_native_meta.verification_loop,
+                command_policy_preview=_native_meta.command_policy_preview,
+                approval_request=_native_meta.approval_request,
+                approval_receipt=_native_meta.approval_receipt,
+                change_budget_preview=_native_meta.change_budget_preview,
+                verification_plan=_native_meta.verification_plan,
+                context_usage_summary=_native_meta.context_usage_summary,
+            )
         _extra_metadata: dict | None = None
         if _native_meta is not None:
             _extra_metadata = {
@@ -1099,6 +1112,11 @@ class RunPipeline:
                 "context_usage_summary": (
                     asdict(_native_meta.context_usage_summary)
                     if _native_meta is not None and _native_meta.context_usage_summary is not None
+                    else None
+                ),
+                "failure_memory": (
+                    asdict(_native_meta.failure_memory)
+                    if _native_meta is not None and _native_meta.failure_memory is not None
                     else None
                 ),
             }

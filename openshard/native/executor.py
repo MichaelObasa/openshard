@@ -23,6 +23,7 @@ from openshard.native.context import (
     NativeContextUsageSummary,
     NativeDiffReview,
     NativeEvidence,
+    NativeFailureMemory,
     NativeFileContext,
     NativeFileSnippet,
     NativeFinalReport,
@@ -107,6 +108,7 @@ class NativeRunMeta:
     verification_plan: NativeVerificationPlan | None = None
     clarification_request: NativeClarificationRequest | None = None
     context_usage_summary: NativeContextUsageSummary | None = None
+    failure_memory: NativeFailureMemory | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
