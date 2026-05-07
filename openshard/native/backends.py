@@ -13,6 +13,15 @@ class NativeBackendResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class DeepAgentsAdapterMeta:
+    available: bool = False
+    version: str | None = None
+    adapter_class: str = "DeepAgentsNativeBackend"
+    mode: str = "unavailable"
+    notes: list[str] = field(default_factory=list)
+
+
 class NativeAgentBackend(Protocol):
     name: str
 
@@ -165,3 +174,25 @@ def get_backend(name: str) -> NativeAgentBackend:
     if name == "deepagents":
         return DeepAgentsNativeBackend()
     return BuiltinNativeBackend()
+
+
+def build_deepagents_adapter_meta(context: dict | None = None) -> DeepAgentsAdapterMeta:  # noqa: ARG001
+    """Import-only probe for DeepAgents availability and version.
+
+    Never calls create_deep_agent or any DeepAgents function. Never raises.
+    """
+    try:
+        import deepagents as _da
+        version: str | None = getattr(_da, "__version__", None)
+        return DeepAgentsAdapterMeta(
+            available=True,
+            version=version,
+            mode="available_unconfigured",
+            notes=["DeepAgents detected. No model configured for agent invocation."],
+        )
+    except Exception:
+        return DeepAgentsAdapterMeta(
+            available=False,
+            mode="unavailable",
+            notes=["Install deepagents to enable this experimental backend."],
+        )
