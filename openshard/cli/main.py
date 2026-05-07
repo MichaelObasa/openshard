@@ -126,6 +126,13 @@ def plan(task: str):
     default=False,
     help="Invoke a minimal read-only DeepAgents agent as a proof step. Requires --native-backend deepagents. No write or shell tools are provided.",
 )
+@click.option(
+    "--native-loop",
+    "native_loop",
+    type=click.Choice(["experimental"], case_sensitive=False),
+    default=None,
+    help="Enable experimental bounded native loop. Requires --workflow native. Runs additional deterministic read-only tool steps before generation.",
+)
 @click.option("--plan", "plan_flag", is_flag=True, default=False, help="Show execution plan and prompt for approval before running.")
 @click.option(
     "--approval",
@@ -141,8 +148,10 @@ def plan(task: str):
 )
 @click.option("--history-scoring", "history_scoring", is_flag=True, default=False, help="Apply run-history bonuses/penalties to model scoring (opt-in).")
 @click.option("--eval-scoring", "eval_scoring", is_flag=True, default=False, help="Apply eval-run bonuses/penalties to model scoring (opt-in).")
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, native_backend: str | None, experimental_deepagents_run: bool, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool):
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, native_backend: str | None, experimental_deepagents_run: bool, native_loop: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool):
     """Execute TASK and return a structured result."""
+    if native_loop is not None and workflow != "native":
+        raise click.UsageError("--native-loop experimental requires --workflow native")
     try:
         config = load_config()
     except (ValueError, RuntimeError) as exc:
@@ -165,6 +174,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         detail=detail,
         native_backend=native_backend,
         experimental_deepagents_run=experimental_deepagents_run,
+        native_loop=native_loop,
     )
     result = pipeline.run(task)
     if result.exit_code != 0:

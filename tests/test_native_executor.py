@@ -31,6 +31,8 @@ from openshard.native.context import (
     NativePlan,
     NativeVerificationCommandSummary,
     NativeVerificationLoop,
+    OSNLoopMeta,
+    OSNLoopStep,
     build_compact_run_state,
     build_initial_context_budget,
     build_native_approval_receipt,
@@ -55,6 +57,7 @@ from openshard.native.context import (
 from openshard.native.executor import (
     NativeAgentExecutor,
     NativeRunMeta,
+    _MAX_OSN_LOOP_STEPS,
     _build_native_plan,
     _extract_search_query,
     _extract_snippet_lines,
@@ -5617,3 +5620,202 @@ class TestNativeApprovalReceipt(unittest.TestCase):
         self.assertFalse(hasattr(result, "files"))
         self.assertFalse(hasattr(result, "diff"))
         self.assertFalse(hasattr(result, "content"))
+
+
+class TestNativeRunMetaOSNField(unittest.TestCase):
+    """osn_loop field on NativeRunMeta."""
+
+    def test_defaults_none(self):
+        meta = NativeRunMeta()
+        self.assertIsNone(meta.osn_loop)
+
+    def test_accepts_osn_loop_meta(self):
+        meta = NativeRunMeta()
+        loop = OSNLoopMeta(enabled=True, steps_run=2, steps_queued=3, max_steps=5, terminated_reason="complete")
+        meta.osn_loop = loop
+        self.assertIs(meta.osn_loop, loop)
+        self.assertTrue(meta.osn_loop.enabled)
+        self.assertEqual(meta.osn_loop.steps_run, 2)
+
+    def test_serializes_via_asdict(self):
+        from dataclasses import asdict
+        meta = NativeRunMeta()
+        loop = OSNLoopMeta(
+            enabled=True,
+            steps_run=1,
+            steps_queued=2,
+            max_steps=5,
+            consecutive_empty=0,
+            terminated_reason="complete",
+            steps=[OSNLoopStep(
+                step_index=0, tool_name="read_file", target_label="src/foo.py",
+                reason="read_search_finding", ok=True, output_chars=100,
+            )],
+            paths_surfaced=["src/foo.py"],
+            warnings=[],
+            truncated=False,
+        )
+        meta.osn_loop = loop
+        d = asdict(meta)
+        self.assertIn("osn_loop", d)
+        self.assertIsNotNone(d["osn_loop"])
+        self.assertTrue(d["osn_loop"]["enabled"])
+        self.assertEqual(d["osn_loop"]["steps_run"], 1)
+        self.assertEqual(d["osn_loop"]["paths_surfaced"], ["src/foo.py"])
+        self.assertEqual(len(d["osn_loop"]["steps"]), 1)
+        self.assertEqual(d["osn_loop"]["steps"][0]["tool_name"], "read_file")
+
+    def test_serializes_none_osn_loop(self):
+        from dataclasses import asdict
+        meta = NativeRunMeta()
+        d = asdict(meta)
+        self.assertIn("osn_loop", d)
+        self.assertIsNone(d["osn_loop"])
+
+    def test_json_serializable_with_loop(self):
+        import json
+        from dataclasses import asdict
+        meta = NativeRunMeta()
+        meta.osn_loop = OSNLoopMeta(
+            enabled=True, steps_run=1, steps_queued=1, max_steps=5,
+            terminated_reason="complete",
+            steps=[OSNLoopStep(
+                step_index=0, tool_name="list_files", target_label="src/",
+                reason="task_keyword", ok=True, output_chars=50,
+            )],
+            paths_surfaced=[],
+        )
+        d = asdict(meta)
+        serialized = json.dumps(d)
+        self.assertIn("osn_loop", serialized)
+
+    def test_json_serializable_without_loop(self):
+        import json
+        from dataclasses import asdict
+        meta = NativeRunMeta()
+        d = asdict(meta)
+        serialized = json.dumps(d)
+        self.assertIn('"osn_loop": null', serialized)
+
+
+class TestGenerateOSNIntegration(unittest.TestCase):
+    """Integration tests for --native-loop experimental in generate()."""
+
+    def _make_executor(self, native_loop=None, with_repo=False):
+        import tempfile
+        fake_gen = _make_generator_mock()
+        kwargs: dict = {"provider": MagicMock(), "native_loop": native_loop}
+        if with_repo:
+            tmp = tempfile.mkdtemp()
+            kwargs["repo_root"] = Path(tmp)
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(**kwargs)
+        return executor, fake_gen
+
+    def test_no_flag_osn_loop_is_none(self):
+        executor, _ = self._make_executor(native_loop=None)
+        executor.generate("fix the bug")
+        self.assertIsNone(executor.native_meta.osn_loop)
+
+    def test_no_flag_osn_loop_not_in_phases(self):
+        executor, _ = self._make_executor(native_loop=None)
+        executor.generate("fix the bug")
+        self.assertNotIn("osn_loop", executor.native_meta.native_loop_steps)
+
+    def test_no_flag_prompt_no_osn_block(self):
+        executor, fake_gen = self._make_executor(native_loop=None)
+        executor.generate("fix the bug")
+        _, kwargs = fake_gen.generate.call_args
+        skills_context = kwargs.get("skills_context", "")
+        self.assertNotIn("[osn loop]", skills_context)
+
+    def test_experimental_flag_no_repo_no_crash(self):
+        # No repo_root → _runner is None → _run_experimental_loop returns early (no crash)
+        executor, _ = self._make_executor(native_loop="experimental", with_repo=False)
+        executor.generate("fix the bug")
+        self.assertIsNone(executor.native_meta.osn_loop)
+
+    def test_experimental_flag_with_repo_enabled_true(self):
+        executor, _ = self._make_executor(native_loop="experimental", with_repo=True)
+        executor.generate("fix the bug")
+        self.assertIsNotNone(executor.native_meta.osn_loop)
+        self.assertTrue(executor.native_meta.osn_loop.enabled)
+
+    def test_experimental_flag_osn_loop_in_phases(self):
+        executor, _ = self._make_executor(native_loop="experimental", with_repo=True)
+        executor.generate("fix the bug")
+        self.assertIn("osn_loop", executor.native_meta.native_loop_steps)
+
+    def test_experimental_flag_terminated_reason_valid(self):
+        _valid = {"not_run", "complete", "max_steps", "consecutive_empty", "no_steps"}
+        executor, _ = self._make_executor(native_loop="experimental", with_repo=True)
+        executor.generate("fix the bug")
+        if executor.native_meta.osn_loop is not None:
+            self.assertIn(executor.native_meta.osn_loop.terminated_reason, _valid)
+
+    def test_experimental_flag_no_write_file_in_trace(self):
+        executor, _ = self._make_executor(native_loop="experimental", with_repo=True)
+        executor.generate("fix the bug")
+        for entry in executor.native_meta.tool_trace:
+            tool_name = (
+                entry.get("tool_name", "") if isinstance(entry, dict)
+                else getattr(entry, "tool_name", "")
+            )
+            self.assertNotEqual(tool_name, "write_file",
+                                "write_file must never appear in tool trace from OSN loop")
+
+    def test_experimental_flag_no_run_command_in_trace(self):
+        executor, _ = self._make_executor(native_loop="experimental", with_repo=True)
+        executor.generate("fix the bug")
+        for entry in executor.native_meta.tool_trace:
+            tool_name = (
+                entry.get("tool_name", "") if isinstance(entry, dict)
+                else getattr(entry, "tool_name", "")
+            )
+            self.assertNotEqual(tool_name, "run_command",
+                                "run_command must never appear in tool trace from OSN loop")
+
+    def test_experimental_flag_no_run_verification_in_trace(self):
+        executor, _ = self._make_executor(native_loop="experimental", with_repo=True)
+        executor.generate("fix the bug")
+        for entry in executor.native_meta.tool_trace:
+            tool_name = (
+                entry.get("tool_name", "") if isinstance(entry, dict)
+                else getattr(entry, "tool_name", "")
+            )
+            self.assertNotEqual(tool_name, "run_verification",
+                                "run_verification must never appear in tool trace from OSN loop")
+
+    def test_experimental_flag_max_steps_enforced(self):
+        executor, _ = self._make_executor(native_loop="experimental", with_repo=True)
+        executor.native_meta.read_search_findings = [
+            f"file:src/file{i}.py" for i in range(20)
+        ]
+        executor.generate("fix the bug")
+        if executor.native_meta.osn_loop is not None:
+            self.assertLessEqual(executor.native_meta.osn_loop.steps_run, _MAX_OSN_LOOP_STEPS)
+
+    def test_no_flag_plan_phase_still_present(self):
+        executor, _ = self._make_executor(native_loop=None)
+        executor.generate("fix the bug")
+        phases = executor.native_meta.native_loop_steps
+        self.assertNotIn("osn_loop", phases)
+        self.assertIn("plan", phases)
+
+    def test_osn_context_block_absent_when_flag_inactive(self):
+        executor, fake_gen = self._make_executor(native_loop=None)
+        executor.generate("fix the bug")
+        _, kwargs = fake_gen.generate.call_args
+        skills_context = kwargs.get("skills_context", "")
+        self.assertNotIn("[osn loop]", skills_context)
+
+    def test_osn_context_block_present_only_when_steps_ran(self):
+        executor, fake_gen = self._make_executor(native_loop="experimental", with_repo=True)
+        executor.generate("fix the bug")
+        _, kwargs = fake_gen.generate.call_args
+        skills_context = kwargs.get("skills_context", "")
+        loop = executor.native_meta.osn_loop
+        if loop is not None and loop.enabled and loop.steps_run > 0:
+            self.assertIn("[osn loop]", skills_context)
+        else:
+            self.assertNotIn("[osn loop]", skills_context)
