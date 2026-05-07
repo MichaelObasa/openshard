@@ -638,8 +638,8 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         _lessons = getattr(fm, "lessons", []) or []
         _l_count = len(_lessons)
         _l_word = "lesson" if _l_count == 1 else "lessons"
-        lines.append(f"  failure memory: {_l_count} {_l_word}")
         if detail == "full":
+            lines.append(f"  failure memory: {_l_count} {_l_word}")
             for _lesson in _lessons:
                 _lt = getattr(_lesson, "lesson_type", None) or (_lesson.get("lesson_type", "") if isinstance(_lesson, dict) else "")
                 _lr = getattr(_lesson, "reason", None) or (_lesson.get("reason", "") if isinstance(_lesson, dict) else "")
@@ -649,7 +649,7 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                 getattr(_l, "lesson_type", None) or (_l.get("lesson_type", "") if isinstance(_l, dict) else "")
                 for _l in _lessons
             ]
-            lines.append(f"    {', '.join(_labels)}")
+            lines.append(f"  failure memory: {', '.join(_labels)}")
         has_content = True
 
     if detail == "full":
