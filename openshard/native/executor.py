@@ -33,6 +33,8 @@ from openshard.native.context import (
     NativeVerificationCommandSummary,
     NativeVerificationLoop,
     NativeVerificationPlan,
+    OSNLoopMeta,
+    OSNLoopStep,
     build_initial_context_budget,
     build_native_approval_receipt,
     build_native_budget_gate_approval_request,
@@ -50,12 +52,14 @@ from openshard.native.context import (
     build_native_patch_proposal,
     build_native_verification_command_summary,
     build_native_verification_plan,
+    build_osn_loop_meta,
     render_native_change_budget,
     render_native_context_packet,
     render_native_context_quality_advisory,
     render_native_evidence,
     render_native_observation,
     render_native_plan,
+    render_osn_loop_context,
 )
 from openshard.native.repo_context import (
     NativeRepoContextSummary,
@@ -109,6 +113,7 @@ class NativeRunMeta:
     clarification_request: NativeClarificationRequest | None = None
     context_usage_summary: NativeContextUsageSummary | None = None
     failure_memory: NativeFailureMemory | None = None
+    osn_loop: OSNLoopMeta | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -125,6 +130,16 @@ _MAX_LOOP_FINDINGS: int = 5
 _MAX_FILE_CONTEXT_FILES: int = 3
 _MAX_FILE_CONTEXT_CHARS_PER_FILE: int = 2000
 _MAX_FILE_CONTEXT_TOTAL_CHARS: int = 5000
+
+_LOOP_ALLOWED_TOOLS: frozenset[str] = frozenset({
+    "list_files",
+    "read_file",
+    "search_repo",
+    "get_git_diff",
+})
+_MAX_OSN_LOOP_STEPS: int = 5
+_MAX_OSN_QUEUE_CAP: int = 10
+_MAX_OSN_CONSECUTIVE_EMPTY: int = 2
 
 
 def _parse_search_result_line(line: str) -> tuple[str, int] | None:
@@ -249,6 +264,7 @@ class NativeAgentExecutor:
         backend_name: str = "builtin",
         experimental_deepagents_run: bool = False,
         deepagents_model: str | None = None,
+        native_loop: str | None = None,
     ) -> None:
         from openshard.native.backends import get_backend
 
@@ -263,6 +279,7 @@ class NativeAgentExecutor:
         self.native_meta.native_backend_available = _available
         self._experimental_deepagents_run = experimental_deepagents_run
         self._deepagents_model = deepagents_model  # None in production; injectable for tests
+        self._native_loop = native_loop
         if backend_name == "deepagents" and not _available:
             self.native_meta.native_backend_notes = [
                 "Install deepagents to enable this experimental backend."
@@ -437,6 +454,203 @@ class NativeAgentExecutor:
                 "matched_terms": matched_terms,
                 "truncated": truncated,
                 "strategy": strategy,
+            },
+        )
+
+    @staticmethod
+    def _is_safe_repo_path(raw: str) -> bool:
+        """Return True only for safe repo-relative paths.
+
+        Rejects: absolute POSIX paths, Windows drive-letter paths, home-relative
+        paths, POSIX traversal (../), backslash traversal (..), and any path
+        that normalizes outside the repo root after separator normalization.
+        """
+        if not raw:
+            return False
+        normalized = raw.replace("\\", "/")
+        if normalized.startswith("/"):
+            return False
+        if normalized.startswith("~"):
+            return False
+        if len(normalized) >= 2 and normalized[1] == ":":
+            return False
+        parts = normalized.split("/")
+        if ".." in parts:
+            return False
+        return True
+
+    @staticmethod
+    def _sanitize_target_label(tool_name: str, raw: str) -> str:
+        """Return a sanitized compact label for an OSN loop step.
+
+        File paths: validated as safe repo-relative, backslashes normalized,
+        truncated to 200 chars.
+        Search steps: always returns the fixed label 'task_keyword_search'.
+        """
+        if tool_name == "search_repo":
+            return "task_keyword_search"
+        if tool_name in ("read_file", "list_files"):
+            if not NativeAgentExecutor._is_safe_repo_path(raw):
+                return ""
+            normalized = raw.replace("\\", "/")
+            return normalized[:200]
+        return ""
+
+    def _build_loop_step_queue(self, task: str) -> list[tuple[str, str, str]]:
+        """Build a deterministic step queue from already-gathered findings.
+
+        Returns list of (tool_name, raw_target, reason) tuples.
+        All tool_names are in _LOOP_ALLOWED_TOOLS.
+        No model or AI is consulted — queue is built from static prior data.
+        """
+        queue: list[tuple[str, str, str]] = []
+        seen_paths: set[str] = set()
+
+        for finding in self.native_meta.read_search_findings:
+            if len(queue) >= _MAX_OSN_QUEUE_CAP:
+                break
+            if finding.startswith("file:"):
+                path = finding[len("file:"):]
+                if path and path not in seen_paths and self._is_safe_repo_path(path):
+                    seen_paths.add(path)
+                    queue.append(("read_file", path, "read_search_finding"))
+            elif finding.startswith("test-marker:"):
+                path = finding[len("test-marker:"):]
+                if path and path not in seen_paths and self._is_safe_repo_path(path):
+                    seen_paths.add(path)
+                    queue.append(("read_file", path, "test_marker"))
+
+        if len(queue) < _MAX_OSN_QUEUE_CAP:
+            query = _extract_search_query(task)
+            if query:
+                queue.append(("search_repo", query, "task_keyword"))
+
+        evidence = self.native_meta.evidence
+        if evidence is not None:
+            for snippet in evidence.file_snippets:
+                if len(queue) >= _MAX_OSN_QUEUE_CAP:
+                    break
+                path = snippet.path
+                if path and path not in seen_paths and self._is_safe_repo_path(path):
+                    seen_paths.add(path)
+                    queue.append(("read_file", path, "evidence_snippet"))
+
+        return queue[:_MAX_OSN_QUEUE_CAP]
+
+    @staticmethod
+    def _osn_loop_args(tool_name: str, raw_target: str) -> dict:
+        if tool_name == "read_file":
+            return {"path": raw_target}
+        if tool_name == "search_repo":
+            return {"query": raw_target}
+        if tool_name == "list_files":
+            return {"subdir": raw_target or "."}
+        if tool_name == "get_git_diff":
+            return {}
+        return {}
+
+    def _run_experimental_loop(self, task: str) -> None:
+        """Bounded deterministic OSN loop — safe read-only tools only.
+
+        Runs only when --native-loop experimental is passed. write_file,
+        run_command, and run_verification are structurally excluded — they
+        are absent from _LOOP_ALLOWED_TOOLS and the queue builder never
+        produces them.
+        """
+        if self._runner is None:
+            return
+
+        queue = self._build_loop_step_queue(task)
+        steps_queued = len(queue)
+
+        if steps_queued == 0:
+            meta = OSNLoopMeta(
+                enabled=True,
+                steps_run=0,
+                steps_queued=0,
+                max_steps=_MAX_OSN_LOOP_STEPS,
+                terminated_reason="no_steps",
+            )
+            self.native_meta.osn_loop = meta
+            self.record_loop_step(
+                "osn_loop",
+                summary="no_steps queued",
+                metadata={"steps_run": 0, "steps_queued": 0, "terminated_reason": "no_steps"},
+            )
+            return
+
+        executed_steps: list[OSNLoopStep] = []
+        consecutive_empty = 0
+        warnings: list[str] = []
+        terminated_reason = "complete"
+
+        for idx, (tool_name, raw_target, reason) in enumerate(queue):
+            if idx >= _MAX_OSN_LOOP_STEPS:
+                terminated_reason = "max_steps"
+                break
+
+            if tool_name not in _LOOP_ALLOWED_TOOLS:
+                warnings.append(f"skipped disallowed tool: {tool_name}")
+                executed_steps.append(OSNLoopStep(
+                    step_index=idx,
+                    tool_name=tool_name,
+                    target_label=self._sanitize_target_label(tool_name, raw_target),
+                    reason=reason,
+                    skipped=True,
+                ))
+                continue
+
+            args = self._osn_loop_args(tool_name, raw_target)
+            call = NativeToolCall(tool_name=tool_name, args=args)
+            result = self._runner.run(call)
+            self.native_meta.tool_trace.append(self._runner.trace_entry(call, result))
+
+            output_chars = len(result.output) if result.ok else 0
+            is_empty = result.ok and not result.output.strip()
+
+            if is_empty:
+                consecutive_empty += 1
+            else:
+                consecutive_empty = 0
+
+            executed_steps.append(OSNLoopStep(
+                step_index=idx,
+                tool_name=tool_name,
+                target_label=self._sanitize_target_label(tool_name, raw_target),
+                reason=reason,
+                ok=result.ok,
+                output_chars=output_chars,
+                empty=is_empty,
+            ))
+
+            if consecutive_empty >= _MAX_OSN_CONSECUTIVE_EMPTY:
+                terminated_reason = "consecutive_empty"
+                break
+
+        steps_run = sum(1 for s in executed_steps if not s.skipped)
+        meta = build_osn_loop_meta(
+            steps_run=steps_run,
+            steps_queued=steps_queued,
+            max_steps=_MAX_OSN_LOOP_STEPS,
+            consecutive_empty=consecutive_empty,
+            terminated_reason=terminated_reason,
+            steps=executed_steps,
+            warnings=warnings,
+        )
+        self.native_meta.osn_loop = meta
+        self.record_loop_step(
+            "osn_loop",
+            summary=(
+                f"steps={steps_run}/{_MAX_OSN_LOOP_STEPS}"
+                f" paths={len(meta.paths_surfaced)}"
+                f" reason={terminated_reason}"
+            ),
+            metadata={
+                "steps_run": steps_run,
+                "steps_queued": steps_queued,
+                "paths_surfaced": len(meta.paths_surfaced),
+                "terminated_reason": terminated_reason,
+                "truncated": meta.truncated,
             },
         )
 
@@ -770,6 +984,8 @@ class NativeAgentExecutor:
             self._run_backend_proof_phase(task)
         self._run_observe_phase(task, repo_facts=repo_facts)
         self._run_read_search_loop(task)
+        if self._native_loop == "experimental":
+            self._run_experimental_loop(task)
         self._run_file_context_phase()
         matches = match_builtin_skills(task, repo_facts=repo_facts)
         self.native_meta.selected_skills = selected_skill_names(matches)
@@ -815,6 +1031,10 @@ class NativeAgentExecutor:
         evidence = self.native_meta.evidence
         if evidence is not None:
             context_parts.append(render_native_evidence(evidence))
+
+        osn_block = render_osn_loop_context(self.native_meta.osn_loop)
+        if osn_block:
+            context_parts.append(osn_block)
 
         context_parts.append(render_native_plan(self.native_meta.plan))
 

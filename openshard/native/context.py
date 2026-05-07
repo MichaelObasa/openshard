@@ -620,6 +620,109 @@ def render_native_context_quality_advisory(
 
 
 @dataclass
+class OSNLoopStep:
+    step_index: int = 0
+    tool_name: str = ""
+    target_label: str = ""
+    reason: str = ""
+    ok: bool = False
+    output_chars: int = 0
+    empty: bool = False
+    skipped: bool = False
+
+
+@dataclass
+class OSNLoopMeta:
+    enabled: bool = False
+    steps_run: int = 0
+    steps_queued: int = 0
+    max_steps: int = 0
+    consecutive_empty: int = 0
+    terminated_reason: str = "not_run"
+    steps: list[OSNLoopStep] = field(default_factory=list)
+    paths_surfaced: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    truncated: bool = False
+
+
+def build_osn_loop_meta(
+    *,
+    steps_run: int,
+    steps_queued: int,
+    max_steps: int,
+    consecutive_empty: int,
+    terminated_reason: str,
+    steps: list[OSNLoopStep],
+    warnings: list[str],
+) -> OSNLoopMeta:
+    paths_surfaced = [
+        s.target_label
+        for s in steps
+        if s.ok and not s.empty and not s.skipped and s.tool_name == "read_file" and s.target_label
+    ][:5]
+    return OSNLoopMeta(
+        enabled=True,
+        steps_run=steps_run,
+        steps_queued=steps_queued,
+        max_steps=max_steps,
+        consecutive_empty=consecutive_empty,
+        terminated_reason=terminated_reason,
+        steps=steps,
+        paths_surfaced=paths_surfaced,
+        warnings=warnings,
+        truncated=steps_queued > max_steps,
+    )
+
+
+def render_osn_loop_context(meta: OSNLoopMeta | None) -> str:
+    """Bounded prompt-safe OSN loop context block.
+
+    Emits only when enabled. Contains no raw file content, snippets, diffs,
+    or command strings — only counts, tool names, safe repo-relative paths,
+    and the termination reason.
+    """
+    if meta is None or not meta.enabled:
+        return ""
+    lines = ["[osn loop]"]
+    lines.append(f"steps: {meta.steps_run}/{meta.max_steps}  reason: {meta.terminated_reason}")
+    tool_names = sorted(
+        {s.tool_name for s in meta.steps if not s.skipped and s.tool_name}
+    )
+    if tool_names:
+        lines.append(f"tools: {', '.join(tool_names)}")
+    if meta.paths_surfaced:
+        lines.append(f"paths: {', '.join(meta.paths_surfaced[:5])}")
+    return "\n".join(lines)
+
+
+def render_osn_loop(meta: OSNLoopMeta | None, *, detail: str = "default") -> str:
+    """Human-readable OSN loop summary for openshard last rendering."""
+    if meta is None or not meta.enabled:
+        return ""
+    lines = [
+        f"osn loop: {meta.steps_run}/{meta.max_steps} steps"
+        f"  paths={len(meta.paths_surfaced)}"
+        f"  reason={meta.terminated_reason}"
+    ]
+    if meta.truncated:
+        lines.append("  [queue truncated to max_steps]")
+    if meta.warnings:
+        for w in meta.warnings[:3]:
+            lines.append(f"  warn: {w}")
+    if detail == "full" and meta.steps:
+        _MAX_RENDER = 8
+        lines.append("  steps:")
+        for s in meta.steps[:_MAX_RENDER]:
+            status = "skip" if s.skipped else ("ok" if s.ok else "fail")
+            empty_tag = " [empty]" if s.empty else ""
+            lines.append(
+                f"    [{s.step_index}] {s.tool_name}({s.target_label!r})"
+                f" {status} chars={s.output_chars}{empty_tag}"
+            )
+    return "\n".join(lines)
+
+
+@dataclass
 class NativeChangeBudget:
     level: str = "unknown"
     max_files: int = 1

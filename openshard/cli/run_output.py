@@ -483,6 +483,19 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         lines.append(f"  read/search: {len(read_search_findings)} findings")
         has_content = True
 
+    osn_loop = getattr(native_meta, "osn_loop", None)
+    if osn_loop is not None and getattr(osn_loop, "enabled", False):
+        steps_run = getattr(osn_loop, "steps_run", 0)
+        max_steps = getattr(osn_loop, "max_steps", 0)
+        paths = getattr(osn_loop, "paths_surfaced", []) or []
+        reason = getattr(osn_loop, "terminated_reason", "")
+        trunc = ", truncated" if getattr(osn_loop, "truncated", False) else ""
+        lines.append(
+            f"  osn loop: {steps_run}/{max_steps} steps,"
+            f" {len(paths)} paths, reason={reason}{trunc}"
+        )
+        has_content = True
+
     cp = getattr(native_meta, "context_packet", None)
     if cp is not None:
         _cp_sources = len(getattr(cp, "sources", []) or [])
@@ -653,6 +666,24 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         has_content = True
 
     if detail == "full":
+        osn_loop_full = getattr(native_meta, "osn_loop", None)
+        if osn_loop_full is not None and getattr(osn_loop_full, "enabled", False):
+            osn_steps = getattr(osn_loop_full, "steps", []) or []
+            _MAX_OSN_RENDER_STEPS = 8
+            if osn_steps:
+                lines.append("  osn loop steps:")
+                for s in osn_steps[:_MAX_OSN_RENDER_STEPS]:
+                    s_idx = _loop_event_value(s, "step_index", "?")
+                    s_tool = _loop_event_value(s, "tool_name", "?")
+                    s_label = _loop_event_value(s, "target_label", "")
+                    s_ok = _loop_event_value(s, "ok", False)
+                    s_chars = _loop_event_value(s, "output_chars", 0)
+                    s_skip = _loop_event_value(s, "skipped", False)
+                    s_status = "skip" if s_skip else ("ok" if s_ok else "fail")
+                    lines.append(f"    [{s_idx}] {s_tool}({s_label!r}) {s_status} chars={s_chars}")
+                has_content = True
+
+    if detail == "full":
         loop_trace = getattr(native_meta, "native_loop_trace", None)
         if loop_trace is None:
             loop_trace = []
@@ -739,6 +770,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "clarification_request": entry.get("clarification_request"),
         "context_usage_summary": entry.get("context_usage_summary"),
         "failure_memory": entry.get("failure_memory"),
+        "osn_loop": entry.get("osn_loop"),
     })
 
 

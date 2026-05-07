@@ -115,6 +115,7 @@ class RunPipeline:
         detail: str,
         native_backend: str | None = None,
         experimental_deepagents_run: bool = False,
+        native_loop: str | None = None,
     ) -> None:
         self._config = config
         self._write = write
@@ -132,6 +133,7 @@ class RunPipeline:
         self._detail = detail
         self._native_backend = native_backend or "builtin"
         self._experimental_deepagents_run = experimental_deepagents_run
+        self._native_loop = native_loop
 
     def run(self, task: str) -> RunResult:  # noqa: C901
         result_obj = RunResult()
@@ -243,6 +245,7 @@ class RunPipeline:
                     repo_root=Path.cwd(),
                     backend_name=self._native_backend,
                     experimental_deepagents_run=self._experimental_deepagents_run,
+                    native_loop=self._native_loop,
                 )
             else:
                 generator = ExecutionGenerator(provider=_provider_instance)
@@ -1117,6 +1120,11 @@ class RunPipeline:
                 "failure_memory": (
                     asdict(_native_meta.failure_memory)
                     if _native_meta is not None and _native_meta.failure_memory is not None
+                    else None
+                ),
+                "osn_loop": (
+                    asdict(_native_meta.osn_loop)
+                    if _native_meta is not None and _native_meta.osn_loop is not None
                     else None
                 ),
             }
