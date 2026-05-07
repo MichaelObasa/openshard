@@ -1582,14 +1582,16 @@ class TestNativeFailureMemoryRendering(unittest.TestCase):
             {"lesson_type": "missing_verification", "reason": "no commands"},
         ])
         out = _render(entry, detail="more")
-        self.assertIn("failure memory: 2 lessons", out)
+        self.assertIn("failure memory:", out)
+        self.assertIn("weak_context", out)
+        self.assertIn("missing_verification", out)
 
     def test_block_shown_with_singular_lesson(self):
         entry = self._entry_with_failure_memory([
             {"lesson_type": "failed_verification", "reason": "exit code 1"},
         ])
         out = _render(entry, detail="more")
-        self.assertIn("failure memory: 1 lesson", out)
+        self.assertIn("failure memory: failed_verification", out)
 
     def test_compact_rendering_shows_labels_not_reasons(self):
         entry = self._entry_with_failure_memory([
@@ -1626,7 +1628,7 @@ class TestNativeFailureMemoryRendering(unittest.TestCase):
         lessons = [{"lesson_type": t, "reason": f"reason for {t}"} for t in all_types]
         entry = self._entry_with_failure_memory(lessons)
         out = _render(entry, detail="more")
-        self.assertIn(f"failure memory: {len(all_types)} lessons", out)
+        self.assertIn("failure memory:", out)
         for t in all_types:
             self.assertIn(t, out)
 
