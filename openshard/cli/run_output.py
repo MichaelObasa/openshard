@@ -633,6 +633,25 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         lines.append(f"  context summary: {', '.join(_cus_parts)}")
         has_content = True
 
+    fm = getattr(native_meta, "failure_memory", None)
+    if fm is not None and getattr(fm, "has_lessons", False):
+        _lessons = getattr(fm, "lessons", []) or []
+        _l_count = len(_lessons)
+        _l_word = "lesson" if _l_count == 1 else "lessons"
+        lines.append(f"  failure memory: {_l_count} {_l_word}")
+        if detail == "full":
+            for _lesson in _lessons:
+                _lt = getattr(_lesson, "lesson_type", None) or (_lesson.get("lesson_type", "") if isinstance(_lesson, dict) else "")
+                _lr = getattr(_lesson, "reason", None) or (_lesson.get("reason", "") if isinstance(_lesson, dict) else "")
+                lines.append(f"    {_lt}: {_lr}")
+        else:
+            _labels = [
+                getattr(_l, "lesson_type", None) or (_l.get("lesson_type", "") if isinstance(_l, dict) else "")
+                for _l in _lessons
+            ]
+            lines.append(f"    {', '.join(_labels)}")
+        has_content = True
+
     if detail == "full":
         loop_trace = getattr(native_meta, "native_loop_trace", None)
         if loop_trace is None:
@@ -719,6 +738,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "verification_plan": entry.get("verification_plan"),
         "clarification_request": entry.get("clarification_request"),
         "context_usage_summary": entry.get("context_usage_summary"),
+        "failure_memory": entry.get("failure_memory"),
     })
 
 

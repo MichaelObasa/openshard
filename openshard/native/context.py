@@ -977,6 +977,111 @@ def build_native_context_usage_summary(
     )
 
 
+@dataclass
+class FailureLesson:
+    lesson_type: str = ""
+    reason: str = ""
+
+
+@dataclass
+class NativeFailureMemory:
+    lessons: list[FailureLesson] = field(default_factory=list)
+    has_lessons: bool = False
+
+
+def build_native_failure_memory(
+    *,
+    context_quality_score: Any | None,
+    clarification_request: Any | None,
+    verification_loop: Any | None,
+    command_policy_preview: Any | None,
+    approval_request: Any | None,
+    approval_receipt: Any | None,
+    change_budget_preview: Any | None,
+    verification_plan: Any | None,
+    context_usage_summary: Any | None,
+) -> NativeFailureMemory:
+    lessons: list[FailureLesson] = []
+
+    if context_quality_score is not None and getattr(context_quality_score, "level", "") == "weak":
+        score = getattr(context_quality_score, "score", 0)
+        lessons.append(FailureLesson(
+            lesson_type="weak_context",
+            reason=f"context quality was weak (score {score}/100)",
+        ))
+
+    if clarification_request is not None and getattr(clarification_request, "needed", False):
+        lessons.append(FailureLesson(
+            lesson_type="unknown_task_type",
+            reason="task type was unknown or ambiguous",
+        ))
+
+    if (
+        verification_loop is not None
+        and getattr(verification_loop, "attempted", False)
+        and not getattr(verification_loop, "passed", True)
+    ):
+        lessons.append(FailureLesson(
+            lesson_type="failed_verification",
+            reason="verification ran but did not pass",
+        ))
+
+    if command_policy_preview is not None:
+        blocked = getattr(command_policy_preview, "blocked_count", 0)
+        if blocked > 0:
+            lessons.append(FailureLesson(
+                lesson_type="unsafe_command",
+                reason=f"{blocked} blocked command(s) detected",
+            ))
+
+    if approval_request is not None and getattr(approval_request, "requires_approval", False):
+        approval_reason = getattr(approval_request, "reason", "") or "approval was required"
+        lessons.append(FailureLesson(
+            lesson_type="approval_required",
+            reason=approval_reason,
+        ))
+
+        if approval_receipt is not None and not getattr(approval_receipt, "granted", True):
+            lessons.append(FailureLesson(
+                lesson_type="approval_rejected",
+                reason="approval was requested but not granted",
+            ))
+
+    if change_budget_preview is not None and getattr(change_budget_preview, "would_exceed_budget", False):
+        proposed = getattr(change_budget_preview, "proposed_files", 0)
+        budget = getattr(change_budget_preview, "budget_max_files", 0)
+        lessons.append(FailureLesson(
+            lesson_type="patch_too_broad",
+            reason=f"{proposed} files proposed but budget allows {budget}",
+        ))
+
+    if verification_plan is not None:
+        cmds = getattr(verification_plan, "suggested_verification_commands", None) or []
+        if not cmds:
+            lessons.append(FailureLesson(
+                lesson_type="missing_verification",
+                reason="no verification commands available",
+            ))
+
+    if context_usage_summary is not None and getattr(context_usage_summary, "any_truncated", False):
+        components = getattr(context_usage_summary, "truncated_components", []) or []
+        component_str = ", ".join(components) if components else "unknown"
+        lessons.append(FailureLesson(
+            lesson_type="context_truncated",
+            reason=f"context was truncated: {component_str}",
+        ))
+
+    if context_usage_summary is not None:
+        warn_count = getattr(context_usage_summary, "failure_warning_count", 0)
+        if warn_count > 0:
+            lessons.append(FailureLesson(
+                lesson_type="warnings_present",
+                reason=f"{warn_count} warning(s) accumulated during run",
+            ))
+
+    return NativeFailureMemory(lessons=lessons, has_lessons=bool(lessons))
+
+
 def render_native_context_usage_summary(meta: NativeContextUsageSummary | None) -> str:
     if meta is None:
         return ""
