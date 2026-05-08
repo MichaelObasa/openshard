@@ -1029,6 +1029,12 @@ class RunPipeline:
                 failure_memory=_native_meta.failure_memory,
                 model_policy=_native_meta.model_policy,
             )
+            from openshard.native.context import sync_native_model_selection_decision_with_candidate_scoring
+            _native_meta.model_selection_decision = sync_native_model_selection_decision_with_candidate_scoring(
+                model_selection_decision=_native_meta.model_selection_decision,
+                model_candidate_scoring=_native_meta.model_candidate_scoring,
+                model_policy=_native_meta.model_policy,
+            )
         if _native_meta is not None and detail != "default":
             from openshard.cli.run_output import _print_native_demo_block, _print_native_summary
             _print_native_demo_block(_native_meta, detail=detail)

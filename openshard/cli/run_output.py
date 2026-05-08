@@ -826,12 +826,16 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                     _planner_tier = _rtier
                 if _rname == "executor":
                     _executor_tier = _rtier
-            lines.append(
+            _msd_warnings_compact = getattr(msd, "warnings", []) or []
+            _msd_compact = (
                 f"  model selection: {_msd_strategy}"
                 f"  confidence={_msd_confidence}"
                 f"  planner={_planner_tier}"
                 f"  executor={_executor_tier}"
             )
+            if _msd_warnings_compact:
+                _msd_compact += f"  warnings={len(_msd_warnings_compact)}"
+            lines.append(_msd_compact)
             has_content = True
             if detail == "full":
                 _msd_task = getattr(msd, "task_type", "unknown")
