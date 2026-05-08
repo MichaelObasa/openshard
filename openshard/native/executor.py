@@ -20,6 +20,7 @@ from openshard.native.context import (
     NativeContextPacket,
     NativeContextQualityAdvisory,
     NativeContextQualityScore,
+    NativeContextProvenance,
     NativeContextUsageSummary,
     NativeDiffReview,
     NativeEvidence,
@@ -47,6 +48,7 @@ from openshard.native.context import (
     build_native_change_budget_soft_gate,
     build_native_context_quality_advisory,
     build_native_context_quality_score,
+    build_native_context_provenance,
     build_native_context_usage_summary,
     build_native_diff_review,
     build_native_final_report,
@@ -120,6 +122,7 @@ class NativeRunMeta:
     failure_memory: NativeFailureMemory | None = None
     osn_loop: OSNLoopMeta | None = None
     deepagents_adapter: DeepAgentsAdapterMeta | None = None
+    context_provenance: NativeContextProvenance | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -1049,45 +1052,58 @@ class NativeAgentExecutor:
         self.record_loop_step("validation_contract")
 
         context_parts = []
+        _injected_sources: set[str] = set()
 
         summary = self.native_meta.repo_context_summary
         if summary is not None:
             context_parts.append(render_repo_context_summary(summary))
+            _injected_sources.add("repo_summary")
 
         observation = self.native_meta.observation
         if observation is not None:
             context_parts.append(render_native_observation(observation))
+            _injected_sources.add("observation")
 
         evidence = self.native_meta.evidence
         if evidence is not None:
             context_parts.append(render_native_evidence(evidence))
+            _injected_sources.add("evidence")
 
         osn_block = render_osn_loop_context(self.native_meta.osn_loop)
         if osn_block:
             context_parts.append(osn_block)
+            _injected_sources.add("osn_loop")
 
-        context_parts.append(render_native_plan(self.native_meta.plan))
+        rendered_plan = render_native_plan(self.native_meta.plan)
+        if rendered_plan:
+            context_parts.append(rendered_plan)
+            _injected_sources.add("plan")
 
         rendered_contract = render_native_validation_contract(validation_contract)
         if rendered_contract:
             context_parts.append(rendered_contract)
+            _injected_sources.add("validation_contract")
 
         packet_context = render_native_context_packet(self.native_meta.context_packet)
         if packet_context:
             context_parts.append(packet_context)
+            _injected_sources.add("context_packet")
 
         advisory_context = render_native_context_quality_advisory(
             self.native_meta.context_quality_advisory
         )
         if advisory_context:
             context_parts.append(advisory_context)
+            _injected_sources.add("advisory")
 
         change_budget_context = render_native_change_budget(self.native_meta.change_budget)
         if change_budget_context:
             context_parts.append(change_budget_context)
+            _injected_sources.add("change_budget")
 
         if skills_context:
             context_parts.append(skills_context)
+            _injected_sources.add("skills_context")
 
         combined_context = "\n\n".join(context_parts) if context_parts else skills_context
 
@@ -1109,6 +1125,27 @@ class NativeAgentExecutor:
             verification_loop=self.native_meta.verification_loop,
             total_chars=len(combined_context) if combined_context else 0,
         )
+
+        self.native_meta.context_provenance = build_native_context_provenance(
+            repo_context_summary=self.native_meta.repo_context_summary,
+            observation=self.native_meta.observation,
+            evidence=self.native_meta.evidence,
+            read_search_findings=self.native_meta.read_search_findings,
+            file_context=self.native_meta.file_context,
+            context_packet=self.native_meta.context_packet,
+            context_quality_score=self.native_meta.context_quality_score,
+            context_quality_advisory=self.native_meta.context_quality_advisory,
+            change_budget=self.native_meta.change_budget,
+            plan=self.native_meta.plan,
+            verification_plan=self.native_meta.verification_plan,
+            clarification_request=self.native_meta.clarification_request,
+            validation_contract=self.native_meta.validation_contract,
+            context_usage_summary=self.native_meta.context_usage_summary,
+            osn_loop=self.native_meta.osn_loop,
+            skills_context=skills_context,
+            injected_source_names=_injected_sources,
+        )
+        self.record_loop_step("context_provenance")
 
         result = self._gen.generate(
             task, model=model, repo_facts=repo_facts, skills_context=combined_context

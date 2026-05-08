@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import asdict
 
 import click
 from click.testing import CliRunner
 
 from openshard.cli.main import _model_label, _render_log_entry
+from openshard.native.context import (
+    NativeContextQualityScore,
+    NativeObservation,
+    NativePlan,
+    NativeValidationContract,
+    build_native_context_provenance,
+)
+from openshard.cli.run_output import _native_meta_from_entry
 
 
 def _render(entry: dict, detail: str = "more") -> str:
@@ -1767,6 +1776,123 @@ class TestNativeValidationContractRendering(unittest.TestCase):
         self.assertEqual(getattr(vc, "strength", None), "strong")
         self.assertEqual(getattr(vc, "acceptance_checks", None), ["tests pass", "no regressions"])
         self.assertEqual(getattr(vc, "verification_commands", None), ["pytest"])
+
+
+class TestNativeContextProvenanceRendering(unittest.TestCase):
+
+    def _base_entry(self) -> dict:
+        return {"workflow": "native", "executor": "native"}
+
+    def _entry_with_provenance(self, **provenance_kwargs) -> dict:
+        p = build_native_context_provenance(**provenance_kwargs)
+        entry = self._base_entry()
+        entry["context_provenance"] = asdict(p)
+        return entry
+
+    def test_old_run_without_provenance_does_not_crash(self):
+        entry = self._base_entry()
+        out = _render(entry, detail="more")
+        self.assertNotIn("context provenance:", out)
+
+    def test_compact_provenance_line_renders_in_more(self):
+        obs = NativeObservation(observed_tools=["read", "grep"])
+        entry = self._entry_with_provenance(
+            observation=obs,
+            injected_source_names={"observation"},
+        )
+        out = _render(entry, detail="more")
+        self.assertIn("context provenance:", out)
+        self.assertIn("sources", out)
+        self.assertIn("injected", out)
+        self.assertIn("items", out)
+
+    def test_gaps_line_renders_when_has_gaps(self):
+        cqs = NativeContextQualityScore(level="weak")
+        entry = self._entry_with_provenance(context_quality_score=cqs)
+        out = _render(entry, detail="more")
+        self.assertIn("context provenance gaps:", out)
+
+    def test_gaps_line_absent_when_no_gaps(self):
+        cqs = NativeContextQualityScore(level="good")
+        entry = self._entry_with_provenance(context_quality_score=cqs)
+        out = _render(entry, detail="more")
+        self.assertNotIn("context provenance gaps:", out)
+
+    def test_full_detail_renders_source_lines(self):
+        obs = NativeObservation(observed_tools=["read"])
+        plan = NativePlan(suggested_steps=["step1"])
+        entry = self._entry_with_provenance(
+            observation=obs,
+            plan=plan,
+            injected_source_names={"observation", "plan"},
+        )
+        out = _render(entry, detail="full")
+        self.assertIn("provenance source:", out)
+        self.assertIn("observation", out)
+        self.assertIn("plan", out)
+
+    def test_provenance_absent_from_default_output(self):
+        obs = NativeObservation(observed_tools=["read"])
+        entry = self._entry_with_provenance(observation=obs)
+        out = _render(entry, detail="default")
+        self.assertNotIn("context provenance:", out)
+        self.assertNotIn("provenance source:", out)
+
+    def test_warning_text_not_rendered_in_block(self):
+        cqs = NativeContextQualityScore(level="weak")
+        vc = NativeValidationContract(strength="weak")
+        entry = self._entry_with_provenance(
+            context_quality_score=cqs,
+            validation_contract=vc,
+        )
+        out = _render(entry, detail="more")
+        self.assertNotIn("context quality weak", out)
+        self.assertNotIn("validation contract weak", out)
+        self.assertIn("context provenance gaps:", out)
+
+    def test_warning_count_rendered_not_raw_text(self):
+        cqs = NativeContextQualityScore(level="weak")
+        vc = NativeValidationContract(strength="weak")
+        entry = self._entry_with_provenance(
+            context_quality_score=cqs,
+            validation_contract=vc,
+        )
+        out = _render(entry, detail="more")
+        self.assertIn("2 warnings", out)
+
+    def test_native_meta_from_entry_roundtrips_provenance(self):
+        obs = NativeObservation(observed_tools=["read", "grep"])
+        plan = NativePlan(suggested_steps=["s1"])
+        p = build_native_context_provenance(
+            observation=obs,
+            plan=plan,
+            injected_source_names={"observation", "plan"},
+        )
+        entry = {"workflow": "native", "context_provenance": asdict(p)}
+        meta = _native_meta_from_entry(entry)
+        prov = getattr(meta, "context_provenance", None)
+        self.assertIsNotNone(prov)
+        self.assertEqual(getattr(prov, "used_sources", None), p.used_sources)
+        self.assertEqual(getattr(prov, "injected_sources", None), p.injected_sources)
+        self.assertEqual(getattr(prov, "total_items", None), p.total_items)
+        self.assertEqual(getattr(prov, "has_gaps", None), p.has_gaps)
+
+    def test_dict_based_source_items_render_without_crash(self):
+        prov_dict = {
+            "sources": [
+                {"name": "repo_summary", "used": True, "injected": True, "item_count": 1, "summary": "1 summary"},
+                {"name": "plan", "used": True, "injected": True, "item_count": 2, "summary": "2 steps"},
+            ],
+            "injected_sources": 2,
+            "used_sources": 2,
+            "total_items": 3,
+            "has_gaps": False,
+            "warnings": [],
+        }
+        entry = {"workflow": "native", "context_provenance": prov_dict}
+        out = _render(entry, detail="full")
+        self.assertIn("provenance source: repo_summary", out)
+        self.assertIn("provenance source: plan", out)
 
 
 if __name__ == "__main__":
