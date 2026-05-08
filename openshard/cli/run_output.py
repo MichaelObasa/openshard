@@ -892,6 +892,11 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                         _cc = getattr(_c, "candidate", "")
                         _cs = getattr(_c, "score", 0)
                     lines.append(f"    - {_cr}/{_cc}: {_cs}")
+            _mcs_blocked = getattr(mcs, "blocked_candidates", []) or []
+            if _mcs_blocked:
+                lines.append("  blocked:")
+                for _b in _mcs_blocked:
+                    lines.append(f"    - {_b}")
             lines.append(f"  warnings: {len(_mcs_warnings)}")
 
     if detail in ("more", "full"):

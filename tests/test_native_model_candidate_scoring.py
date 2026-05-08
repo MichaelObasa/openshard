@@ -357,5 +357,114 @@ class TestRenderNativeModelCandidateScoring(unittest.TestCase):
         self.assertIsInstance(parsed["warnings"], list)
 
 
+def _policy(**kwargs: object) -> SimpleNamespace:
+    defaults = dict(
+        mode="custom",
+        allowed_tiers=[],
+        disallowed_tiers=[],
+        prefer_low_cost=False,
+        require_open_source=False,
+        require_local=False,
+        allow_frontier=True,
+        warnings=[],
+    )
+    defaults.update(kwargs)
+    return SimpleNamespace(**defaults)
+
+
+class TestNativeModelPolicyEnforcement(unittest.TestCase):
+    def test_no_policy_no_blocked(self) -> None:
+        sc = _build()
+        self.assertEqual(sc.blocked_candidates, [])
+
+    def test_frontier_blocked_by_allow_frontier_false(self) -> None:
+        sc = _build(model_policy=_policy(allow_frontier=False))
+        frontier_blocked = [b for b in sc.blocked_candidates if "frontier-reasoning-model" in b]
+        self.assertGreater(len(frontier_blocked), 0)
+        for c in sc.candidates:
+            if c.candidate == "frontier-reasoning-model":
+                self.assertEqual(c.score, 0)
+
+    def test_frontier_blocked_by_require_open_source(self) -> None:
+        sc = _build(model_policy=_policy(require_open_source=True))
+        frontier_blocked = [b for b in sc.blocked_candidates if "frontier-reasoning-model" in b]
+        self.assertGreater(len(frontier_blocked), 0)
+
+    def test_local_only_blocks_frontier_and_validator(self) -> None:
+        sc = _build(model_policy=_policy(require_local=True))
+        blocked_tiers = {b.split("/", 1)[1] for b in sc.blocked_candidates}
+        self.assertIn("frontier-reasoning-model", blocked_tiers)
+        self.assertIn("independent-validator-model", blocked_tiers)
+        surviving = {c.candidate for c in sc.candidates if c.score > 0}
+        self.assertIn("balanced-coding-model", surviving)
+
+    def test_disallowed_tiers_blocks_candidate(self) -> None:
+        sc = _build(model_policy=_policy(disallowed_tiers=["frontier-reasoning-model"]))
+        blocked_tiers = {b.split("/", 1)[1] for b in sc.blocked_candidates}
+        self.assertIn("frontier-reasoning-model", blocked_tiers)
+
+    def test_allowed_tiers_blocks_others(self) -> None:
+        sc = _build(model_policy=_policy(allowed_tiers=["balanced-coding-model"]))
+        for c in sc.candidates:
+            if c.candidate != "balanced-coding-model":
+                self.assertEqual(c.score, 0, msg=f"{c.role}/{c.candidate} should be blocked")
+        surviving = {c.candidate for c in sc.candidates if c.score > 0}
+        self.assertEqual(surviving, {"balanced-coding-model"})
+
+    def test_selected_by_role_shifts_away_from_blocked(self) -> None:
+        # Block frontier: planner should shift from default frontier to balanced
+        sc = _build(model_policy=_policy(allow_frontier=False))
+        self.assertNotEqual(sc.selected_by_role.get("planner"), "frontier-reasoning-model")
+        self.assertEqual(sc.selected_by_role.get("planner"), "balanced-coding-model")
+
+    def test_role_safe_selection_prevents_invalid_tiers(self) -> None:
+        # independent-validator-model must never be selected as executor; low-cost never as planner
+        sc = _build(model_policy=_policy(allow_frontier=False))
+        self.assertNotEqual(sc.selected_by_role.get("executor"), "independent-validator-model")
+        self.assertNotEqual(sc.selected_by_role.get("planner"), "low-cost-coding-model")
+
+    def test_all_blocked_adds_warning(self) -> None:
+        # Block everything: planner has only frontier+balanced valid, block both
+        sc = _build(model_policy=_policy(allowed_tiers=["low-cost-coding-model"]))
+        # planner's valid tiers (frontier, balanced) are both not in allowed → all blocked for planner
+        self.assertIn("no candidates survived policy enforcement", sc.warnings)
+
+    def test_policy_warnings_deduped(self) -> None:
+        sc = _build(model_policy=_policy(allow_frontier=False))
+        count = sc.warnings.count("frontier models blocked by policy")
+        self.assertEqual(count, 1)
+
+    def test_policy_restrictions_warning_added(self) -> None:
+        sc = _build(model_policy=_policy(allow_frontier=False))
+        self.assertIn("policy restrictions reduced candidate pool", sc.warnings)
+
+    def test_blocked_count_in_compact_render(self) -> None:
+        sc = _build(model_policy=_policy(allow_frontier=False))
+        out = render_native_model_candidate_scoring(sc, detail="compact")
+        self.assertIn("blocked=", out)
+
+    def test_zero_blocked_not_shown_in_compact(self) -> None:
+        sc = _build()
+        out = render_native_model_candidate_scoring(sc, detail="compact")
+        self.assertNotIn("blocked=", out)
+
+    def test_blocked_section_in_full_render(self) -> None:
+        sc = _build(model_policy=_policy(allow_frontier=False))
+        out = render_native_model_candidate_scoring(sc, detail="full")
+        self.assertIn("blocked:", out)
+        self.assertIn("frontier-reasoning-model", out)
+
+    def test_no_blocked_section_in_full_render_when_empty(self) -> None:
+        sc = _build()
+        out = render_native_model_candidate_scoring(sc, detail="full")
+        self.assertNotIn("blocked:", out)
+
+    def test_blocked_candidates_in_asdict(self) -> None:
+        sc = _build(model_policy=_policy(allow_frontier=False))
+        d = asdict(sc)
+        self.assertIn("blocked_candidates", d)
+        self.assertIsInstance(d["blocked_candidates"], list)
+
+
 if __name__ == "__main__":
     unittest.main()
