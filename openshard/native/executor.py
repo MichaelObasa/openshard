@@ -37,6 +37,7 @@ from openshard.native.context import (
     NativeRunTrustScore,
     NativeModelSelectionDecision,
     NativeModelCandidateScoring,
+    NativeModelPolicy,
     NativeValidationContract,
     OSNLoopMeta,
     OSNLoopStep,
@@ -59,6 +60,7 @@ from openshard.native.context import (
     build_native_verification_command_summary,
     build_native_verification_plan,
     build_native_validation_contract,
+    build_native_model_policy,
     build_osn_loop_meta,
     render_native_change_budget,
     render_native_context_packet,
@@ -129,6 +131,7 @@ class NativeRunMeta:
     run_trust_score: NativeRunTrustScore | None = None
     model_selection_decision: NativeModelSelectionDecision | None = None
     model_candidate_scoring: NativeModelCandidateScoring | None = None
+    model_policy: NativeModelPolicy | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -280,6 +283,7 @@ class NativeAgentExecutor:
         experimental_deepagents_run: bool = False,
         deepagents_model: str | None = None,
         native_loop: str | None = None,
+        model_policy: str | None = None,
     ) -> None:
         from openshard.native.backends import get_backend
 
@@ -287,6 +291,7 @@ class NativeAgentExecutor:
         self.model = self._gen.model
         self.fixer_model = self._gen.fixer_model
         self.native_meta = NativeRunMeta()
+        self.native_meta.model_policy = build_native_model_policy(model_policy)
         self._runner = NativeToolRunner(repo_root) if repo_root is not None else None
         self._backend = get_backend(backend_name)
         _available = self._backend.available()

@@ -116,6 +116,7 @@ class RunPipeline:
         native_backend: str | None = None,
         experimental_deepagents_run: bool = False,
         native_loop: str | None = None,
+        model_policy: str | None = None,
     ) -> None:
         self._config = config
         self._write = write
@@ -134,6 +135,7 @@ class RunPipeline:
         self._native_backend = native_backend or "builtin"
         self._experimental_deepagents_run = experimental_deepagents_run
         self._native_loop = native_loop
+        self._model_policy = model_policy
 
     def run(self, task: str) -> RunResult:  # noqa: C901
         result_obj = RunResult()
@@ -246,6 +248,7 @@ class RunPipeline:
                     backend_name=self._native_backend,
                     experimental_deepagents_run=self._experimental_deepagents_run,
                     native_loop=self._native_loop,
+                    model_policy=self._model_policy,
                 )
             else:
                 generator = ExecutionGenerator(provider=_provider_instance)
@@ -1191,6 +1194,11 @@ class RunPipeline:
                 "model_candidate_scoring": (
                     asdict(_native_meta.model_candidate_scoring)
                     if _native_meta is not None and _native_meta.model_candidate_scoring is not None
+                    else None
+                ),
+                "model_policy": (
+                    asdict(_native_meta.model_policy)
+                    if _native_meta is not None and _native_meta.model_policy is not None
                     else None
                 ),
             }

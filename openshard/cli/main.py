@@ -148,7 +148,14 @@ def plan(task: str):
 )
 @click.option("--history-scoring", "history_scoring", is_flag=True, default=False, help="Apply run-history bonuses/penalties to model scoring (opt-in).")
 @click.option("--eval-scoring", "eval_scoring", is_flag=True, default=False, help="Apply eval-run bonuses/penalties to model scoring (opt-in).")
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, native_backend: str | None, experimental_deepagents_run: bool, native_loop: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool):
+@click.option(
+    "--model-policy",
+    "model_policy",
+    type=click.Choice(["auto", "cheapest-safe", "frontier-heavy", "open-source-only", "local-only", "custom"], case_sensitive=False),
+    default=None,
+    help="Model selection policy mode (metadata-only v1): auto, cheapest-safe, frontier-heavy, open-source-only, local-only, custom.",
+)
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, native_backend: str | None, experimental_deepagents_run: bool, native_loop: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool, model_policy: str | None):
     """Execute TASK and return a structured result."""
     if native_loop is not None and workflow != "native":
         raise click.UsageError("--native-loop experimental requires --workflow native")
@@ -175,6 +182,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         native_backend=native_backend,
         experimental_deepagents_run=experimental_deepagents_run,
         native_loop=native_loop,
+        model_policy=model_policy,
     )
     result = pipeline.run(task)
     if result.exit_code != 0:

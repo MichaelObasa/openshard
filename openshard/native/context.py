@@ -2382,3 +2382,49 @@ def render_native_model_candidate_scoring(
         lines.append(f"warnings: {len(_warnings)}")
         return "\n".join(lines)
     return f"model candidates: {_role_count} roles, strategy={_strategy}, confidence={_confidence}"
+
+
+@dataclass
+class NativeModelPolicy:
+    mode: str = "auto"
+    allowed_tiers: list[str] = field(default_factory=list)
+    disallowed_tiers: list[str] = field(default_factory=list)
+    prefer_low_cost: bool = False
+    require_open_source: bool = False
+    require_local: bool = False
+    allow_frontier: bool = True
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_model_policy(mode: str | None) -> "NativeModelPolicy":
+    """Parse a mode string into a NativeModelPolicy. Metadata-only v1 — no routing effect."""
+    if mode is None or mode == "auto":
+        return NativeModelPolicy()
+    if mode == "cheapest-safe":
+        return NativeModelPolicy(mode="cheapest-safe", prefer_low_cost=True, allow_frontier=True)
+    if mode == "frontier-heavy":
+        return NativeModelPolicy(mode="frontier-heavy", allow_frontier=True, prefer_low_cost=False)
+    if mode == "open-source-only":
+        return NativeModelPolicy(
+            mode="open-source-only",
+            require_open_source=True,
+            allow_frontier=False,
+            disallowed_tiers=["frontier-reasoning-model"],
+        )
+    if mode == "local-only":
+        return NativeModelPolicy(
+            mode="local-only",
+            require_local=True,
+            require_open_source=True,
+            allow_frontier=False,
+            disallowed_tiers=["frontier-reasoning-model"],
+        )
+    if mode == "custom":
+        return NativeModelPolicy(
+            mode="custom",
+            warnings=["custom model policy is not enforced in v1"],
+        )
+    return NativeModelPolicy(
+        mode="auto",
+        warnings=["unknown model policy mode; defaulted to auto"],
+    )

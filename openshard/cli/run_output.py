@@ -894,6 +894,36 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                     lines.append(f"    - {_cr}/{_cc}: {_cs}")
             lines.append(f"  warnings: {len(_mcs_warnings)}")
 
+    if detail in ("more", "full"):
+        mp = getattr(native_meta, "model_policy", None)
+        if mp is not None:
+            _mp_mode = mp.get("mode", "auto") if isinstance(mp, dict) else getattr(mp, "mode", "auto")
+            _mp_allow_frontier = mp.get("allow_frontier", True) if isinstance(mp, dict) else getattr(mp, "allow_frontier", True)
+            _mp_prefer_low_cost = mp.get("prefer_low_cost", False) if isinstance(mp, dict) else getattr(mp, "prefer_low_cost", False)
+            _mp_require_os = mp.get("require_open_source", False) if isinstance(mp, dict) else getattr(mp, "require_open_source", False)
+            _mp_require_local = mp.get("require_local", False) if isinstance(mp, dict) else getattr(mp, "require_local", False)
+            _mp_warnings = (mp.get("warnings", []) if isinstance(mp, dict) else getattr(mp, "warnings", [])) or []
+            _mp_flags: list[str] = []
+            if _mp_require_local:
+                _mp_flags.append("local only")
+            elif _mp_require_os:
+                _mp_flags.append("open source only")
+            if _mp_prefer_low_cost:
+                _mp_flags.append("prefer low cost")
+            _mp_flags.append("frontier allowed" if _mp_allow_frontier else "frontier blocked")
+            _mp_summary = ", ".join(_mp_flags)
+            _mp_warn_suffix = f", {len(_mp_warnings)} warning(s)" if _mp_warnings else ""
+            lines.append(f"  model policy: {_mp_mode}, {_mp_summary}{_mp_warn_suffix}")
+            has_content = True
+            if detail == "full":
+                lines.append("  [model policy]")
+                lines.append(f"  mode: {_mp_mode}")
+                lines.append(f"  prefer_low_cost: {'yes' if _mp_prefer_low_cost else 'no'}")
+                lines.append(f"  require_open_source: {'yes' if _mp_require_os else 'no'}")
+                lines.append(f"  require_local: {'yes' if _mp_require_local else 'no'}")
+                lines.append(f"  allow_frontier: {'yes' if _mp_allow_frontier else 'no'}")
+                lines.append(f"  warnings: {len(_mp_warnings)}")
+
     return lines if has_content else []
 
 
@@ -964,6 +994,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "run_trust_score": entry.get("run_trust_score"),
         "model_selection_decision": entry.get("model_selection_decision"),
         "model_candidate_scoring": entry.get("model_candidate_scoring"),
+        "model_policy": entry.get("model_policy"),
     })
 
 
