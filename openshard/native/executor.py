@@ -39,6 +39,7 @@ from openshard.native.context import (
     NativeModelCandidateScoring,
     NativeModelPolicy,
     NativeModelPolicyReceipt,
+    NativeRoutingPreview,
     NativeValidationContract,
     OSNLoopMeta,
     OSNLoopStep,
@@ -134,6 +135,7 @@ class NativeRunMeta:
     model_candidate_scoring: NativeModelCandidateScoring | None = None
     model_policy: NativeModelPolicy | None = None
     model_policy_receipt: NativeModelPolicyReceipt | None = None
+    routing_preview: NativeRoutingPreview | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({

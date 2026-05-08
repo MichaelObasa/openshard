@@ -962,6 +962,37 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                 lines.append(f"  warnings_count: {_mpr_warnings}")
                 lines.append(f"  summary: {_mpr_summary}")
 
+    if detail in ("more", "full"):
+        rp = getattr(native_meta, "routing_preview", None)
+        if rp is not None:
+            _rp_summary = rp.get("summary", "") if isinstance(rp, dict) else getattr(rp, "summary", "")
+            lines.append(f"  routing preview: {_rp_summary}")
+            has_content = True
+            if detail == "full":
+                _rp_strategy = rp.get("strategy", "") if isinstance(rp, dict) else getattr(rp, "strategy", "")
+                _rp_policy_mode = rp.get("policy_mode", "") if isinstance(rp, dict) else getattr(rp, "policy_mode", "")
+                _rp_planner = rp.get("planner_tier", "") if isinstance(rp, dict) else getattr(rp, "planner_tier", "")
+                _rp_executor = rp.get("executor_tier", "") if isinstance(rp, dict) else getattr(rp, "executor_tier", "")
+                _rp_validator = rp.get("validator_tier", "") if isinstance(rp, dict) else getattr(rp, "validator_tier", "")
+                _rp_risk = rp.get("risk_level", "") if isinstance(rp, dict) else getattr(rp, "risk_level", "")
+                _rp_confidence = rp.get("confidence", "") if isinstance(rp, dict) else getattr(rp, "confidence", "")
+                _rp_trust = rp.get("trust_level", "") if isinstance(rp, dict) else getattr(rp, "trust_level", "")
+                _rp_blocked = rp.get("blocked_candidates", 0) if isinstance(rp, dict) else getattr(rp, "blocked_candidates", 0)
+                _rp_changed = rp.get("policy_changed_selection", False) if isinstance(rp, dict) else getattr(rp, "policy_changed_selection", False)
+                _rp_warnings = rp.get("warnings", []) if isinstance(rp, dict) else getattr(rp, "warnings", [])
+                lines.append("  [routing preview]")
+                lines.append(f"  strategy:              {_rp_strategy}")
+                lines.append(f"  policy_mode:           {_rp_policy_mode}")
+                lines.append(f"  planner_tier:          {_rp_planner}")
+                lines.append(f"  executor_tier:         {_rp_executor}")
+                lines.append(f"  validator_tier:        {_rp_validator}")
+                lines.append(f"  risk_level:            {_rp_risk}")
+                lines.append(f"  confidence:            {_rp_confidence}")
+                lines.append(f"  trust_level:           {_rp_trust}")
+                lines.append(f"  blocked_candidates:    {_rp_blocked}")
+                lines.append(f"  policy_changed:        {'yes' if _rp_changed else 'no'}")
+                lines.append(f"  warnings:              {len(_rp_warnings or [])}")
+
     return lines if has_content else []
 
 
@@ -1034,6 +1065,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "model_candidate_scoring": entry.get("model_candidate_scoring"),
         "model_policy": entry.get("model_policy"),
         "model_policy_receipt": entry.get("model_policy_receipt"),
+        "routing_preview": entry.get("routing_preview"),
     })
 
 

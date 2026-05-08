@@ -2609,6 +2609,86 @@ def build_native_model_policy_receipt(
     )
 
 
+@dataclass
+class NativeRoutingPreview:
+    strategy: str = "cost-balanced"
+    policy_mode: str = "auto"
+    planner_tier: str = "unknown"
+    executor_tier: str = "unknown"
+    validator_tier: str = "unknown"
+    risk_level: str = "unknown"
+    confidence: str = "medium"
+    blocked_candidates: int = 0
+    policy_changed_selection: bool = False
+    trust_level: str = "unknown"
+    summary: str = ""
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_routing_preview(
+    *,
+    model_candidate_scoring=None,
+    model_selection_decision=None,
+    model_policy_receipt=None,
+    run_trust_score=None,
+) -> "NativeRoutingPreview":
+    def _get(obj, key, default=None):
+        if obj is None:
+            return default
+        return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
+
+    def _tier_from_scoring(role: str) -> str:
+        sbr = _get(model_candidate_scoring, "selected_by_role", {}) or {}
+        return sbr.get(role, "")
+
+    def _tier_from_decision(role: str) -> str:
+        roles = _get(model_selection_decision, "roles", []) or []
+        for r in roles:
+            rname = r.get("role", "") if isinstance(r, dict) else getattr(r, "role", "")
+            if rname == role:
+                return r.get("model_tier", "") if isinstance(r, dict) else getattr(r, "model_tier", "")
+        return ""
+
+    def _tier(role: str) -> str:
+        t = _tier_from_scoring(role)
+        return t if t else (_tier_from_decision(role) or "unknown")
+
+    strategy = _get(model_candidate_scoring, "strategy", "") or _get(model_selection_decision, "strategy", "cost-balanced") or "cost-balanced"
+    confidence = _get(model_candidate_scoring, "confidence", "") or _get(model_selection_decision, "confidence", "medium") or "medium"
+    risk_level = _get(model_selection_decision, "risk_level", "unknown") or "unknown"
+    policy_mode = _get(model_policy_receipt, "mode", "auto") or "auto"
+    policy_changed_selection = bool(_get(model_policy_receipt, "affected_selection", False))
+    blocked_candidates = int(_get(model_policy_receipt, "blocked_count", 0) or 0)
+    trust_level = _get(run_trust_score, "level", "unknown") or "unknown"
+
+    planner_tier = _tier("planner")
+    executor_tier = _tier("executor")
+    validator_tier = _tier("validator")
+
+    mcs_warnings: list[str] = list(_get(model_candidate_scoring, "warnings", []) or [])
+    warnings = mcs_warnings
+
+    summary = (
+        f"{strategy} | planner={planner_tier} executor={executor_tier}"
+        f" validator={validator_tier} | policy={policy_mode}"
+    )
+
+    return NativeRoutingPreview(
+        strategy=strategy,
+        policy_mode=policy_mode,
+        planner_tier=planner_tier,
+        executor_tier=executor_tier,
+        validator_tier=validator_tier,
+        risk_level=risk_level,
+        confidence=confidence,
+        blocked_candidates=blocked_candidates,
+        policy_changed_selection=policy_changed_selection,
+        trust_level=trust_level,
+        summary=summary,
+        warnings=warnings,
+    )
+
+
 def sync_native_model_selection_decision_with_candidate_scoring(
     model_selection_decision: "NativeModelSelectionDecision | None",
     model_candidate_scoring: "NativeModelCandidateScoring | None",
