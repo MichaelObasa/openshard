@@ -2061,12 +2061,16 @@ def render_native_model_selection_decision(
         if _rname == "executor":
             _executor_tier = _rtier
     if detail in ("compact", "more"):
-        return (
+        _warnings = getattr(msd, "warnings", []) or []
+        _base = (
             f"model selection: {_strategy}"
             f"  confidence={_confidence}"
             f"  planner={_planner_tier}"
             f"  executor={_executor_tier}"
         )
+        if _warnings:
+            return f"{_base}  warnings={len(_warnings)}"
+        return _base
     lines = [
         "[model selection]",
         f"strategy: {_strategy}",
@@ -2506,3 +2510,51 @@ def build_native_model_policy(mode: str | None) -> "NativeModelPolicy":
         mode="auto",
         warnings=["unknown model policy mode; defaulted to auto"],
     )
+
+
+def sync_native_model_selection_decision_with_candidate_scoring(
+    model_selection_decision: "NativeModelSelectionDecision | None",
+    model_candidate_scoring: "NativeModelCandidateScoring | None",
+    model_policy: "NativeModelPolicy | None" = None,
+) -> "NativeModelSelectionDecision | None":
+    if model_selection_decision is None or model_candidate_scoring is None:
+        return model_selection_decision
+    selected = getattr(model_candidate_scoring, "selected_by_role", {}) or {}
+    if not selected:
+        return model_selection_decision
+
+    import copy
+    synced = copy.deepcopy(model_selection_decision)
+    changed = False
+
+    for role, tier in selected.items():
+        existing = next(
+            (
+                r for r in synced.roles
+                if (r.get("role") if isinstance(r, dict) else getattr(r, "role", "")) == role
+            ),
+            None,
+        )
+        if existing is not None:
+            current_tier = (
+                existing.get("model_tier", "") if isinstance(existing, dict)
+                else getattr(existing, "model_tier", "")
+            )
+            if current_tier != tier:
+                if isinstance(existing, dict):
+                    existing["model_tier"] = tier
+                else:
+                    existing.model_tier = tier
+                changed = True
+        else:
+            synced.roles.append(NativeModelRoleDecision(role=role, model_tier=tier))
+            changed = True
+
+    _policy_warning = "model selection adjusted by policy enforcement"
+    if changed:
+        if _policy_warning not in synced.warnings:
+            synced.warnings.append(_policy_warning)
+        if not synced.fallback_reason:
+            synced.fallback_reason = "candidate scoring applied model policy constraints"
+
+    return synced

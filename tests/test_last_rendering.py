@@ -2085,6 +2085,41 @@ class TestNativeModelSelectionDecisionRendering(unittest.TestCase):
         self.assertIn("frontier-reasoning-model", out)
         self.assertIn("independent-validator-model", out)
 
+    def test_synced_role_appears_in_full_output(self):
+        entry = self._base_entry()
+        entry["model_selection_decision"] = self._msd_dict(
+            strategy="cost-balanced",
+            warnings=["model selection adjusted by policy enforcement"],
+        )
+        out = _render(entry, detail="full")
+        self.assertIn("balanced-coding-model", out)
+
+    def test_warning_count_renders_without_raw_text_in_full(self):
+        entry = self._base_entry()
+        entry["model_selection_decision"] = self._msd_dict(
+            warnings=["model selection adjusted by policy enforcement"],
+        )
+        out = _render(entry, detail="full")
+        self.assertIn("warnings: 1", out)
+        self.assertNotIn("model selection adjusted by policy enforcement", out)
+
+    def test_warnings_count_in_compact_output(self):
+        entry = self._base_entry()
+        entry["model_selection_decision"] = self._msd_dict(
+            warnings=["model selection adjusted by policy enforcement"],
+        )
+        out = _render(entry, detail="more")
+        self.assertIn("warnings=1", out)
+
+    def test_old_entries_without_warnings_render_safely(self):
+        entry = self._base_entry()
+        msd = self._msd_dict()
+        msd.pop("warnings", None)
+        entry["model_selection_decision"] = msd
+        out = _render(entry, detail="more")
+        self.assertIn("model selection:", out)
+        self.assertNotIn("warnings=", out)
+
 
 class TestNativeModelCandidateScoringRendering(unittest.TestCase):
     def _base_entry(self) -> dict:
