@@ -584,6 +584,35 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         lines.append(f"  clarification options: {_opt_str}")
         has_content = True
 
+    validation_contract = getattr(native_meta, "validation_contract", None)
+    if validation_contract is not None:
+        _vc_strength = getattr(validation_contract, "strength", "unknown")
+        _vc_checks = len(getattr(validation_contract, "acceptance_checks", None) or [])
+        _vc_cmds = len(getattr(validation_contract, "verification_commands", None) or [])
+        _checks_word = "check" if _vc_checks == 1 else "checks"
+        _cmds_word = "verification command" if _vc_cmds == 1 else "verification commands"
+        lines.append(
+            f"  validation contract: {_vc_strength}, {_vc_checks} {_checks_word}, {_vc_cmds} {_cmds_word}"
+        )
+        has_content = True
+        if detail == "full":
+            from openshard.native.context import NativeValidationContract as _NVC
+            from openshard.native.context import render_native_validation_contract as _render_vc
+            _vc_obj = _NVC(
+                intent=getattr(validation_contract, "intent", ""),
+                risk_level=getattr(validation_contract, "risk_level", "unknown"),
+                expected_change_scope=getattr(validation_contract, "expected_change_scope", "unknown"),
+                acceptance_checks=list(getattr(validation_contract, "acceptance_checks", None) or []),
+                verification_commands=list(getattr(validation_contract, "verification_commands", None) or []),
+                approval_expected=getattr(validation_contract, "approval_expected", False),
+                strength=getattr(validation_contract, "strength", "weak"),
+                warnings=list(getattr(validation_contract, "warnings", None) or []),
+            )
+            _full_contract = _render_vc(_vc_obj)
+            if _full_contract:
+                for _vc_line in _full_contract.splitlines():
+                    lines.append(f"  {_vc_line}")
+
     budget_preview = getattr(native_meta, "change_budget_preview", None)
     if budget_preview is not None:
         _proposed = getattr(budget_preview, "proposed_files", 0)
@@ -784,6 +813,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "failure_memory": entry.get("failure_memory"),
         "osn_loop": entry.get("osn_loop"),
         "deepagents_adapter": entry.get("deepagents_adapter"),
+        "validation_contract": entry.get("validation_contract"),
     })
 
 
