@@ -22,6 +22,7 @@ from openshard.native.context import (
     build_native_model_candidate_scoring,
 )
 from openshard.cli.run_output import _native_meta_from_entry
+from openshard.native.context import build_native_model_policy
 
 
 def _render(entry: dict, detail: str = "more") -> str:
@@ -2230,6 +2231,122 @@ class TestNativeModelCandidateScoringRendering(unittest.TestCase):
         except Exception as exc:
             self.fail(f"render raised {exc}")
         self.assertNotIn("model candidates:", out)
+
+
+class TestNativeModelPolicyRendering(unittest.TestCase):
+    def _base_entry(self) -> dict:
+        return {"workflow": "native", "executor": "native"}
+
+    def _entry_with_policy(self, mode: str) -> dict:
+        entry = self._base_entry()
+        entry["model_policy"] = asdict(build_native_model_policy(mode))
+        return entry
+
+    def test_model_policy_hidden_at_default_detail(self):
+        entry = self._entry_with_policy("auto")
+        out = _render(entry, detail="default")
+        self.assertNotIn("model policy", out)
+
+    def test_model_policy_compact_line_at_more(self):
+        entry = self._entry_with_policy("auto")
+        out = _render(entry, detail="more")
+        self.assertIn("model policy:", out)
+        self.assertIn("auto", out)
+
+    def test_model_policy_frontier_allowed_flag_at_more(self):
+        entry = self._entry_with_policy("auto")
+        out = _render(entry, detail="more")
+        self.assertIn("frontier allowed", out)
+
+    def test_model_policy_frontier_blocked_flag_at_more(self):
+        entry = self._entry_with_policy("open-source-only")
+        out = _render(entry, detail="more")
+        self.assertIn("frontier blocked", out)
+
+    def test_model_policy_cheapest_safe_at_more(self):
+        entry = self._entry_with_policy("cheapest-safe")
+        out = _render(entry, detail="more")
+        self.assertIn("model policy:", out)
+        self.assertIn("cheapest-safe", out)
+        self.assertIn("prefer low cost", out)
+
+    def test_model_policy_local_only_at_more(self):
+        entry = self._entry_with_policy("local-only")
+        out = _render(entry, detail="more")
+        self.assertIn("local only", out)
+        self.assertIn("frontier blocked", out)
+
+    def test_model_policy_full_section_header(self):
+        entry = self._entry_with_policy("auto")
+        out = _render(entry, detail="full")
+        self.assertIn("[model policy]", out)
+
+    def test_model_policy_full_shows_mode(self):
+        entry = self._entry_with_policy("cheapest-safe")
+        out = _render(entry, detail="full")
+        self.assertIn("mode: cheapest-safe", out)
+
+    def test_model_policy_full_shows_all_fields(self):
+        entry = self._entry_with_policy("auto")
+        out = _render(entry, detail="full")
+        self.assertIn("prefer_low_cost:", out)
+        self.assertIn("require_open_source:", out)
+        self.assertIn("require_local:", out)
+        self.assertIn("allow_frontier:", out)
+        self.assertIn("warnings:", out)
+
+    def test_model_policy_full_boolean_values(self):
+        entry = self._entry_with_policy("open-source-only")
+        out = _render(entry, detail="full")
+        self.assertIn("require_open_source: yes", out)
+        self.assertIn("allow_frontier: no", out)
+        self.assertIn("require_local: no", out)
+
+    def test_model_policy_warnings_shown_at_more(self):
+        entry = self._base_entry()
+        p = build_native_model_policy("custom")
+        entry["model_policy"] = asdict(p)
+        out = _render(entry, detail="more")
+        self.assertIn("warning(s)", out)
+
+    def test_model_policy_none_no_crash_at_more(self):
+        entry = self._base_entry()
+        try:
+            out = _render(entry, detail="more")
+        except Exception as exc:
+            self.fail(f"render raised {exc}")
+        self.assertNotIn("model policy", out)
+
+    def test_model_policy_none_no_crash_at_full(self):
+        entry = self._base_entry()
+        try:
+            out = _render(entry, detail="full")
+        except Exception as exc:
+            self.fail(f"render raised {exc}")
+        self.assertNotIn("model policy", out)
+
+    def test_default_output_unchanged_when_policy_absent(self):
+        entry_without = self._base_entry()
+        entry_with_none = self._base_entry()
+        entry_with_none["model_policy"] = None
+        out_without = _render(entry_without, detail="more")
+        out_with_none = _render(entry_with_none, detail="more")
+        self.assertNotIn("model policy", out_without)
+        self.assertNotIn("model policy", out_with_none)
+
+    def test_native_meta_from_entry_extracts_model_policy(self):
+        entry = self._entry_with_policy("frontier-heavy")
+        nm = _native_meta_from_entry(entry)
+        mp = getattr(nm, "model_policy", None)
+        self.assertIsNotNone(mp)
+        mode = mp.get("mode") if isinstance(mp, dict) else getattr(mp, "mode", None)
+        self.assertEqual(mode, "frontier-heavy")
+
+    def test_native_meta_from_entry_missing_policy_returns_none(self):
+        entry = self._base_entry()
+        nm = _native_meta_from_entry(entry)
+        mp = getattr(nm, "model_policy", "MISSING")
+        self.assertIsNone(mp)
 
 
 if __name__ == "__main__":
