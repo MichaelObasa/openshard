@@ -748,6 +748,33 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                 lines.append(f"    {phase} [{status}]{meta_str}")
             has_content = True
 
+    if detail in ("more", "full"):
+        prov = getattr(native_meta, "context_provenance", None)
+        if prov is not None:
+            _p_used = getattr(prov, "used_sources", 0)
+            _p_inj = getattr(prov, "injected_sources", 0)
+            _p_items = getattr(prov, "total_items", 0)
+            lines.append(f"  context provenance: {_p_used} sources, {_p_inj} injected, {_p_items} items")
+            has_content = True
+            _p_gaps = getattr(prov, "has_gaps", False)
+            _p_warns = getattr(prov, "warnings", []) or []
+            if _p_gaps:
+                lines.append(f"  context provenance gaps: {len(_p_warns)} warnings")
+            if detail == "full":
+                _p_sources = getattr(prov, "sources", []) or []
+                for _src in _p_sources:
+                    if isinstance(_src, dict):
+                        _sn = _src.get("name", "")
+                        _su = "yes" if _src.get("used", False) else "no"
+                        _si = "yes" if _src.get("injected", False) else "no"
+                        _sc = _src.get("item_count", 0)
+                    else:
+                        _sn = getattr(_src, "name", "")
+                        _su = "yes" if getattr(_src, "used", False) else "no"
+                        _si = "yes" if getattr(_src, "injected", False) else "no"
+                        _sc = getattr(_src, "item_count", 0)
+                    lines.append(f"    provenance source: {_sn} used={_su} injected={_si} items={_sc}")
+
     return lines if has_content else []
 
 
@@ -814,6 +841,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "osn_loop": entry.get("osn_loop"),
         "deepagents_adapter": entry.get("deepagents_adapter"),
         "validation_contract": entry.get("validation_contract"),
+        "context_provenance": entry.get("context_provenance"),
     })
 
 

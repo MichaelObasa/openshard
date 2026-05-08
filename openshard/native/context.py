@@ -1400,6 +1400,260 @@ def render_native_validation_contract(contract: NativeValidationContract | None)
     return "\n".join(lines)
 
 
+@dataclass
+class NativeContextSource:
+    name: str = ""
+    used: bool = False
+    injected: bool = False
+    item_count: int = 0
+    summary: str = ""
+
+
+@dataclass
+class NativeContextProvenance:
+    sources: list[NativeContextSource] = field(default_factory=list)
+    injected_sources: int = 0
+    used_sources: int = 0
+    total_items: int = 0
+    has_gaps: bool = False
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_context_provenance(
+    *,
+    repo_context_summary: Any | None = None,
+    observation: Any | None = None,
+    evidence: Any | None = None,
+    read_search_findings: list[str] | None = None,
+    file_context: Any | None = None,
+    context_packet: Any | None = None,
+    context_quality_score: Any | None = None,
+    context_quality_advisory: Any | None = None,
+    change_budget: Any | None = None,
+    plan: Any | None = None,
+    verification_plan: Any | None = None,
+    clarification_request: Any | None = None,
+    validation_contract: Any | None = None,
+    context_usage_summary: Any | None = None,
+    osn_loop: Any | None = None,
+    skills_context: str | None = None,
+    injected_source_names: set[str] | None = None,
+) -> "NativeContextProvenance":
+    _inj = injected_source_names or set()
+
+    def _src(name: str, used: bool, item_count: int, summary: str) -> NativeContextSource:
+        return NativeContextSource(
+            name=name,
+            used=used,
+            injected=name in _inj,
+            item_count=item_count,
+            summary=summary,
+        )
+
+    sources: list[NativeContextSource] = []
+
+    # repo_summary
+    sources.append(_src(
+        "repo_summary",
+        repo_context_summary is not None,
+        1 if repo_context_summary is not None else 0,
+        "1 summary" if repo_context_summary is not None else "",
+    ))
+
+    # observation
+    _obs_tools = len(getattr(observation, "observed_tools", []) or []) if observation is not None else 0
+    sources.append(_src(
+        "observation",
+        observation is not None,
+        _obs_tools,
+        f"{_obs_tools} tools" if observation is not None else "",
+    ))
+
+    # evidence
+    _ev_items = 0
+    if evidence is not None:
+        _ev_items = (
+            len(getattr(evidence, "file_snippets", []) or [])
+            + len(getattr(evidence, "search_results", []) or [])
+        )
+    sources.append(_src(
+        "evidence",
+        evidence is not None,
+        _ev_items,
+        f"{_ev_items} items" if evidence is not None else "",
+    ))
+
+    # read_search
+    _rs = list(read_search_findings) if read_search_findings else []
+    sources.append(_src(
+        "read_search",
+        bool(_rs),
+        len(_rs),
+        f"{len(_rs)} findings" if _rs else "",
+    ))
+
+    # file_context
+    _fc_files = getattr(file_context, "files_read", 0) if file_context is not None else 0
+    sources.append(_src(
+        "file_context",
+        file_context is not None,
+        _fc_files,
+        f"{_fc_files} files" if file_context is not None else "",
+    ))
+
+    # context_packet
+    _cp_sources = len(getattr(context_packet, "sources", []) or []) if context_packet is not None else 0
+    sources.append(_src(
+        "context_packet",
+        context_packet is not None,
+        _cp_sources,
+        f"{_cp_sources} sources" if context_packet is not None else "",
+    ))
+
+    # context_quality
+    _cq_level = getattr(context_quality_score, "level", "") if context_quality_score is not None else ""
+    sources.append(_src(
+        "context_quality",
+        context_quality_score is not None,
+        1 if context_quality_score is not None else 0,
+        f"level={_cq_level}" if context_quality_score is not None else "",
+    ))
+
+    # advisory
+    sources.append(_src(
+        "advisory",
+        context_quality_advisory is not None,
+        1 if context_quality_advisory is not None else 0,
+        "1 advisory" if context_quality_advisory is not None else "",
+    ))
+
+    # change_budget
+    sources.append(_src(
+        "change_budget",
+        change_budget is not None,
+        1 if change_budget is not None else 0,
+        "1 budget" if change_budget is not None else "",
+    ))
+
+    # plan
+    _plan_steps = len(getattr(plan, "suggested_steps", []) or []) if plan is not None else 0
+    _plan_items = _plan_steps if _plan_steps > 0 else (1 if plan is not None else 0)
+    sources.append(_src(
+        "plan",
+        plan is not None,
+        _plan_items,
+        f"{_plan_items} steps" if plan is not None else "",
+    ))
+
+    # verification_plan
+    _vp_cmds = (
+        len(getattr(verification_plan, "suggested_verification_commands", []) or [])
+        if verification_plan is not None
+        else 0
+    )
+    sources.append(_src(
+        "verification_plan",
+        verification_plan is not None,
+        _vp_cmds,
+        f"{_vp_cmds} commands" if verification_plan is not None else "",
+    ))
+
+    # clarification_request
+    _cr_needed = getattr(clarification_request, "needed", False) if clarification_request is not None else False
+    sources.append(_src(
+        "clarification_request",
+        bool(_cr_needed),
+        1 if _cr_needed else 0,
+        "1 request" if _cr_needed else "",
+    ))
+
+    # validation_contract
+    _vc_checks = (
+        len(getattr(validation_contract, "acceptance_checks", []) or [])
+        if validation_contract is not None
+        else 0
+    )
+    sources.append(_src(
+        "validation_contract",
+        validation_contract is not None,
+        _vc_checks,
+        f"{_vc_checks} checks" if validation_contract is not None else "",
+    ))
+
+    # context_usage_summary
+    sources.append(_src(
+        "context_usage_summary",
+        context_usage_summary is not None,
+        1 if context_usage_summary is not None else 0,
+        "1 summary" if context_usage_summary is not None else "",
+    ))
+
+    # osn_loop
+    _osn_enabled = getattr(osn_loop, "enabled", False) if osn_loop is not None else False
+    _osn_steps = getattr(osn_loop, "steps_run", 0) if osn_loop is not None else 0
+    sources.append(_src(
+        "osn_loop",
+        bool(_osn_enabled),
+        _osn_steps,
+        f"{_osn_steps} steps" if _osn_enabled else "",
+    ))
+
+    # skills_context
+    _sc_used = bool(skills_context)
+    sources.append(_src(
+        "skills_context",
+        _sc_used,
+        1 if _sc_used else 0,
+        "1 context" if _sc_used else "",
+    ))
+
+    # aggregate counts
+    used_sources = sum(1 for s in sources if s.used)
+    injected_count = sum(1 for s in sources if s.injected)
+    total_items = sum(s.item_count for s in sources)
+
+    # has_gaps
+    warnings: list[str] = []
+    _cq_level_val = getattr(context_quality_score, "level", "") if context_quality_score is not None else ""
+    if _cq_level_val in ("weak", "unknown") and context_quality_score is not None:
+        warnings.append("context quality weak")
+    _vc_strength = getattr(validation_contract, "strength", "") if validation_contract is not None else ""
+    if _vc_strength == "weak":
+        warnings.append("validation contract weak")
+    if _cr_needed:
+        warnings.append("clarification needed")
+    if file_context is not None and getattr(file_context, "truncated", False):
+        warnings.append("file context truncated")
+    if context_usage_summary is not None and getattr(context_usage_summary, "any_truncated", False):
+        warnings.append("context truncated")
+
+    has_gaps = bool(warnings)
+
+    return NativeContextProvenance(
+        sources=sources,
+        injected_sources=injected_count,
+        used_sources=used_sources,
+        total_items=total_items,
+        has_gaps=has_gaps,
+        warnings=warnings,
+    )
+
+
+def render_native_context_provenance(provenance: "NativeContextProvenance | None") -> str:
+    """Audit/display renderer — NOT injected into model prompt."""
+    if provenance is None:
+        return ""
+    parts = [
+        f"{provenance.used_sources} sources",
+        f"{provenance.injected_sources} injected",
+        f"{provenance.total_items} items",
+    ]
+    lines = ["context provenance: " + ", ".join(parts)]
+    if provenance.has_gaps:
+        lines.append(f"context provenance gaps: {len(provenance.warnings)} warnings")
+    return "\n".join(lines)
+
+
 def build_native_context_quality_score(packet: NativeContextPacket) -> NativeContextQualityScore:
     score = 0
     reasons: list[str] = []

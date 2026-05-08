@@ -1137,6 +1137,11 @@ class RunPipeline:
                     if _native_meta is not None and _native_meta.validation_contract is not None
                     else None
                 ),
+                "context_provenance": (
+                    asdict(_native_meta.context_provenance)
+                    if _native_meta is not None and _native_meta.context_provenance is not None
+                    else None
+                ),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
