@@ -9,6 +9,8 @@ from click.testing import CliRunner
 from openshard.cli.main import _model_label, _render_log_entry
 from openshard.native.context import (
     NativeContextQualityScore,
+    NativeModelCandidateScore,
+    NativeModelCandidateScoring,
     NativeModelRoleDecision,
     NativeModelSelectionDecision,
     NativeObservation,
@@ -17,6 +19,7 @@ from openshard.native.context import (
     NativeRunTrustScore,
     NativeValidationContract,
     build_native_context_provenance,
+    build_native_model_candidate_scoring,
 )
 from openshard.cli.run_output import _native_meta_from_entry
 
@@ -2080,6 +2083,153 @@ class TestNativeModelSelectionDecisionRendering(unittest.TestCase):
         out = _render(entry, detail="full")
         self.assertIn("frontier-reasoning-model", out)
         self.assertIn("independent-validator-model", out)
+
+
+class TestNativeModelCandidateScoringRendering(unittest.TestCase):
+    def _base_entry(self) -> dict:
+        return {"workflow": "native", "executor": "native"}
+
+    def _mcs_dict(
+        self,
+        strategy: str = "cost-balanced",
+        confidence: str = "medium",
+        include_candidates: bool = False,
+    ) -> dict:
+        candidates = []
+        if include_candidates:
+            candidates = [
+                asdict(NativeModelCandidateScore(
+                    role="planner",
+                    candidate="frontier-reasoning-model",
+                    score=87,
+                    capability_score=25,
+                    reason="capability+25",
+                )),
+                asdict(NativeModelCandidateScore(
+                    role="executor",
+                    candidate="balanced-coding-model",
+                    score=76,
+                    capability_score=15,
+                    reason="capability+15",
+                )),
+                asdict(NativeModelCandidateScore(
+                    role="executor",
+                    candidate="low-cost-coding-model",
+                    score=62,
+                    cost_score=20,
+                    reason="cost+20",
+                )),
+            ]
+        return asdict(NativeModelCandidateScoring(
+            strategy=strategy,
+            confidence=confidence,
+            selected_by_role={
+                "planner": "frontier-reasoning-model",
+                "executor": "balanced-coding-model",
+                "validator": "independent-validator-model",
+            },
+            candidates=candidates,
+            warnings=[],
+        ))
+
+    def test_absent_model_candidate_scoring_does_not_crash_more(self):
+        entry = self._base_entry()
+        try:
+            out = _render(entry, detail="more")
+        except Exception as exc:
+            self.fail(f"render raised {exc}")
+        self.assertNotIn("model candidates:", out)
+
+    def test_absent_model_candidate_scoring_does_not_crash_full(self):
+        entry = self._base_entry()
+        try:
+            out = _render(entry, detail="full")
+        except Exception as exc:
+            self.fail(f"render raised {exc}")
+        self.assertNotIn("model candidates:", out)
+
+    def test_present_more_renders_compact_line(self):
+        entry = self._base_entry()
+        entry["model_candidate_scoring"] = self._mcs_dict(strategy="cost-balanced", confidence="high")
+        out = _render(entry, detail="more")
+        self.assertIn("model candidates:", out)
+        self.assertIn("cost-balanced", out)
+
+    def test_present_compact_does_not_render(self):
+        entry = self._base_entry()
+        entry["model_candidate_scoring"] = self._mcs_dict()
+        out = _render(entry, detail="default")
+        self.assertNotIn("model candidates:", out)
+
+    def test_full_renders_block_header(self):
+        entry = self._base_entry()
+        entry["model_candidate_scoring"] = self._mcs_dict(include_candidates=True)
+        out = _render(entry, detail="full")
+        self.assertIn("[model candidates]", out)
+
+    def test_full_renders_strategy_and_confidence(self):
+        entry = self._base_entry()
+        entry["model_candidate_scoring"] = self._mcs_dict(
+            strategy="frontier-heavy",
+            confidence="low",
+            include_candidates=True,
+        )
+        out = _render(entry, detail="full")
+        self.assertIn("strategy: frontier-heavy", out)
+        self.assertIn("confidence: low", out)
+
+    def test_full_renders_selected_roles(self):
+        entry = self._base_entry()
+        entry["model_candidate_scoring"] = self._mcs_dict(include_candidates=True)
+        out = _render(entry, detail="full")
+        self.assertIn("planner:", out)
+        self.assertIn("executor:", out)
+        self.assertIn("validator:", out)
+
+    def test_full_renders_score_lines(self):
+        entry = self._base_entry()
+        entry["model_candidate_scoring"] = self._mcs_dict(include_candidates=True)
+        out = _render(entry, detail="full")
+        self.assertIn("scores:", out)
+        self.assertIn("planner/frontier-reasoning-model: 87", out)
+
+    def test_full_renders_warnings_count(self):
+        entry = self._base_entry()
+        mcs = self._mcs_dict(include_candidates=True)
+        mcs["warnings"] = ["low trust run may reduce model selection confidence"]
+        entry["model_candidate_scoring"] = mcs
+        out = _render(entry, detail="full")
+        self.assertIn("warnings: 1", out)
+
+    def test_native_meta_from_entry_roundtrips_model_candidate_scoring(self):
+        entry = self._base_entry()
+        entry["model_candidate_scoring"] = self._mcs_dict(strategy="context-cautious", confidence="low")
+        meta = _native_meta_from_entry(entry)
+        mcs = getattr(meta, "model_candidate_scoring", None)
+        self.assertIsNotNone(mcs)
+        strategy = getattr(mcs, "strategy", None)
+        confidence = getattr(mcs, "confidence", None)
+        self.assertEqual(strategy, "context-cautious")
+        self.assertEqual(confidence, "low")
+
+    def test_builder_result_asdict_roundtrips_through_entry(self):
+        from dataclasses import asdict as _asdict
+        sc = build_native_model_candidate_scoring()
+        entry = self._base_entry()
+        entry["model_candidate_scoring"] = _asdict(sc)
+        meta = _native_meta_from_entry(entry)
+        mcs = getattr(meta, "model_candidate_scoring", None)
+        self.assertIsNotNone(mcs)
+        self.assertEqual(getattr(mcs, "strategy", None), "cost-balanced")
+
+    def test_full_with_none_scoring_after_present_does_not_crash(self):
+        entry = self._base_entry()
+        entry["model_candidate_scoring"] = None
+        try:
+            out = _render(entry, detail="full")
+        except Exception as exc:
+            self.fail(f"render raised {exc}")
+        self.assertNotIn("model candidates:", out)
 
 
 if __name__ == "__main__":

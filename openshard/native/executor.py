@@ -36,6 +36,7 @@ from openshard.native.context import (
     NativeVerificationPlan,
     NativeRunTrustScore,
     NativeModelSelectionDecision,
+    NativeModelCandidateScoring,
     NativeValidationContract,
     OSNLoopMeta,
     OSNLoopStep,
@@ -127,6 +128,7 @@ class NativeRunMeta:
     context_provenance: NativeContextProvenance | None = None
     run_trust_score: NativeRunTrustScore | None = None
     model_selection_decision: NativeModelSelectionDecision | None = None
+    model_candidate_scoring: NativeModelCandidateScoring | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({

@@ -861,6 +861,39 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                         lines.append(f"    - {_rn}: {_rt} ({_rc}) — {_rr}")
                 lines.append(f"  warnings: {len(_msd_warnings)}")
 
+    mcs = getattr(native_meta, "model_candidate_scoring", None)
+    if mcs is not None and detail in ("more", "full"):
+        from openshard.native.context import render_native_model_candidate_scoring
+        _mcs_line = render_native_model_candidate_scoring(mcs, detail="compact")
+        if _mcs_line:
+            lines.append(f"  {_mcs_line}")
+            has_content = True
+        if detail == "full":
+            _mcs_selected_raw = getattr(mcs, "selected_by_role", {}) or {}
+            _mcs_selected = _mcs_selected_raw if isinstance(_mcs_selected_raw, dict) else (vars(_mcs_selected_raw) if hasattr(_mcs_selected_raw, "__dict__") else {})
+            _mcs_candidates = getattr(mcs, "candidates", []) or []
+            _mcs_warnings = getattr(mcs, "warnings", []) or []
+            lines.append("  [model candidates]")
+            lines.append(f"  strategy: {getattr(mcs, 'strategy', 'cost-balanced')}")
+            lines.append(f"  confidence: {getattr(mcs, 'confidence', 'medium')}")
+            if _mcs_selected:
+                lines.append("  selected:")
+                for _role, _tier in _mcs_selected.items():
+                    lines.append(f"    - {_role}: {_tier}")
+            if _mcs_candidates:
+                lines.append("  scores:")
+                for _c in _mcs_candidates:
+                    if isinstance(_c, dict):
+                        _cr = _c.get("role", "")
+                        _cc = _c.get("candidate", "")
+                        _cs = _c.get("score", 0)
+                    else:
+                        _cr = getattr(_c, "role", "")
+                        _cc = getattr(_c, "candidate", "")
+                        _cs = getattr(_c, "score", 0)
+                    lines.append(f"    - {_cr}/{_cc}: {_cs}")
+            lines.append(f"  warnings: {len(_mcs_warnings)}")
+
     return lines if has_content else []
 
 
@@ -930,6 +963,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "context_provenance": entry.get("context_provenance"),
         "run_trust_score": entry.get("run_trust_score"),
         "model_selection_decision": entry.get("model_selection_decision"),
+        "model_candidate_scoring": entry.get("model_candidate_scoring"),
     })
 
 

@@ -2094,3 +2094,291 @@ def render_native_model_selection_decision(
     _warnings = getattr(msd, "warnings", []) or []
     lines.append(f"warnings: {len(_warnings)}")
     return "\n".join(lines)
+
+
+@dataclass
+class NativeModelCandidateScore:
+    role: str = ""
+    candidate: str = ""
+    score: int = 0
+    capability_score: int = 0
+    risk_fit_score: int = 0
+    context_fit_score: int = 0
+    cost_score: int = 0
+    verification_fit_score: int = 0
+    penalty: int = 0
+    reason: str = ""
+
+
+@dataclass
+class NativeModelCandidateScoring:
+    candidates: list[NativeModelCandidateScore] = field(default_factory=list)
+    selected_by_role: dict[str, str] = field(default_factory=dict)
+    strategy: str = "cost-balanced"
+    confidence: str = "medium"
+    warnings: list[str] = field(default_factory=list)
+
+
+_CANDIDATE_TIERS = [
+    "frontier-reasoning-model",
+    "balanced-coding-model",
+    "low-cost-coding-model",
+    "independent-validator-model",
+]
+
+_DEFAULT_ROLE_TIERS = {
+    "planner": "frontier-reasoning-model",
+    "executor": "balanced-coding-model",
+    "validator": "independent-validator-model",
+}
+
+
+def build_native_model_candidate_scoring(
+    *,
+    model_selection_decision=None,
+    verification_plan=None,
+    validation_contract=None,
+    context_quality_score=None,
+    context_provenance=None,
+    run_trust_score=None,
+    context_usage_summary=None,
+    failure_memory=None,
+) -> NativeModelCandidateScoring:
+    vc_strength = getattr(validation_contract, "strength", "") or ""
+    rts_level = getattr(run_trust_score, "level", "") or ""
+    cqs_level = getattr(context_quality_score, "level", "") or ""
+    cp_has_gaps = getattr(context_provenance, "has_gaps", False)
+    task_type = getattr(verification_plan, "task_type", "") or ""
+    risk_level = getattr(verification_plan, "risk_level", "") or ""
+    if not risk_level:
+        risk_level = getattr(validation_contract, "risk_level", "") or ""
+    has_lessons = getattr(failure_memory, "has_lessons", False)
+    any_truncated = getattr(context_usage_summary, "any_truncated", False)
+    verification_commands = getattr(verification_plan, "verification_commands", []) or []
+    has_verification_cmds = len(verification_commands) > 0
+
+    if model_selection_decision is not None:
+        strategy = getattr(model_selection_decision, "strategy", "cost-balanced") or "cost-balanced"
+        confidence = getattr(model_selection_decision, "confidence", "medium") or "medium"
+        msd_roles_raw = getattr(model_selection_decision, "roles", []) or []
+        roles: list[str] = []
+        for _r in msd_roles_raw:
+            if isinstance(_r, dict):
+                _rn = _r.get("role", "")
+            else:
+                _rn = getattr(_r, "role", "")
+            if _rn:
+                roles.append(_rn)
+        if not roles:
+            roles = list(_DEFAULT_ROLE_TIERS.keys())
+    else:
+        strategy = "cost-balanced"
+        confidence = "medium"
+        roles = list(_DEFAULT_ROLE_TIERS.keys())
+
+    candidates: list[NativeModelCandidateScore] = []
+    for role in roles:
+        for tier in _CANDIDATE_TIERS:
+            cap = 0
+            risk_fit = 0
+            ctx_fit = 0
+            cost = 0
+            ver_fit = 0
+            pen = 0
+            reason_parts: list[str] = []
+
+            # Capability
+            if tier == "frontier-reasoning-model":
+                if role == "planner":
+                    cap = 25
+                elif role == "executor" and risk_level == "high":
+                    cap = 20
+            elif tier == "balanced-coding-model":
+                if role == "executor":
+                    cap = 15
+            elif tier == "low-cost-coding-model":
+                if role == "executor" and task_type in ("docs", "test", "config"):
+                    cap = 15
+            elif tier == "independent-validator-model":
+                if role == "validator":
+                    cap = 25
+
+            # Risk fit
+            if risk_level == "high":
+                if tier == "frontier-reasoning-model":
+                    risk_fit += 15
+                elif tier == "low-cost-coding-model":
+                    risk_fit -= 15
+                elif tier == "balanced-coding-model":
+                    risk_fit += 5
+            elif risk_level == "low":
+                if tier == "low-cost-coding-model":
+                    risk_fit += 10
+                elif tier == "balanced-coding-model":
+                    risk_fit += 5
+                elif tier == "frontier-reasoning-model":
+                    risk_fit -= 5
+            if vc_strength == "weak" and role == "executor":
+                if tier == "low-cost-coding-model":
+                    risk_fit -= 10
+            if rts_level == "weak" and role == "executor":
+                if tier == "low-cost-coding-model":
+                    risk_fit -= 5
+                elif tier == "balanced-coding-model":
+                    risk_fit -= 5
+
+            # Context fit
+            if cqs_level == "weak" or cp_has_gaps:
+                if tier == "frontier-reasoning-model":
+                    ctx_fit += 10
+                elif tier == "balanced-coding-model":
+                    ctx_fit += 5
+            elif cqs_level in ("good", "strong") and not cp_has_gaps:
+                if tier == "low-cost-coding-model" and role == "executor":
+                    ctx_fit += 5
+
+            # Cost
+            if tier == "low-cost-coding-model":
+                cost = 20
+            elif tier == "balanced-coding-model":
+                cost = 10
+            elif tier == "frontier-reasoning-model":
+                cost = -10
+            else:
+                cost = 0
+
+            # Verification fit
+            if role == "validator" and tier == "independent-validator-model":
+                ver_fit += 20
+            if role == "executor":
+                if has_verification_cmds:
+                    if tier in ("balanced-coding-model", "low-cost-coding-model"):
+                        ver_fit += 5
+                else:
+                    if tier == "frontier-reasoning-model":
+                        ver_fit += 5
+                    elif tier == "low-cost-coding-model":
+                        ver_fit -= 10
+
+            # Penalties
+            if has_lessons:
+                if tier == "low-cost-coding-model":
+                    pen += 5
+                elif tier == "balanced-coding-model":
+                    pen += 3
+            if any_truncated and tier == "low-cost-coding-model":
+                pen += 10
+
+            raw = 50 + cap + risk_fit + ctx_fit + cost + ver_fit - pen
+            final_score = max(0, min(100, raw))
+
+            if cap:
+                reason_parts.append(f"capability{'+' if cap >= 0 else ''}{cap}")
+            if risk_fit:
+                reason_parts.append(f"risk{'+' if risk_fit >= 0 else ''}{risk_fit}")
+            if ctx_fit:
+                reason_parts.append(f"context{'+' if ctx_fit >= 0 else ''}{ctx_fit}")
+            if cost:
+                reason_parts.append(f"cost{'+' if cost >= 0 else ''}{cost}")
+            if ver_fit:
+                reason_parts.append(f"verification{'+' if ver_fit >= 0 else ''}{ver_fit}")
+            if pen:
+                reason_parts.append(f"penalty-{pen}")
+
+            candidates.append(NativeModelCandidateScore(
+                role=role,
+                candidate=tier,
+                score=final_score,
+                capability_score=cap,
+                risk_fit_score=risk_fit,
+                context_fit_score=ctx_fit,
+                cost_score=cost,
+                verification_fit_score=ver_fit,
+                penalty=pen,
+                reason=", ".join(reason_parts),
+            ))
+
+    # selected_by_role
+    selected_by_role: dict[str, str] = {}
+    if model_selection_decision is not None:
+        msd_roles_raw = getattr(model_selection_decision, "roles", []) or []
+        for _r in msd_roles_raw:
+            if isinstance(_r, dict):
+                _rn = _r.get("role", "")
+                _rt = _r.get("model_tier", "")
+            else:
+                _rn = getattr(_r, "role", "")
+                _rt = getattr(_r, "model_tier", "")
+            if _rn and _rt:
+                selected_by_role[_rn] = _rt
+    if not selected_by_role:
+        selected_by_role = dict(_DEFAULT_ROLE_TIERS)
+
+    warnings: list[str] = []
+    if model_selection_decision is None:
+        warnings.append("model selection decision missing")
+    if rts_level == "weak":
+        warnings.append("low trust run may reduce model selection confidence")
+    if cp_has_gaps:
+        warnings.append("context gaps may affect candidate scoring")
+    if vc_strength == "weak":
+        warnings.append("validation contract weak")
+
+    return NativeModelCandidateScoring(
+        candidates=candidates,
+        selected_by_role=selected_by_role,
+        strategy=strategy,
+        confidence=confidence,
+        warnings=warnings,
+    )
+
+
+def _ns_to_dict(obj: object) -> dict:
+    if isinstance(obj, dict):
+        return obj
+    try:
+        return vars(obj)  # type: ignore[arg-type]
+    except TypeError:
+        return {}
+
+
+def render_native_model_candidate_scoring(
+    scoring: "NativeModelCandidateScoring | None",
+    detail: str = "compact",
+) -> str:
+    if scoring is None:
+        return ""
+    _strategy = getattr(scoring, "strategy", "cost-balanced") or "cost-balanced"
+    _confidence = getattr(scoring, "confidence", "medium") or "medium"
+    _selected = _ns_to_dict(getattr(scoring, "selected_by_role", {}) or {})
+    _candidates = getattr(scoring, "candidates", []) or []
+    _role_count = len(_selected) if _selected else len({
+        (_c.get("role", "") if isinstance(_c, dict) else getattr(_c, "role", ""))
+        for _c in _candidates
+    })
+    if detail == "full":
+        lines = [
+            "[model candidates]",
+            f"strategy: {_strategy}",
+            f"confidence: {_confidence}",
+        ]
+        if _selected:
+            lines.append("selected:")
+            for _role, _tier in _selected.items():
+                lines.append(f"  - {_role}: {_tier}")
+        if _candidates:
+            lines.append("scores:")
+            for _c in _candidates:
+                if isinstance(_c, dict):
+                    _cr = _c.get("role", "")
+                    _cc = _c.get("candidate", "")
+                    _cs = _c.get("score", 0)
+                else:
+                    _cr = getattr(_c, "role", "")
+                    _cc = getattr(_c, "candidate", "")
+                    _cs = getattr(_c, "score", 0)
+                lines.append(f"  - {_cr}/{_cc}: {_cs}")
+        _warnings = getattr(scoring, "warnings", []) or []
+        lines.append(f"warnings: {len(_warnings)}")
+        return "\n".join(lines)
+    return f"model candidates: {_role_count} roles, strategy={_strategy}, confidence={_confidence}"
