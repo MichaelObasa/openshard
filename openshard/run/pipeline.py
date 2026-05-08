@@ -1132,6 +1132,11 @@ class RunPipeline:
                     if _native_meta is not None and _native_meta.deepagents_adapter is not None
                     else None
                 ),
+                "validation_contract": (
+                    asdict(_native_meta.validation_contract)
+                    if _native_meta is not None and _native_meta.validation_contract is not None
+                    else None
+                ),
             }
         try:
             _log_run(start, task, generator, retry_triggered, final_files,

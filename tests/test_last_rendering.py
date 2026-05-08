@@ -1642,5 +1642,132 @@ class TestNativeFailureMemoryRendering(unittest.TestCase):
         self.assertNotIn("failure memory:", out)
 
 
+class TestNativeValidationContractRendering(unittest.TestCase):
+
+    def _base_entry(self):
+        return {
+            "workflow": "native",
+            "executor": "native",
+            "native_loop_steps": [],
+            "native_loop_trace": [],
+        }
+
+    def _entry_with_contract(self, strength="strong", checks=3, cmds=1):
+        entry = self._base_entry()
+        entry["validation_contract"] = {
+            "intent": "add feature",
+            "risk_level": "low",
+            "expected_change_scope": "3 files expected",
+            "acceptance_checks": [f"check {i}" for i in range(checks)],
+            "verification_commands": [f"cmd {i}" for i in range(cmds)],
+            "approval_expected": False,
+            "strength": strength,
+            "warnings": [],
+        }
+        return entry
+
+    def test_absent_on_old_runs_does_not_crash(self):
+        entry = self._base_entry()
+        out = _render(entry, detail="more")
+        self.assertNotIn("validation contract:", out)
+
+    def test_compact_line_appears_at_more_detail(self):
+        entry = self._entry_with_contract(strength="strong", checks=3, cmds=1)
+        out = _render(entry, detail="more")
+        self.assertIn("validation contract:", out)
+        self.assertIn("strong", out)
+        self.assertIn("3 checks", out)
+        self.assertIn("1 verification command", out)
+
+    def test_compact_line_singular_check(self):
+        entry = self._entry_with_contract(strength="fair", checks=1, cmds=0)
+        out = _render(entry, detail="more")
+        self.assertIn("1 check", out)
+        self.assertNotIn("1 checks", out)
+
+    def test_compact_line_singular_command(self):
+        entry = self._entry_with_contract(strength="strong", checks=2, cmds=1)
+        out = _render(entry, detail="more")
+        self.assertIn("1 verification command", out)
+        self.assertNotIn("1 verification commands", out)
+
+    def test_compact_line_plural_checks(self):
+        entry = self._entry_with_contract(strength="strong", checks=3, cmds=1)
+        out = _render(entry, detail="more")
+        self.assertIn("3 checks", out)
+
+    def test_compact_line_plural_commands(self):
+        entry = self._entry_with_contract(strength="strong", checks=2, cmds=3)
+        out = _render(entry, detail="more")
+        self.assertIn("3 verification commands", out)
+
+    def test_full_detail_includes_multiline_render(self):
+        entry = self._entry_with_contract(strength="strong", checks=2, cmds=1)
+        out = _render(entry, detail="full")
+        self.assertIn("[validation contract]", out)
+        self.assertIn("intent:", out)
+        self.assertIn("risk:", out)
+        self.assertIn("strength:", out)
+
+    def test_absent_when_validation_contract_is_none(self):
+        entry = self._base_entry()
+        entry["validation_contract"] = None
+        out = _render(entry, detail="more")
+        self.assertNotIn("validation contract:", out)
+
+    def test_warnings_not_rendered_in_output(self):
+        entry = self._base_entry()
+        entry["validation_contract"] = {
+            "intent": "task",
+            "risk_level": "low",
+            "expected_change_scope": "unknown",
+            "acceptance_checks": [],
+            "verification_commands": [],
+            "approval_expected": False,
+            "strength": "weak",
+            "warnings": ["UNIQUE_WARNING_NOT_IN_OUTPUT"],
+        }
+        out = _render(entry, detail="more")
+        self.assertNotIn("UNIQUE_WARNING_NOT_IN_OUTPUT", out)
+
+    def test_native_meta_from_entry_round_trips_validation_contract(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+        entry = self._entry_with_contract(strength="fair", checks=2, cmds=0)
+        meta = _native_meta_from_entry(entry)
+        self.assertIsNotNone(meta)
+        vc = getattr(meta, "validation_contract", None)
+        self.assertIsNotNone(vc)
+        self.assertEqual(getattr(vc, "strength", None), "fair")
+        self.assertEqual(len(getattr(vc, "acceptance_checks", [])), 2)
+        self.assertEqual(len(getattr(vc, "verification_commands", [])), 0)
+
+    def test_pipeline_dict_round_trips_via_native_meta_from_entry(self):
+        """Prove the full save→load path: asdict output reconstructed by _native_meta_from_entry."""
+        from dataclasses import asdict
+        from openshard.cli.run_output import _native_meta_from_entry
+        from openshard.native.context import NativeValidationContract
+        original = NativeValidationContract(
+            intent="add auth",
+            risk_level="medium",
+            expected_change_scope="2 files expected",
+            acceptance_checks=["tests pass", "no regressions"],
+            verification_commands=["pytest"],
+            approval_expected=False,
+            strength="strong",
+            warnings=[],
+        )
+        entry = self._base_entry()
+        entry["validation_contract"] = asdict(original)
+        meta = _native_meta_from_entry(entry)
+        self.assertIsNotNone(meta)
+        vc = getattr(meta, "validation_contract", None)
+        self.assertIsNotNone(vc)
+        self.assertEqual(getattr(vc, "intent", None), "add auth")
+        self.assertEqual(getattr(vc, "risk_level", None), "medium")
+        self.assertEqual(getattr(vc, "strength", None), "strong")
+        self.assertEqual(getattr(vc, "acceptance_checks", None), ["tests pass", "no regressions"])
+        self.assertEqual(getattr(vc, "verification_commands", None), ["pytest"])
+
+
 if __name__ == "__main__":
     unittest.main()

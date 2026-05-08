@@ -1015,6 +1015,18 @@ class NativeClarificationRequest:
 
 
 @dataclass
+class NativeValidationContract:
+    intent: str = ""
+    risk_level: str = "unknown"
+    expected_change_scope: str = "unknown"
+    acceptance_checks: list[str] = field(default_factory=list)
+    verification_commands: list[str] = field(default_factory=list)
+    approval_expected: bool = False
+    strength: str = "weak"  # weak | fair | strong
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
 class NativeContextUsageSummary:
     repo_summary_included: bool = False
     selected_files_count: int = 0
@@ -1286,6 +1298,106 @@ def build_native_clarification_request(
         reason=reason,
         task_field="task_type",
     )
+
+
+def build_native_validation_contract(
+    *,
+    task: str,
+    plan: Any | None,
+    verification_plan: Any | None,
+    change_budget: Any | None,
+    change_budget_preview: Any | None,
+    change_budget_soft_gate: Any | None,
+    clarification_request: Any | None,
+    context_quality_score: Any | None,
+) -> NativeValidationContract:
+    intent = (task or "").strip()[:120]
+
+    if plan is not None and getattr(plan, "risk", None):
+        risk_level = plan.risk
+    elif verification_plan is not None and getattr(verification_plan, "risk_level", None):
+        risk_level = verification_plan.risk_level
+    else:
+        risk_level = "unknown"
+
+    if change_budget is not None:
+        expected_change_scope = f"{change_budget.max_files} files expected"
+    elif change_budget_preview is not None:
+        proposed = getattr(change_budget_preview, "proposed_files", 0)
+        expected_change_scope = f"{proposed} files proposed"
+    else:
+        expected_change_scope = "unknown"
+
+    seen: set[str] = set()
+    acceptance_checks: list[str] = []
+    for item in (getattr(verification_plan, "success_criteria", None) or []):
+        if item and item not in seen:
+            seen.add(item)
+            acceptance_checks.append(item)
+    for step in (getattr(plan, "suggested_steps", None) or [])[:3]:
+        if step and step not in seen:
+            seen.add(step)
+            acceptance_checks.append(step)
+
+    verification_commands = list(
+        (getattr(verification_plan, "suggested_verification_commands", None) or [])[:5]
+    )
+
+    approval_expected = False
+    if change_budget_soft_gate is not None and getattr(change_budget_soft_gate, "requires_approval", False):
+        approval_expected = True
+    if change_budget_preview is not None and getattr(change_budget_preview, "would_exceed_budget", False):
+        approval_expected = True
+
+    clarification_needed = (
+        clarification_request is not None and getattr(clarification_request, "needed", False)
+    )
+
+    if acceptance_checks and verification_commands and not clarification_needed:
+        strength = "strong"
+    elif acceptance_checks and (not verification_commands or clarification_needed):
+        strength = "fair"
+    else:
+        strength = "weak"
+
+    warnings: list[str] = []
+    if clarification_needed:
+        warnings.append("clarification needed before proceeding")
+    if not acceptance_checks:
+        warnings.append("no acceptance checks derived from plan")
+    if not verification_commands:
+        warnings.append("no verification commands available")
+
+    return NativeValidationContract(
+        intent=intent,
+        risk_level=risk_level,
+        expected_change_scope=expected_change_scope,
+        acceptance_checks=acceptance_checks,
+        verification_commands=verification_commands,
+        approval_expected=approval_expected,
+        strength=strength,
+        warnings=warnings,
+    )
+
+
+def render_native_validation_contract(contract: NativeValidationContract | None) -> str:
+    if contract is None:
+        return ""
+    lines = ["[validation contract]"]
+    lines.append(f"intent: {contract.intent}")
+    lines.append(f"risk: {contract.risk_level}")
+    lines.append(f"scope: {contract.expected_change_scope}")
+    if contract.acceptance_checks:
+        lines.append("acceptance checks:")
+        for check in contract.acceptance_checks:
+            lines.append(f"  - {check}")
+    if contract.verification_commands:
+        lines.append("verification:")
+        for cmd in contract.verification_commands:
+            lines.append(f"  - {cmd}")
+    lines.append(f"approval expected: {'yes' if contract.approval_expected else 'no'}")
+    lines.append(f"strength: {contract.strength}")
+    return "\n".join(lines)
 
 
 def build_native_context_quality_score(packet: NativeContextPacket) -> NativeContextQualityScore:

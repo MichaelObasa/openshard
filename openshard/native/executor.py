@@ -33,6 +33,7 @@ from openshard.native.context import (
     NativeVerificationCommandSummary,
     NativeVerificationLoop,
     NativeVerificationPlan,
+    NativeValidationContract,
     OSNLoopMeta,
     OSNLoopStep,
     build_initial_context_budget,
@@ -52,6 +53,7 @@ from openshard.native.context import (
     build_native_patch_proposal,
     build_native_verification_command_summary,
     build_native_verification_plan,
+    build_native_validation_contract,
     build_osn_loop_meta,
     render_native_change_budget,
     render_native_context_packet,
@@ -59,6 +61,7 @@ from openshard.native.context import (
     render_native_evidence,
     render_native_observation,
     render_native_plan,
+    render_native_validation_contract,
     render_osn_loop_context,
 )
 from openshard.native.repo_context import (
@@ -112,6 +115,7 @@ class NativeRunMeta:
     approval_receipt: NativeApprovalReceipt | None = None
     verification_plan: NativeVerificationPlan | None = None
     clarification_request: NativeClarificationRequest | None = None
+    validation_contract: NativeValidationContract | None = None
     context_usage_summary: NativeContextUsageSummary | None = None
     failure_memory: NativeFailureMemory | None = None
     osn_loop: OSNLoopMeta | None = None
@@ -1031,6 +1035,19 @@ class NativeAgentExecutor:
         if self.native_meta.clarification_request.needed:
             self.record_loop_step("clarification_request")
 
+        validation_contract = build_native_validation_contract(
+            task=task,
+            plan=self.native_meta.plan,
+            verification_plan=self.native_meta.verification_plan,
+            change_budget=self.native_meta.change_budget,
+            change_budget_preview=None,
+            change_budget_soft_gate=None,
+            clarification_request=self.native_meta.clarification_request,
+            context_quality_score=self.native_meta.context_quality_score,
+        )
+        self.native_meta.validation_contract = validation_contract
+        self.record_loop_step("validation_contract")
+
         context_parts = []
 
         summary = self.native_meta.repo_context_summary
@@ -1050,6 +1067,10 @@ class NativeAgentExecutor:
             context_parts.append(osn_block)
 
         context_parts.append(render_native_plan(self.native_meta.plan))
+
+        rendered_contract = render_native_validation_contract(validation_contract)
+        if rendered_contract:
+            context_parts.append(rendered_contract)
 
         packet_context = render_native_context_packet(self.native_meta.context_packet)
         if packet_context:

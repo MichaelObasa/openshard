@@ -28,6 +28,7 @@ NativeLoopPhase = Literal[
     "verification_summary",
     "diff_review",
     "final_report",
+    "validation_contract",
 ]
 
 
