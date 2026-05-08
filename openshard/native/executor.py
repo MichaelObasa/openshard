@@ -34,6 +34,7 @@ from openshard.native.context import (
     NativeVerificationCommandSummary,
     NativeVerificationLoop,
     NativeVerificationPlan,
+    NativeRunTrustScore,
     NativeValidationContract,
     OSNLoopMeta,
     OSNLoopStep,
@@ -123,6 +124,7 @@ class NativeRunMeta:
     osn_loop: OSNLoopMeta | None = None
     deepagents_adapter: DeepAgentsAdapterMeta | None = None
     context_provenance: NativeContextProvenance | None = None
+    run_trust_score: NativeRunTrustScore | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({

@@ -989,6 +989,21 @@ class RunPipeline:
                 verification_plan=_native_meta.verification_plan,
                 context_usage_summary=_native_meta.context_usage_summary,
             )
+            from openshard.native.context import build_native_run_trust_score
+            _native_meta.run_trust_score = build_native_run_trust_score(
+                context_quality_score=_native_meta.context_quality_score,
+                validation_contract=_native_meta.validation_contract,
+                context_provenance=_native_meta.context_provenance,
+                verification_loop=_native_meta.verification_loop,
+                command_policy_preview=_native_meta.command_policy_preview,
+                change_budget_preview=_native_meta.change_budget_preview,
+                change_budget_soft_gate=_native_meta.change_budget_soft_gate,
+                approval_request=_native_meta.approval_request,
+                approval_receipt=_native_meta.approval_receipt,
+                failure_memory=_native_meta.failure_memory,
+                context_usage_summary=_native_meta.context_usage_summary,
+                final_report=_native_meta.final_report,
+            )
         if _native_meta is not None and detail != "default":
             from openshard.cli.run_output import _print_native_demo_block, _print_native_summary
             _print_native_demo_block(_native_meta, detail=detail)
@@ -1140,6 +1155,11 @@ class RunPipeline:
                 "context_provenance": (
                     asdict(_native_meta.context_provenance)
                     if _native_meta is not None and _native_meta.context_provenance is not None
+                    else None
+                ),
+                "run_trust_score": (
+                    asdict(_native_meta.run_trust_score)
+                    if _native_meta is not None and _native_meta.run_trust_score is not None
                     else None
                 ),
             }

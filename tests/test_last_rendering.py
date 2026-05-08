@@ -11,6 +11,8 @@ from openshard.native.context import (
     NativeContextQualityScore,
     NativeObservation,
     NativePlan,
+    NativeRunTrustFactor,
+    NativeRunTrustScore,
     NativeValidationContract,
     build_native_context_provenance,
 )
@@ -1893,6 +1895,109 @@ class TestNativeContextProvenanceRendering(unittest.TestCase):
         out = _render(entry, detail="full")
         self.assertIn("provenance source: repo_summary", out)
         self.assertIn("provenance source: plan", out)
+
+
+class TestNativeRunTrustScoreRendering(unittest.TestCase):
+
+    def _base_entry(self) -> dict:
+        return {"workflow": "native", "executor": "native"}
+
+    def _entry_with_trust(self, score: int = 72, level: str = "good", warnings=None, blockers=None, factors=None) -> dict:
+        entry = self._base_entry()
+        entry["run_trust_score"] = {
+            "score": score,
+            "level": level,
+            "factors": factors or [],
+            "warnings": warnings or [],
+            "blockers": blockers or [],
+        }
+        return entry
+
+    def test_old_run_without_run_trust_score_does_not_crash(self):
+        entry = self._base_entry()
+        out = _render(entry, detail="more")
+        self.assertNotIn("run trust:", out)
+
+    def test_compact_line_renders_when_present_in_more(self):
+        entry = self._entry_with_trust(score=72, level="good")
+        out = _render(entry, detail="more")
+        self.assertIn("run trust: 72/100 good", out)
+
+    def test_warning_count_line_renders_when_warnings_exist(self):
+        entry = self._entry_with_trust(warnings=["verification failed", "context truncated"])
+        out = _render(entry, detail="more")
+        self.assertIn("run trust warnings: 2 warnings", out)
+
+    def test_blocker_count_line_renders_when_blockers_exist(self):
+        entry = self._entry_with_trust(blockers=["verification failed"])
+        out = _render(entry, detail="more")
+        self.assertIn("run trust blockers: 1 blocker", out)
+
+    def test_trust_absent_from_default_output(self):
+        entry = self._entry_with_trust()
+        out = _render(entry, detail="default")
+        self.assertNotIn("run trust:", out)
+
+    def test_full_detail_renders_run_trust_block(self):
+        entry = self._entry_with_trust(
+            score=82,
+            level="good",
+            factors=[{"name": "verification_passed", "impact": 20, "reason": "verification passed"}],
+        )
+        out = _render(entry, detail="full")
+        self.assertIn("[run trust]", out)
+        self.assertIn("score: 82/100", out)
+        self.assertIn("level: good", out)
+
+    def test_full_detail_renders_factor_lines(self):
+        entry = self._entry_with_trust(
+            score=82,
+            level="good",
+            factors=[{"name": "verification_passed", "impact": 20, "reason": "verification passed"}],
+        )
+        out = _render(entry, detail="full")
+        self.assertIn("verification_passed", out)
+        self.assertIn("+20", out)
+
+    def test_native_meta_from_entry_roundtrips_run_trust_score(self):
+        trust = NativeRunTrustScore(
+            score=72,
+            level="good",
+            factors=[NativeRunTrustFactor(name="verification_passed", impact=20, reason="verification passed")],
+            warnings=["context truncated"],
+            blockers=[],
+        )
+        entry = {"workflow": "native", "run_trust_score": asdict(trust)}
+        meta = _native_meta_from_entry(entry)
+        rts = getattr(meta, "run_trust_score", None)
+        self.assertIsNotNone(rts)
+        self.assertEqual(getattr(rts, "score", None), 72)
+        self.assertEqual(getattr(rts, "level", None), "good")
+
+    def test_dict_based_factor_rendering_in_full(self):
+        entry = self._entry_with_trust(
+            score=50,
+            level="fair",
+            factors=[
+                {"name": "verification_not_attempted", "impact": -10, "reason": "verification not attempted"},
+                {"name": "validation_contract_strong", "impact": 15, "reason": "strong validation contract"},
+            ],
+        )
+        out = _render(entry, detail="full")
+        self.assertIn("verification_not_attempted", out)
+        self.assertIn("validation_contract_strong", out)
+        self.assertIn("+15", out)
+
+    def test_compact_does_not_expose_raw_warning_or_blocker_text(self):
+        entry = self._entry_with_trust(
+            warnings=["verification failed", "blocked commands detected"],
+            blockers=["verification failed"],
+        )
+        out = _render(entry, detail="more")
+        self.assertNotIn("verification failed", out)
+        self.assertNotIn("blocked commands detected", out)
+        self.assertIn("2 warnings", out)
+        self.assertIn("1 blocker", out)
 
 
 if __name__ == "__main__":
