@@ -775,6 +775,42 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                         _sc = getattr(_src, "item_count", 0)
                     lines.append(f"    provenance source: {_sn} used={_su} injected={_si} items={_sc}")
 
+    if detail in ("more", "full"):
+        rts = getattr(native_meta, "run_trust_score", None)
+        if rts is not None:
+            _rts_score = getattr(rts, "score", 0)
+            _rts_level = getattr(rts, "level", "unknown")
+            _rts_warnings = getattr(rts, "warnings", []) or []
+            _rts_blockers = getattr(rts, "blockers", []) or []
+            lines.append(f"  run trust: {_rts_score}/100 {_rts_level}")
+            if _rts_warnings:
+                _wc = len(_rts_warnings)
+                lines.append(f"  run trust warnings: {_wc} {'warning' if _wc == 1 else 'warnings'}")
+            if _rts_blockers:
+                _bc = len(_rts_blockers)
+                lines.append(f"  run trust blockers: {_bc} {'blocker' if _bc == 1 else 'blockers'}")
+            if detail == "full":
+                _rts_factors = getattr(rts, "factors", []) or []
+                lines.append("  [run trust]")
+                lines.append(f"  score: {_rts_score}/100")
+                lines.append(f"  level: {_rts_level}")
+                if _rts_factors:
+                    lines.append("  factors:")
+                    for _f in _rts_factors:
+                        if isinstance(_f, dict):
+                            _fn = _f.get("name", "")
+                            _fi = _f.get("impact", 0)
+                            _fr = _f.get("reason", "")
+                        else:
+                            _fn = getattr(_f, "name", "")
+                            _fi = getattr(_f, "impact", 0)
+                            _fr = getattr(_f, "reason", "")
+                        _sign = "+" if _fi >= 0 else ""
+                        lines.append(f"    - {_fn} ({_sign}{_fi}): {_fr}")
+                lines.append(f"  warnings: {len(_rts_warnings)}")
+                lines.append(f"  blockers: {len(_rts_blockers)}")
+            has_content = True
+
     return lines if has_content else []
 
 
@@ -842,6 +878,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "deepagents_adapter": entry.get("deepagents_adapter"),
         "validation_contract": entry.get("validation_contract"),
         "context_provenance": entry.get("context_provenance"),
+        "run_trust_score": entry.get("run_trust_score"),
     })
 
 

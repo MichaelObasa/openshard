@@ -1703,3 +1703,200 @@ def build_native_context_quality_score(packet: NativeContextPacket) -> NativeCon
         reasons=reasons,
         warnings=warnings,
     )
+
+
+@dataclass
+class NativeRunTrustFactor:
+    name: str = ""
+    impact: int = 0
+    reason: str = ""
+
+
+@dataclass
+class NativeRunTrustScore:
+    score: int = 0
+    level: str = "unknown"  # weak | fair | good | strong
+    factors: list[NativeRunTrustFactor] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    blockers: list[str] = field(default_factory=list)
+
+
+def build_native_run_trust_score(
+    context_quality_score=None,
+    validation_contract=None,
+    context_provenance=None,
+    verification_loop=None,
+    command_policy_preview=None,
+    change_budget_preview=None,
+    change_budget_soft_gate=None,
+    approval_request=None,
+    approval_receipt=None,
+    failure_memory=None,
+    context_usage_summary=None,
+    final_report=None,
+) -> NativeRunTrustScore:
+    score = 50
+    factors: list[NativeRunTrustFactor] = []
+    warnings: list[str] = []
+    blockers: list[str] = []
+
+    v_attempted = verification_loop is not None and getattr(verification_loop, "attempted", False)
+    v_passed = v_attempted and getattr(verification_loop, "passed", False)
+    if v_passed:
+        factors.append(NativeRunTrustFactor(name="verification_passed", impact=20, reason="verification passed"))
+        score += 20
+    elif v_attempted:
+        factors.append(NativeRunTrustFactor(name="verification_failed", impact=-30, reason="verification failed"))
+        score -= 30
+        warnings.append("verification failed")
+        blockers.append("verification failed")
+    else:
+        factors.append(NativeRunTrustFactor(name="verification_not_attempted", impact=-10, reason="verification not attempted"))
+        score -= 10
+        warnings.append("verification not attempted")
+
+    v_strength = getattr(validation_contract, "strength", None) if validation_contract is not None else None
+    if v_strength == "strong":
+        factors.append(NativeRunTrustFactor(name="validation_contract_strong", impact=15, reason="strong validation contract"))
+        score += 15
+    elif v_strength == "fair":
+        factors.append(NativeRunTrustFactor(name="validation_contract_fair", impact=7, reason="fair validation contract"))
+        score += 7
+    elif v_strength == "weak":
+        factors.append(NativeRunTrustFactor(name="validation_contract_weak", impact=-15, reason="weak validation contract"))
+        score -= 15
+        warnings.append("validation contract weak")
+
+    cq_level = getattr(context_quality_score, "level", None) if context_quality_score is not None else None
+    if cq_level in ("strong", "good"):
+        factors.append(NativeRunTrustFactor(name="context_quality_good", impact=10, reason="good context quality"))
+        score += 10
+    elif cq_level in ("weak", "unknown"):
+        factors.append(NativeRunTrustFactor(name="context_quality_weak", impact=-15, reason="weak context quality"))
+        score -= 15
+        warnings.append("context quality weak")
+
+    if context_provenance is not None:
+        p_injected = getattr(context_provenance, "injected_sources", 0)
+        if p_injected > 0:
+            factors.append(NativeRunTrustFactor(name="provenance_injected", impact=8, reason="injected context sources"))
+            score += 8
+        p_has_gaps = getattr(context_provenance, "has_gaps", False)
+        if not p_has_gaps:
+            factors.append(NativeRunTrustFactor(name="provenance_no_gaps", impact=5, reason="no provenance gaps"))
+            score += 5
+        else:
+            factors.append(NativeRunTrustFactor(name="provenance_gaps", impact=-10, reason="provenance gaps detected"))
+            score -= 10
+            warnings.append("context provenance gaps")
+
+    if command_policy_preview is not None:
+        if getattr(command_policy_preview, "blocked_count", 0) > 0:
+            factors.append(NativeRunTrustFactor(name="blocked_commands", impact=-25, reason="blocked commands detected"))
+            score -= 25
+            warnings.append("blocked commands detected")
+            blockers.append("blocked commands detected")
+
+    if change_budget_preview is not None:
+        if getattr(change_budget_preview, "would_exceed_budget", False):
+            factors.append(NativeRunTrustFactor(name="budget_exceeded", impact=-15, reason="change budget exceeded"))
+            score -= 15
+            warnings.append("change budget exceeded")
+            blockers.append("change budget exceeded")
+
+    req_approval = approval_request is not None and getattr(approval_request, "requires_approval", False)
+    if req_approval:
+        if approval_receipt is not None:
+            if getattr(approval_receipt, "granted", False):
+                factors.append(NativeRunTrustFactor(name="approval_granted", impact=5, reason="approval granted"))
+                score += 5
+            else:
+                factors.append(NativeRunTrustFactor(name="approval_not_granted", impact=-30, reason="approval not granted"))
+                score -= 30
+                warnings.append("approval not granted")
+                blockers.append("approval not granted")
+
+    if failure_memory is not None and getattr(failure_memory, "has_lessons", False):
+        _lessons = getattr(failure_memory, "lessons", []) or []
+        _penalty = min(len(_lessons) * 5, 25)
+        if _penalty > 0:
+            factors.append(NativeRunTrustFactor(name="failure_lessons", impact=-_penalty, reason="failure lessons present"))
+            score -= _penalty
+            warnings.append("failure lessons present")
+
+    if context_usage_summary is not None:
+        if getattr(context_usage_summary, "any_truncated", False):
+            factors.append(NativeRunTrustFactor(name="context_truncated", impact=-8, reason="context truncated"))
+            score -= 8
+            warnings.append("context truncated")
+        _warn_count = getattr(context_usage_summary, "failure_warning_count", 0)
+        if _warn_count > 0:
+            _warn_penalty = min(_warn_count, 10)
+            factors.append(NativeRunTrustFactor(name="context_warnings", impact=-_warn_penalty, reason="context warnings present"))
+            score -= _warn_penalty
+            warnings.append("context warnings present")
+
+    if final_report is not None and getattr(final_report, "used_native_context", False):
+        factors.append(NativeRunTrustFactor(name="used_native_context", impact=5, reason="used native context"))
+        score += 5
+
+    score = max(0, min(100, score))
+
+    if score >= 85:
+        level = "strong"
+    elif score >= 70:
+        level = "good"
+    elif score >= 45:
+        level = "fair"
+    else:
+        level = "weak"
+
+    return NativeRunTrustScore(
+        score=score,
+        level=level,
+        factors=factors,
+        warnings=warnings,
+        blockers=blockers,
+    )
+
+
+def render_native_run_trust_score(score: "NativeRunTrustScore | None", detail: str = "compact") -> str:
+    if score is None:
+        return ""
+    _score = getattr(score, "score", 0)
+    _level = getattr(score, "level", "unknown")
+    _warnings = getattr(score, "warnings", []) or []
+    _blockers = getattr(score, "blockers", []) or []
+    _factors = getattr(score, "factors", []) or []
+
+    if detail == "full":
+        lines = [
+            "[run trust]",
+            f"score: {_score}/100",
+            f"level: {_level}",
+        ]
+        if _factors:
+            lines.append("factors:")
+            for _f in _factors:
+                if isinstance(_f, dict):
+                    _fn = _f.get("name", "")
+                    _fi = _f.get("impact", 0)
+                    _fr = _f.get("reason", "")
+                else:
+                    _fn = getattr(_f, "name", "")
+                    _fi = getattr(_f, "impact", 0)
+                    _fr = getattr(_f, "reason", "")
+                _sign = "+" if _fi >= 0 else ""
+                lines.append(f"  - {_fn} ({_sign}{_fi}): {_fr}")
+        lines.append(f"warnings: {len(_warnings)}")
+        lines.append(f"blockers: {len(_blockers)}")
+        return "\n".join(lines)
+
+    parts = [f"run trust: {_score}/100 {_level}"]
+    if _warnings:
+        _wc = len(_warnings)
+        parts.append(f"run trust warnings: {_wc} {'warning' if _wc == 1 else 'warnings'}")
+    if _blockers:
+        _bc = len(_blockers)
+        parts.append(f"run trust blockers: {_bc} {'blocker' if _bc == 1 else 'blockers'}")
+    return "\n".join(parts)
