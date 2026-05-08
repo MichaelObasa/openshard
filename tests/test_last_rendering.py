@@ -22,7 +22,7 @@ from openshard.native.context import (
     build_native_model_candidate_scoring,
 )
 from openshard.cli.run_output import _native_meta_from_entry
-from openshard.native.context import build_native_model_policy
+from openshard.native.context import build_native_model_policy, NativeModelPolicyReceipt
 
 
 def _render(entry: dict, detail: str = "more") -> str:
@@ -2440,6 +2440,101 @@ class TestNativeModelPolicyRendering(unittest.TestCase):
         nm = _native_meta_from_entry(entry)
         mp = getattr(nm, "model_policy", "MISSING")
         self.assertIsNone(mp)
+
+
+class TestNativeModelPolicyReceiptRendering(unittest.TestCase):
+    def _base_entry(self) -> dict:
+        return {"workflow": "native", "executor": "native"}
+
+    def _entry_with_receipt(self, **kwargs) -> dict:
+        entry = self._base_entry()
+        entry["model_policy_receipt"] = asdict(NativeModelPolicyReceipt(**kwargs))
+        return entry
+
+    def test_receipt_hidden_at_default_detail(self):
+        entry = self._entry_with_receipt(active=True, blocked_count=2)
+        out = _render(entry, detail="default")
+        self.assertNotIn("model policy receipt", out)
+
+    def test_compact_line_shown_at_more(self):
+        entry = self._entry_with_receipt(active=True, blocked_count=2)
+        out = _render(entry, detail="more")
+        self.assertIn("model policy receipt:", out)
+
+    def test_compact_line_shows_active_and_blocked(self):
+        entry = self._entry_with_receipt(active=True, blocked_count=3)
+        out = _render(entry, detail="more")
+        self.assertIn("active=true", out)
+        self.assertIn("blocked=3", out)
+
+    def test_full_block_header_shown_at_full(self):
+        entry = self._entry_with_receipt(active=True)
+        out = _render(entry, detail="full")
+        self.assertIn("[model policy receipt]", out)
+
+    def test_full_block_shows_all_fields(self):
+        entry = self._entry_with_receipt(
+            active=True,
+            mode="open-source-only",
+            affected_selection=True,
+            blocked_count=3,
+            changed_roles=["executor"],
+            warnings_count=2,
+            summary="policy active: blocked 3 candidates and changed 1 role",
+        )
+        out = _render(entry, detail="full")
+        self.assertIn("mode: open-source-only", out)
+        self.assertIn("affected_selection: yes", out)
+        self.assertIn("blocked_count: 3", out)
+        self.assertIn("warnings_count: 2", out)
+        self.assertIn("summary: policy active: blocked 3 candidates and changed 1 role", out)
+
+    def test_changed_roles_list_rendered(self):
+        entry = self._entry_with_receipt(
+            active=True,
+            affected_selection=True,
+            changed_roles=["executor"],
+        )
+        out = _render(entry, detail="full")
+        self.assertIn("- executor", out)
+
+    def test_empty_changed_roles_rendered(self):
+        entry = self._entry_with_receipt(active=True, changed_roles=[])
+        out = _render(entry, detail="full")
+        self.assertIn("changed_roles: []", out)
+
+    def test_old_entry_without_receipt_no_crash(self):
+        entry = self._base_entry()
+        try:
+            out = _render(entry, detail="more")
+        except Exception as exc:
+            self.fail(f"render raised {exc}")
+        self.assertNotIn("receipt", out)
+
+    def test_entry_with_none_receipt_no_crash(self):
+        entry = self._base_entry()
+        entry["model_policy_receipt"] = None
+        try:
+            out = _render(entry, detail="more")
+        except Exception as exc:
+            self.fail(f"render raised {exc}")
+        self.assertNotIn("model policy receipt", out)
+
+    def test_native_meta_from_entry_extracts_receipt(self):
+        entry = self._base_entry()
+        entry["model_policy_receipt"] = {"active": True, "mode": "open-source-only",
+                                          "affected_selection": False, "blocked_count": 0,
+                                          "changed_roles": [], "warnings_count": 0, "summary": ""}
+        nm = _native_meta_from_entry(entry)
+        mpr = getattr(nm, "model_policy_receipt", None)
+        self.assertIsNotNone(mpr)
+        active = mpr.get("active") if isinstance(mpr, dict) else getattr(mpr, "active", None)
+        self.assertTrue(active)
+
+    def test_receipt_not_shown_at_default_when_absent(self):
+        entry = self._base_entry()
+        out = _render(entry, detail="default")
+        self.assertNotIn("receipt", out)
 
 
 if __name__ == "__main__":

@@ -1029,11 +1029,20 @@ class RunPipeline:
                 failure_memory=_native_meta.failure_memory,
                 model_policy=_native_meta.model_policy,
             )
+            import copy
+            _before_sync = copy.deepcopy(_native_meta.model_selection_decision)
             from openshard.native.context import sync_native_model_selection_decision_with_candidate_scoring
             _native_meta.model_selection_decision = sync_native_model_selection_decision_with_candidate_scoring(
                 model_selection_decision=_native_meta.model_selection_decision,
                 model_candidate_scoring=_native_meta.model_candidate_scoring,
                 model_policy=_native_meta.model_policy,
+            )
+            from openshard.native.context import build_native_model_policy_receipt
+            _native_meta.model_policy_receipt = build_native_model_policy_receipt(
+                model_policy=_native_meta.model_policy,
+                model_selection_decision_before=_before_sync,
+                model_selection_decision_after=_native_meta.model_selection_decision,
+                model_candidate_scoring=_native_meta.model_candidate_scoring,
             )
         if _native_meta is not None and detail != "default":
             from openshard.cli.run_output import _print_native_demo_block, _print_native_summary
@@ -1206,6 +1215,11 @@ class RunPipeline:
                 "model_policy": (
                     asdict(_native_meta.model_policy)
                     if _native_meta is not None and _native_meta.model_policy is not None
+                    else None
+                ),
+                "model_policy_receipt": (
+                    asdict(_native_meta.model_policy_receipt)
+                    if _native_meta is not None and _native_meta.model_policy_receipt is not None
                     else None
                 ),
             }
