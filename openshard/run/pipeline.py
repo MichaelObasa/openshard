@@ -1014,6 +1014,17 @@ class RunPipeline:
                 change_budget=_native_meta.change_budget,
                 failure_memory=_native_meta.failure_memory,
             )
+            from openshard.native.context import build_native_model_candidate_scoring
+            _native_meta.model_candidate_scoring = build_native_model_candidate_scoring(
+                model_selection_decision=_native_meta.model_selection_decision,
+                verification_plan=_native_meta.verification_plan,
+                validation_contract=_native_meta.validation_contract,
+                context_quality_score=_native_meta.context_quality_score,
+                context_provenance=_native_meta.context_provenance,
+                run_trust_score=_native_meta.run_trust_score,
+                context_usage_summary=_native_meta.context_usage_summary,
+                failure_memory=_native_meta.failure_memory,
+            )
         if _native_meta is not None and detail != "default":
             from openshard.cli.run_output import _print_native_demo_block, _print_native_summary
             _print_native_demo_block(_native_meta, detail=detail)
@@ -1175,6 +1186,11 @@ class RunPipeline:
                 "model_selection_decision": (
                     asdict(_native_meta.model_selection_decision)
                     if _native_meta is not None and _native_meta.model_selection_decision is not None
+                    else None
+                ),
+                "model_candidate_scoring": (
+                    asdict(_native_meta.model_candidate_scoring)
+                    if _native_meta is not None and _native_meta.model_candidate_scoring is not None
                     else None
                 ),
             }
