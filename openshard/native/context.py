@@ -2512,6 +2512,103 @@ def build_native_model_policy(mode: str | None) -> "NativeModelPolicy":
     )
 
 
+@dataclass
+class NativeModelPolicyReceipt:
+    active: bool = False
+    mode: str = "auto"
+    affected_selection: bool = False
+    blocked_count: int = 0
+    changed_roles: list[str] = field(default_factory=list)
+    warnings_count: int = 0
+    summary: str = ""
+
+
+def build_native_model_policy_receipt(
+    *,
+    model_policy=None,
+    model_selection_decision_before=None,
+    model_selection_decision_after=None,
+    model_candidate_scoring=None,
+) -> "NativeModelPolicyReceipt":
+    _mode = "auto"
+    if model_policy is not None:
+        _mode = (
+            model_policy.get("mode", "auto") if isinstance(model_policy, dict)
+            else getattr(model_policy, "mode", "auto")
+        ) or "auto"
+    active = model_policy is not None and _mode != "auto"
+
+    _blocked: list = []
+    if model_candidate_scoring is not None:
+        _blocked = (
+            model_candidate_scoring.get("blocked_candidates", []) if isinstance(model_candidate_scoring, dict)
+            else getattr(model_candidate_scoring, "blocked_candidates", [])
+        ) or []
+    blocked_count = len(_blocked)
+
+    def _role_tiers(decision) -> dict:
+        if decision is None:
+            return {}
+        roles = (
+            decision.get("roles", []) if isinstance(decision, dict)
+            else getattr(decision, "roles", [])
+        ) or []
+        result: dict = {}
+        for r in roles:
+            rname = r.get("role", "") if isinstance(r, dict) else getattr(r, "role", "")
+            rtier = r.get("model_tier", "") if isinstance(r, dict) else getattr(r, "model_tier", "")
+            if rname:
+                result[rname] = rtier
+        return result
+
+    before_tiers = _role_tiers(model_selection_decision_before)
+    after_tiers = _role_tiers(model_selection_decision_after)
+    changed_roles = [r for r, t in after_tiers.items() if before_tiers.get(r) != t]
+
+    affected_selection = blocked_count > 0 or len(changed_roles) > 0
+
+    _mcs_warnings: list = []
+    if model_candidate_scoring is not None:
+        _mcs_warnings = (
+            model_candidate_scoring.get("warnings", []) if isinstance(model_candidate_scoring, dict)
+            else getattr(model_candidate_scoring, "warnings", [])
+        ) or []
+    _mp_warnings: list = []
+    if model_policy is not None:
+        _mp_warnings = (
+            model_policy.get("warnings", []) if isinstance(model_policy, dict)
+            else getattr(model_policy, "warnings", [])
+        ) or []
+    warnings_count = len(_mcs_warnings) + len(_mp_warnings)
+
+    if not active:
+        summary = "policy inactive"
+    elif not affected_selection:
+        summary = "policy active: no selection changes"
+    else:
+        n_b = blocked_count
+        n_c = len(changed_roles)
+        if n_b > 0 and n_c > 0:
+            summary = (
+                f"policy active: blocked {n_b} candidate{'s' if n_b != 1 else ''}"
+                f" and changed {n_c} role{'s' if n_c != 1 else ''}"
+            )
+        elif n_b > 0:
+            summary = f"policy active: blocked {n_b} candidate{'s' if n_b != 1 else ''}"
+        else:
+            summary = f"policy active: changed {n_c} role{'s' if n_c != 1 else ''}"
+
+    return NativeModelPolicyReceipt(
+        active=active,
+        mode=_mode,
+        affected_selection=affected_selection,
+        blocked_count=blocked_count,
+        changed_roles=changed_roles,
+        warnings_count=warnings_count,
+        summary=summary,
+    )
+
+
 def sync_native_model_selection_decision_with_candidate_scoring(
     model_selection_decision: "NativeModelSelectionDecision | None",
     model_candidate_scoring: "NativeModelCandidateScoring | None",

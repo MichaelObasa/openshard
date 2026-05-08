@@ -933,6 +933,35 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                 lines.append(f"  allow_frontier: {'yes' if _mp_allow_frontier else 'no'}")
                 lines.append(f"  warnings: {len(_mp_warnings)}")
 
+    if detail in ("more", "full"):
+        mpr = getattr(native_meta, "model_policy_receipt", None)
+        if mpr is not None:
+            _mpr_active = mpr.get("active", False) if isinstance(mpr, dict) else getattr(mpr, "active", False)
+            _mpr_blocked = mpr.get("blocked_count", 0) if isinstance(mpr, dict) else getattr(mpr, "blocked_count", 0)
+            _mpr_changed = (mpr.get("changed_roles", []) if isinstance(mpr, dict) else getattr(mpr, "changed_roles", [])) or []
+            lines.append(
+                f"  model policy receipt: active={'true' if _mpr_active else 'false'},"
+                f" blocked={_mpr_blocked}, changed_roles={len(_mpr_changed)}"
+            )
+            has_content = True
+            if detail == "full":
+                _mpr_mode = mpr.get("mode", "auto") if isinstance(mpr, dict) else getattr(mpr, "mode", "auto")
+                _mpr_affected = mpr.get("affected_selection", False) if isinstance(mpr, dict) else getattr(mpr, "affected_selection", False)
+                _mpr_warnings = mpr.get("warnings_count", 0) if isinstance(mpr, dict) else getattr(mpr, "warnings_count", 0)
+                _mpr_summary = mpr.get("summary", "") if isinstance(mpr, dict) else getattr(mpr, "summary", "")
+                lines.append("  [model policy receipt]")
+                lines.append(f"  mode: {_mpr_mode}")
+                lines.append(f"  affected_selection: {'yes' if _mpr_affected else 'no'}")
+                lines.append(f"  blocked_count: {_mpr_blocked}")
+                if _mpr_changed:
+                    lines.append("  changed_roles:")
+                    for _cr in _mpr_changed:
+                        lines.append(f"    - {_cr}")
+                else:
+                    lines.append("  changed_roles: []")
+                lines.append(f"  warnings_count: {_mpr_warnings}")
+                lines.append(f"  summary: {_mpr_summary}")
+
     return lines if has_content else []
 
 
@@ -1004,6 +1033,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "model_selection_decision": entry.get("model_selection_decision"),
         "model_candidate_scoring": entry.get("model_candidate_scoring"),
         "model_policy": entry.get("model_policy"),
+        "model_policy_receipt": entry.get("model_policy_receipt"),
     })
 
 
