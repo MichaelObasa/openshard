@@ -1900,3 +1900,197 @@ def render_native_run_trust_score(score: "NativeRunTrustScore | None", detail: s
         _bc = len(_blockers)
         parts.append(f"run trust blockers: {_bc} {'blocker' if _bc == 1 else 'blockers'}")
     return "\n".join(parts)
+
+
+@dataclass
+class NativeModelRoleDecision:
+    role: str = ""
+    model_tier: str = ""
+    cost_tier: str = ""
+    reason: str = ""
+
+
+@dataclass
+class NativeModelSelectionDecision:
+    strategy: str = "cost-balanced"
+    task_type: str = "unknown"
+    risk_level: str = "unknown"
+    roles: list[NativeModelRoleDecision] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    fallback_reason: str = ""
+    confidence: str = "medium"
+
+
+def build_native_model_selection_decision(
+    *,
+    verification_plan=None,
+    validation_contract=None,
+    context_quality_score=None,
+    context_provenance=None,
+    run_trust_score=None,
+    change_budget=None,
+    failure_memory=None,
+) -> NativeModelSelectionDecision:
+    vc_strength = getattr(validation_contract, "strength", "") or ""
+    vp_risk = getattr(verification_plan, "risk_level", "unknown") or "unknown"
+    vc_risk = getattr(validation_contract, "risk_level", "unknown") or "unknown"
+    rts_level = getattr(run_trust_score, "level", "unknown") or "unknown"
+    cqs_level = getattr(context_quality_score, "level", "unknown") or "unknown"
+    cp_has_gaps = getattr(context_provenance, "has_gaps", False)
+    task_type = getattr(verification_plan, "task_type", "unknown") or "unknown"
+    risk_level = vp_risk if vp_risk not in ("", "unknown") else vc_risk
+
+    fallback_reason = ""
+
+    if vc_strength == "weak" or vp_risk == "high" or rts_level == "weak":
+        strategy = "frontier-heavy"
+    elif cqs_level == "weak" or cp_has_gaps:
+        strategy = "context-cautious"
+    elif risk_level in ("low", "medium") and vc_strength in ("fair", "strong"):
+        strategy = "cost-balanced"
+    else:
+        strategy = "cost-balanced"
+        fallback_reason = "insufficient signal — defaulting to cost-balanced"
+
+    if strategy == "frontier-heavy":
+        planner_reason = "high risk requires strong reasoning model"
+        executor_tier = "frontier-reasoning-model"
+        executor_cost = "high"
+        executor_reason = "high risk or weak signals require frontier execution"
+    elif strategy == "context-cautious":
+        planner_reason = "planning requires strong reasoning despite context gaps"
+        executor_tier = "balanced-coding-model"
+        executor_cost = "medium"
+        executor_reason = "context gaps suggest balanced model for cautious execution"
+    else:
+        planner_reason = "planning always uses frontier reasoning"
+        if task_type in ("docs", "test", "config"):
+            executor_tier = "low-cost-coding-model"
+            executor_cost = "low"
+            executor_reason = "low-complexity task type allows low-cost model"
+        else:
+            executor_tier = "balanced-coding-model"
+            executor_cost = "medium"
+            executor_reason = "balanced cost and capability"
+
+    planner_role = NativeModelRoleDecision(
+        role="planner",
+        model_tier="frontier-reasoning-model",
+        cost_tier="high",
+        reason=planner_reason,
+    )
+    executor_role = NativeModelRoleDecision(
+        role="executor",
+        model_tier=executor_tier,
+        cost_tier=executor_cost,
+        reason=executor_reason,
+    )
+    validator_role = NativeModelRoleDecision(
+        role="validator",
+        model_tier="independent-validator-model",
+        cost_tier="medium",
+        reason="independent validation required for all strategies",
+    )
+
+    warnings: list[str] = []
+    if cqs_level == "weak":
+        warnings.append("context quality is weak")
+    if vc_strength == "weak":
+        warnings.append("validation contract is weak — signals may be unreliable")
+    if rts_level == "weak":
+        warnings.append("run trust score is weak")
+    if getattr(failure_memory, "has_lessons", False):
+        warnings.append("failure memory has lessons that may affect model reliability")
+
+    signal_count = sum([
+        verification_plan is not None,
+        validation_contract is not None,
+        context_quality_score is not None,
+        context_provenance is not None,
+        run_trust_score is not None,
+    ])
+
+    if signal_count == 0:
+        confidence = "low"
+        if not fallback_reason:
+            fallback_reason = "insufficient signal — defaulting to cost-balanced"
+    elif signal_count <= 2:
+        confidence = "medium"
+    else:
+        frontier_triggers = sum([
+            vc_strength == "weak",
+            vp_risk == "high",
+            rts_level == "weak",
+        ])
+        if strategy == "cost-balanced" and frontier_triggers == 0:
+            confidence = "high"
+        elif strategy == "frontier-heavy" and frontier_triggers >= 2:
+            confidence = "high"
+        else:
+            confidence = "medium"
+
+    return NativeModelSelectionDecision(
+        strategy=strategy,
+        task_type=task_type,
+        risk_level=risk_level,
+        roles=[planner_role, executor_role, validator_role],
+        warnings=warnings,
+        fallback_reason=fallback_reason,
+        confidence=confidence,
+    )
+
+
+def render_native_model_selection_decision(
+    msd: "NativeModelSelectionDecision | None",
+    detail: str = "compact",
+) -> str:
+    if msd is None:
+        return ""
+    if detail not in ("compact", "more", "full"):
+        return ""
+    _strategy = getattr(msd, "strategy", "unknown")
+    _confidence = getattr(msd, "confidence", "unknown")
+    _roles = getattr(msd, "roles", []) or []
+    _planner_tier = ""
+    _executor_tier = ""
+    for _r in _roles:
+        _rname = _r.get("role", "") if isinstance(_r, dict) else getattr(_r, "role", "")
+        _rtier = _r.get("model_tier", "") if isinstance(_r, dict) else getattr(_r, "model_tier", "")
+        if _rname == "planner":
+            _planner_tier = _rtier
+        if _rname == "executor":
+            _executor_tier = _rtier
+    if detail in ("compact", "more"):
+        return (
+            f"model selection: {_strategy}"
+            f"  confidence={_confidence}"
+            f"  planner={_planner_tier}"
+            f"  executor={_executor_tier}"
+        )
+    lines = [
+        "[model selection]",
+        f"strategy: {_strategy}",
+        f"task_type: {getattr(msd, 'task_type', 'unknown')}",
+        f"risk_level: {getattr(msd, 'risk_level', 'unknown')}",
+        f"confidence: {_confidence}",
+    ]
+    _fallback = getattr(msd, "fallback_reason", "")
+    if _fallback:
+        lines.append(f"fallback: {_fallback}")
+    if _roles:
+        lines.append("roles:")
+        for _r in _roles:
+            if isinstance(_r, dict):
+                _rn = _r.get("role", "")
+                _rt = _r.get("model_tier", "")
+                _rc = _r.get("cost_tier", "")
+                _rr = _r.get("reason", "")
+            else:
+                _rn = getattr(_r, "role", "")
+                _rt = getattr(_r, "model_tier", "")
+                _rc = getattr(_r, "cost_tier", "")
+                _rr = getattr(_r, "reason", "")
+            lines.append(f"  - {_rn}: {_rt} ({_rc}) — {_rr}")
+    _warnings = getattr(msd, "warnings", []) or []
+    lines.append(f"warnings: {len(_warnings)}")
+    return "\n".join(lines)

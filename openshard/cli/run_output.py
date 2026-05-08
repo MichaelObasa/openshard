@@ -811,6 +811,56 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                 lines.append(f"  blockers: {len(_rts_blockers)}")
             has_content = True
 
+    if detail in ("more", "full"):
+        msd = getattr(native_meta, "model_selection_decision", None)
+        if msd is not None:
+            _msd_strategy = getattr(msd, "strategy", "unknown")
+            _msd_confidence = getattr(msd, "confidence", "unknown")
+            _msd_roles = getattr(msd, "roles", []) or []
+            _planner_tier = ""
+            _executor_tier = ""
+            for _r in _msd_roles:
+                _rname = _r.get("role", "") if isinstance(_r, dict) else getattr(_r, "role", "")
+                _rtier = _r.get("model_tier", "") if isinstance(_r, dict) else getattr(_r, "model_tier", "")
+                if _rname == "planner":
+                    _planner_tier = _rtier
+                if _rname == "executor":
+                    _executor_tier = _rtier
+            lines.append(
+                f"  model selection: {_msd_strategy}"
+                f"  confidence={_msd_confidence}"
+                f"  planner={_planner_tier}"
+                f"  executor={_executor_tier}"
+            )
+            has_content = True
+            if detail == "full":
+                _msd_task = getattr(msd, "task_type", "unknown")
+                _msd_risk = getattr(msd, "risk_level", "unknown")
+                _msd_fallback = getattr(msd, "fallback_reason", "")
+                _msd_warnings = getattr(msd, "warnings", []) or []
+                lines.append("  [model selection]")
+                lines.append(f"  strategy: {_msd_strategy}")
+                lines.append(f"  task_type: {_msd_task}")
+                lines.append(f"  risk_level: {_msd_risk}")
+                lines.append(f"  confidence: {_msd_confidence}")
+                if _msd_fallback:
+                    lines.append(f"  fallback: {_msd_fallback}")
+                if _msd_roles:
+                    lines.append("  roles:")
+                    for _r in _msd_roles:
+                        if isinstance(_r, dict):
+                            _rn = _r.get("role", "")
+                            _rt = _r.get("model_tier", "")
+                            _rc = _r.get("cost_tier", "")
+                            _rr = _r.get("reason", "")
+                        else:
+                            _rn = getattr(_r, "role", "")
+                            _rt = getattr(_r, "model_tier", "")
+                            _rc = getattr(_r, "cost_tier", "")
+                            _rr = getattr(_r, "reason", "")
+                        lines.append(f"    - {_rn}: {_rt} ({_rc}) — {_rr}")
+                lines.append(f"  warnings: {len(_msd_warnings)}")
+
     return lines if has_content else []
 
 
@@ -879,6 +929,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "validation_contract": entry.get("validation_contract"),
         "context_provenance": entry.get("context_provenance"),
         "run_trust_score": entry.get("run_trust_score"),
+        "model_selection_decision": entry.get("model_selection_decision"),
     })
 
 

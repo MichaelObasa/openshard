@@ -9,6 +9,8 @@ from click.testing import CliRunner
 from openshard.cli.main import _model_label, _render_log_entry
 from openshard.native.context import (
     NativeContextQualityScore,
+    NativeModelRoleDecision,
+    NativeModelSelectionDecision,
     NativeObservation,
     NativePlan,
     NativeRunTrustFactor,
@@ -1998,6 +2000,86 @@ class TestNativeRunTrustScoreRendering(unittest.TestCase):
         self.assertNotIn("blocked commands detected", out)
         self.assertIn("2 warnings", out)
         self.assertIn("1 blocker", out)
+
+
+class TestNativeModelSelectionDecisionRendering(unittest.TestCase):
+    def _base_entry(self) -> dict:
+        return {"workflow": "native", "executor": "native"}
+
+    def _msd_dict(
+        self,
+        strategy: str = "cost-balanced",
+        task_type: str = "feature",
+        risk_level: str = "medium",
+        confidence: str = "high",
+        fallback_reason: str = "",
+        warnings: list | None = None,
+    ) -> dict:
+        return asdict(NativeModelSelectionDecision(
+            strategy=strategy,
+            task_type=task_type,
+            risk_level=risk_level,
+            roles=[
+                NativeModelRoleDecision(role="planner", model_tier="frontier-reasoning-model", cost_tier="high", reason="planning"),
+                NativeModelRoleDecision(role="executor", model_tier="balanced-coding-model", cost_tier="medium", reason="balanced"),
+                NativeModelRoleDecision(role="validator", model_tier="independent-validator-model", cost_tier="medium", reason="independent"),
+            ],
+            warnings=warnings or [],
+            fallback_reason=fallback_reason,
+            confidence=confidence,
+        ))
+
+    def test_old_entry_no_msd_does_not_crash_more(self):
+        entry = self._base_entry()
+        out = _render(entry, detail="more")
+        self.assertNotIn("model selection:", out)
+
+    def test_old_entry_no_msd_does_not_crash_full(self):
+        entry = self._base_entry()
+        out = _render(entry, detail="full")
+        self.assertNotIn("model selection:", out)
+
+    def test_compact_line_renders_at_more(self):
+        entry = self._base_entry()
+        entry["model_selection_decision"] = self._msd_dict(strategy="cost-balanced")
+        out = _render(entry, detail="more")
+        self.assertIn("model selection:", out)
+        self.assertIn("cost-balanced", out)
+
+    def test_full_block_renders_at_full(self):
+        entry = self._base_entry()
+        entry["model_selection_decision"] = self._msd_dict(strategy="frontier-heavy", risk_level="high")
+        out = _render(entry, detail="full")
+        self.assertIn("[model selection]", out)
+        self.assertIn("strategy:", out)
+        self.assertIn("roles:", out)
+
+    def test_model_selection_not_shown_at_default(self):
+        entry = self._base_entry()
+        entry["model_selection_decision"] = self._msd_dict()
+        out = _render(entry, detail="default")
+        self.assertNotIn("model selection:", out)
+
+    def test_native_meta_from_entry_roundtrips_msd(self):
+        entry = self._base_entry()
+        entry["model_selection_decision"] = self._msd_dict(
+            strategy="context-cautious",
+            confidence="medium",
+        )
+        meta = _native_meta_from_entry(entry)
+        msd = getattr(meta, "model_selection_decision", None)
+        self.assertIsNotNone(msd)
+        strategy = getattr(msd, "strategy", None)
+        confidence = getattr(msd, "confidence", None)
+        self.assertEqual(strategy, "context-cautious")
+        self.assertEqual(confidence, "medium")
+
+    def test_full_renders_role_tiers(self):
+        entry = self._base_entry()
+        entry["model_selection_decision"] = self._msd_dict()
+        out = _render(entry, detail="full")
+        self.assertIn("frontier-reasoning-model", out)
+        self.assertIn("independent-validator-model", out)
 
 
 if __name__ == "__main__":
