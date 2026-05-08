@@ -1044,6 +1044,13 @@ class RunPipeline:
                 model_selection_decision_after=_native_meta.model_selection_decision,
                 model_candidate_scoring=_native_meta.model_candidate_scoring,
             )
+            from openshard.native.context import build_native_routing_preview
+            _native_meta.routing_preview = build_native_routing_preview(
+                model_candidate_scoring=_native_meta.model_candidate_scoring,
+                model_selection_decision=_native_meta.model_selection_decision,
+                model_policy_receipt=_native_meta.model_policy_receipt,
+                run_trust_score=_native_meta.run_trust_score,
+            )
         if _native_meta is not None and detail != "default":
             from openshard.cli.run_output import _print_native_demo_block, _print_native_summary
             _print_native_demo_block(_native_meta, detail=detail)
@@ -1220,6 +1227,11 @@ class RunPipeline:
                 "model_policy_receipt": (
                     asdict(_native_meta.model_policy_receipt)
                     if _native_meta is not None and _native_meta.model_policy_receipt is not None
+                    else None
+                ),
+                "routing_preview": (
+                    asdict(_native_meta.routing_preview)
+                    if _native_meta is not None and _native_meta.routing_preview is not None
                     else None
                 ),
             }
