@@ -2117,6 +2117,7 @@ class NativeModelCandidateScoring:
     strategy: str = "cost-balanced"
     confidence: str = "medium"
     warnings: list[str] = field(default_factory=list)
+    blocked_candidates: list[str] = field(default_factory=list)
 
 
 _CANDIDATE_TIERS = [
@@ -2132,6 +2133,12 @@ _DEFAULT_ROLE_TIERS = {
     "validator": "independent-validator-model",
 }
 
+_VALID_TIERS_BY_ROLE: dict[str, list[str]] = {
+    "planner": ["frontier-reasoning-model", "balanced-coding-model"],
+    "executor": ["frontier-reasoning-model", "balanced-coding-model", "low-cost-coding-model"],
+    "validator": ["independent-validator-model", "frontier-reasoning-model", "balanced-coding-model"],
+}
+
 
 def build_native_model_candidate_scoring(
     *,
@@ -2143,6 +2150,7 @@ def build_native_model_candidate_scoring(
     run_trust_score=None,
     context_usage_summary=None,
     failure_memory=None,
+    model_policy=None,
 ) -> NativeModelCandidateScoring:
     vc_strength = getattr(validation_contract, "strength", "") or ""
     rts_level = getattr(run_trust_score, "level", "") or ""
@@ -2298,7 +2306,47 @@ def build_native_model_candidate_scoring(
                 reason=", ".join(reason_parts),
             ))
 
-    # selected_by_role
+    # Policy enforcement: zero out blocked candidates
+    blocked_candidates: list[str] = []
+    _policy_warnings: list[str] = []
+    if model_policy is not None:
+        _allow_frontier = getattr(model_policy, "allow_frontier", True)
+        _require_open_source = getattr(model_policy, "require_open_source", False)
+        _require_local = getattr(model_policy, "require_local", False)
+        _disallowed = set(getattr(model_policy, "disallowed_tiers", []) or [])
+        _allowed = set(getattr(model_policy, "allowed_tiers", []) or [])
+        for _c in candidates:
+            _block = False
+            if not _allow_frontier and _c.candidate == "frontier-reasoning-model":
+                _block = True
+                if "frontier models blocked by policy" not in _policy_warnings:
+                    _policy_warnings.append("frontier models blocked by policy")
+            if _require_open_source and _c.candidate == "frontier-reasoning-model":
+                _block = True
+                if "frontier models blocked by policy" not in _policy_warnings:
+                    _policy_warnings.append("frontier models blocked by policy")
+            if _require_local:
+                if _c.candidate in ("frontier-reasoning-model", "independent-validator-model"):
+                    _block = True
+                    if _c.candidate == "frontier-reasoning-model":
+                        if "frontier models blocked by policy" not in _policy_warnings:
+                            _policy_warnings.append("frontier models blocked by policy")
+                    else:
+                        if "validator model blocked by local-only policy" not in _policy_warnings:
+                            _policy_warnings.append("validator model blocked by local-only policy")
+            if _c.candidate in _disallowed:
+                _block = True
+            if _allowed and _c.candidate not in _allowed:
+                _block = True
+            if _block:
+                _c.score = 0
+                _key = f"{_c.role}/{_c.candidate}"
+                if _key not in blocked_candidates:
+                    blocked_candidates.append(_key)
+        if blocked_candidates and "policy restrictions reduced candidate pool" not in _policy_warnings:
+            _policy_warnings.append("policy restrictions reduced candidate pool")
+
+    # Base selection from MSD (pre-enforcement fallback)
     selected_by_role: dict[str, str] = {}
     if model_selection_decision is not None:
         msd_roles_raw = getattr(model_selection_decision, "roles", []) or []
@@ -2314,6 +2362,22 @@ def build_native_model_candidate_scoring(
     if not selected_by_role:
         selected_by_role = dict(_DEFAULT_ROLE_TIERS)
 
+    # Re-derive selection from enforcement survivors using role-valid tiers
+    if blocked_candidates:
+        _new_selected: dict[str, str] = {}
+        for _role in roles:
+            _valid = _VALID_TIERS_BY_ROLE.get(_role, list(_CANDIDATE_TIERS))
+            _role_candidates = [_c for _c in candidates if _c.role == _role and _c.candidate in _valid]
+            _surviving = [_c for _c in _role_candidates if _c.score > 0]
+            if _surviving:
+                _best = max(_surviving, key=lambda _c: _c.score)
+                _new_selected[_role] = _best.candidate
+            else:
+                _new_selected[_role] = selected_by_role.get(_role, _DEFAULT_ROLE_TIERS.get(_role, "balanced-coding-model"))
+                if "no candidates survived policy enforcement" not in _policy_warnings:
+                    _policy_warnings.append("no candidates survived policy enforcement")
+        selected_by_role = _new_selected
+
     warnings: list[str] = []
     if model_selection_decision is None:
         warnings.append("model selection decision missing")
@@ -2323,6 +2387,9 @@ def build_native_model_candidate_scoring(
         warnings.append("context gaps may affect candidate scoring")
     if vc_strength == "weak":
         warnings.append("validation contract weak")
+    for _pw in _policy_warnings:
+        if _pw not in warnings:
+            warnings.append(_pw)
 
     return NativeModelCandidateScoring(
         candidates=candidates,
@@ -2330,6 +2397,7 @@ def build_native_model_candidate_scoring(
         strategy=strategy,
         confidence=confidence,
         warnings=warnings,
+        blocked_candidates=blocked_candidates,
     )
 
 
@@ -2378,10 +2446,20 @@ def render_native_model_candidate_scoring(
                     _cc = getattr(_c, "candidate", "")
                     _cs = getattr(_c, "score", 0)
                 lines.append(f"  - {_cr}/{_cc}: {_cs}")
+        _blocked = getattr(scoring, "blocked_candidates", []) or []
+        if _blocked:
+            lines.append("blocked:")
+            for _b in _blocked:
+                lines.append(f"  - {_b}")
         _warnings = getattr(scoring, "warnings", []) or []
         lines.append(f"warnings: {len(_warnings)}")
         return "\n".join(lines)
-    return f"model candidates: {_role_count} roles, strategy={_strategy}, confidence={_confidence}"
+    _blocked = getattr(scoring, "blocked_candidates", []) or []
+    _blocked_count = len(_blocked)
+    _base = f"model candidates: {_role_count} roles, strategy={_strategy}, confidence={_confidence}"
+    if _blocked_count:
+        return f"{_base}, blocked={_blocked_count}"
+    return _base
 
 
 @dataclass

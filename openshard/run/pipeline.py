@@ -1027,6 +1027,7 @@ class RunPipeline:
                 run_trust_score=_native_meta.run_trust_score,
                 context_usage_summary=_native_meta.context_usage_summary,
                 failure_memory=_native_meta.failure_memory,
+                model_policy=_native_meta.model_policy,
             )
         if _native_meta is not None and detail != "default":
             from openshard.cli.run_output import _print_native_demo_block, _print_native_summary

@@ -2232,6 +2232,64 @@ class TestNativeModelCandidateScoringRendering(unittest.TestCase):
             self.fail(f"render raised {exc}")
         self.assertNotIn("model candidates:", out)
 
+    def test_old_entry_without_blocked_candidates_renders_more(self):
+        entry = self._base_entry()
+        mcs = self._mcs_dict(strategy="cost-balanced", confidence="medium")
+        # Simulate old entry: no blocked_candidates key
+        mcs.pop("blocked_candidates", None)
+        entry["model_candidate_scoring"] = mcs
+        try:
+            out = _render(entry, detail="more")
+        except Exception as exc:
+            self.fail(f"render raised {exc}")
+        self.assertIn("model candidates:", out)
+        self.assertNotIn("blocked=", out)
+
+    def test_old_entry_without_blocked_candidates_renders_full(self):
+        entry = self._base_entry()
+        mcs = self._mcs_dict(include_candidates=True)
+        mcs.pop("blocked_candidates", None)
+        entry["model_candidate_scoring"] = mcs
+        try:
+            out = _render(entry, detail="full")
+        except Exception as exc:
+            self.fail(f"render raised {exc}")
+        self.assertIn("[model candidates]", out)
+        self.assertNotIn("blocked:", out)
+
+    def test_blocked_count_appears_in_more(self):
+        entry = self._base_entry()
+        mcs = self._mcs_dict(strategy="cost-balanced", confidence="high")
+        mcs["blocked_candidates"] = ["planner/frontier-reasoning-model", "executor/frontier-reasoning-model"]
+        entry["model_candidate_scoring"] = mcs
+        out = _render(entry, detail="more")
+        self.assertIn("blocked=2", out)
+
+    def test_zero_blocked_not_shown_in_compact(self):
+        entry = self._base_entry()
+        mcs = self._mcs_dict()
+        mcs["blocked_candidates"] = []
+        entry["model_candidate_scoring"] = mcs
+        out = _render(entry, detail="more")
+        self.assertNotIn("blocked=", out)
+
+    def test_blocked_section_appears_in_full(self):
+        entry = self._base_entry()
+        mcs = self._mcs_dict(include_candidates=True)
+        mcs["blocked_candidates"] = ["planner/frontier-reasoning-model"]
+        entry["model_candidate_scoring"] = mcs
+        out = _render(entry, detail="full")
+        self.assertIn("blocked:", out)
+        self.assertIn("planner/frontier-reasoning-model", out)
+
+    def test_no_blocked_section_in_full_when_empty(self):
+        entry = self._base_entry()
+        mcs = self._mcs_dict(include_candidates=True)
+        mcs["blocked_candidates"] = []
+        entry["model_candidate_scoring"] = mcs
+        out = _render(entry, detail="full")
+        self.assertNotIn("blocked:", out)
+
 
 class TestNativeModelPolicyRendering(unittest.TestCase):
     def _base_entry(self) -> dict:
