@@ -69,6 +69,25 @@ class TestFormatBaselineLine(unittest.TestCase):
         result = format_baseline_line(1_000_000, 1_000_000, actual_cost=0.0)
         self.assertNotIn("x higher", result)
 
+    def test_no_multiplier_when_baseline_cheaper_than_actual(self):
+        # 1k/1k → Sonnet 4.6 ≈ $0.018, GPT-5.5 ≈ $0.035; actual $1.00 → both ratios ≈ 0.02–0.04 (<1.05)
+        result = format_baseline_line(1_000, 1_000, actual_cost=1.0)
+        self.assertIsNotNone(result)
+        self.assertNotIn("x higher", result)
+
+    def test_no_multiplier_when_ratio_nearly_equal(self):
+        # Sonnet 4.6 at 1k/1k = $0.018; actual $0.0175 → ratio ≈ 1.03 (<1.05, omit suffix)
+        custom = [("Sonnet 4.6", "anthropic/claude-sonnet-4.6")]
+        result = format_baseline_line(1_000, 1_000, actual_cost=0.0175, models=custom)
+        self.assertIsNotNone(result)
+        self.assertNotIn("x higher", result)
+
+    def test_multiplier_appears_for_meaningful_higher_baseline(self):
+        # 1M/1M → Sonnet 4.6 = $18; actual $10 → ratio 1.8x (>1.05), suffix shown
+        result = format_baseline_line(1_000_000, 1_000_000, actual_cost=10.0)
+        self.assertIsNotNone(result)
+        self.assertIn("x higher", result)
+
     # --- Multiplier: present with actual_cost ---
 
     def test_multiplier_present_when_actual_cost_positive(self):
