@@ -5911,7 +5911,7 @@ class TestExplicitFileSnippetsObservePhase(unittest.TestCase):
             executor._run_observe_phase("what does ../secret.py do?")
         self.assertIsNone(executor.native_meta.evidence)
 
-    def test_snippet_lines_capped_at_8(self):
+    def test_snippet_lines_bounded(self):
         big = "\n".join(f"line_{i} = {i}" for i in range(100))
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -5921,7 +5921,7 @@ class TestExplicitFileSnippetsObservePhase(unittest.TestCase):
         evidence = executor.native_meta.evidence
         self.assertIsNotNone(evidence)
         snippet = next(s for s in evidence.file_snippets if s.path == "big.py")
-        self.assertLessEqual(len(snippet.lines), 8)
+        self.assertLessEqual(len(snippet.lines), 25)
 
     def test_no_runner_returns_early(self):
         executor = self._make_executor_no_repo()
@@ -5958,6 +5958,159 @@ class TestExplicitFileSnippetsObservePhase(unittest.TestCase):
             executor = self._make_executor_with_repo(root)
             executor._run_observe_phase("fix the bug in the code")
         self.assertIsNone(executor.native_meta.evidence)
+
+    def test_python_outline_exposes_def_not_just_imports(self):
+        content = "import os\n\ndef main(): pass\nclass Config:\n    pass\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "mod.py").write_text(content)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("what does mod.py do?")
+        evidence = executor.native_meta.evidence
+        self.assertIsNotNone(evidence)
+        snippet = next(s for s in evidence.file_snippets if s.path == "mod.py")
+        joined = "\n".join(snippet.lines)
+        self.assertIn("main", joined)
+        self.assertIn("Config", joined)
+
+    def test_python_outline_exposes_click_commands(self):
+        content = "import click\n\n@click.command()\ndef deploy(): pass\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "cli.py").write_text(content)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("what does cli.py do?")
+        evidence = executor.native_meta.evidence
+        self.assertIsNotNone(evidence)
+        snippet = next(s for s in evidence.file_snippets if s.path == "cli.py")
+        joined = "\n".join(snippet.lines)
+        self.assertIn("[commands]", joined)
+        self.assertIn("deploy", joined)
+
+
+class TestBuildExplicitFileOutline(unittest.TestCase):
+    """Unit tests for _build_explicit_file_outline() and its sub-helpers."""
+
+    def _outline(self, content: str, path: str, **kw) -> str:
+        from openshard.native.executor import _build_explicit_file_outline
+        return "\n".join(_build_explicit_file_outline(content, path, **kw))
+
+    # ── Python outline ────────────────────────────────────────────────────
+
+    def test_python_includes_def_names(self):
+        content = "def foo(): pass\ndef bar(): pass\n"
+        result = self._outline(content, "mod.py")
+        self.assertIn("foo", result)
+        self.assertIn("bar", result)
+
+    def test_python_includes_class_names(self):
+        content = "class Foo:\n    pass\nclass Bar:\n    pass\n"
+        result = self._outline(content, "mod.py")
+        self.assertIn("Foo", result)
+        self.assertIn("Bar", result)
+
+    def test_python_labels_defs_and_classes_separately(self):
+        content = "class A:\n    pass\ndef b(): pass\n"
+        result = self._outline(content, "mod.py")
+        self.assertIn("[classes]", result)
+        self.assertIn("[defs]", result)
+
+    def test_python_module_docstring_captured(self):
+        content = '"""Handles CLI entry points."""\nimport click\n'
+        result = self._outline(content, "main.py")
+        self.assertIn("[docstring]", result)
+        self.assertIn("Handles CLI entry points", result)
+
+    def test_python_imports_summarized(self):
+        content = "import os\nimport re\nfrom pathlib import Path\ndef foo(): pass\n"
+        result = self._outline(content, "main.py")
+        self.assertIn("[imports]", result)
+        self.assertTrue(
+            any(name in result for name in ("os", "re", "pathlib")),
+            msg=f"Expected import names in outline: {result!r}",
+        )
+
+    def test_python_click_command_decorator_labeled_as_command(self):
+        content = "import click\n\n@click.command()\ndef run(): pass\n"
+        result = self._outline(content, "cli.py")
+        self.assertIn("[commands]", result)
+        self.assertIn("run", result)
+
+    def test_python_app_group_decorator_labeled_as_command(self):
+        content = "import typer\napp = typer.Typer()\n\n@app.command()\ndef deploy(): pass\n"
+        result = self._outline(content, "cli.py")
+        self.assertIn("[commands]", result)
+        self.assertIn("deploy", result)
+
+    def test_python_non_command_def_not_labeled_as_command(self):
+        content = "def helper(): pass\n"
+        result = self._outline(content, "util.py")
+        self.assertNotIn("[commands]", result)
+        self.assertIn("[defs]", result)
+
+    def test_python_indented_method_not_in_defs(self):
+        content = "class Foo:\n    def bar(self): pass\n"
+        result = self._outline(content, "mod.py")
+        self.assertIn("Foo", result)
+        # bar is a method (indented), must NOT appear under [defs]
+        if "[defs]" in result:
+            defs_part = result.split("[defs]")[1].split("\n")[0]
+            self.assertNotIn("bar", defs_part)
+
+    def test_python_large_file_bounded_by_max_lines(self):
+        many_defs = "\n".join(f"def fn_{i}(): pass" for i in range(200))
+        from openshard.native.executor import _build_explicit_file_outline
+        lines = _build_explicit_file_outline(many_defs, "big.py", max_lines=25)
+        self.assertLessEqual(len(lines), 25)
+
+    def test_python_empty_file_returns_empty(self):
+        from openshard.native.executor import _build_explicit_file_outline
+        self.assertEqual(_build_explicit_file_outline("", "empty.py"), [])
+
+    def test_python_imports_only_shows_imports_no_defs(self):
+        content = "import os\nimport sys\n"
+        result = self._outline(content, "imports_only.py")
+        self.assertIn("[imports]", result)
+        self.assertNotIn("[defs]", result)
+        self.assertNotIn("[classes]", result)
+
+    def test_python_fallback_to_generic_when_no_symbols(self):
+        content = "x = 1\ny = 2\nz = 3\n"
+        from openshard.native.executor import _build_explicit_file_outline
+        lines = _build_explicit_file_outline(content, "data.py")
+        # Fallback to generic outline: at least one line, all non-blank
+        self.assertGreater(len(lines), 0)
+
+    def test_python_long_import_list_truncated_with_ellipsis(self):
+        content = "\n".join(f"import mod{i}" for i in range(10)) + "\ndef go(): pass\n"
+        result = self._outline(content, "heavy.py")
+        self.assertIn("...", result)
+
+    # ── Non-Python outline ────────────────────────────────────────────────
+
+    def test_non_python_returns_meaningful_lines(self):
+        content = "\n\nHello world\nThis is a readme\n\n"
+        from openshard.native.executor import _build_explicit_file_outline
+        lines = _build_explicit_file_outline(content, "README.md")
+        joined = "\n".join(lines)
+        self.assertIn("Hello world", joined)
+        self.assertIn("This is a readme", joined)
+
+    def test_non_python_skips_leading_blank_lines(self):
+        content = "\n\n\nfirst real line\n"
+        from openshard.native.executor import _build_explicit_file_outline
+        lines = _build_explicit_file_outline(content, "notes.txt")
+        self.assertTrue(lines[0].strip())
+
+    def test_non_python_bounded_by_max_lines(self):
+        content = "\n".join(f"line {i}" for i in range(100))
+        from openshard.native.executor import _build_explicit_file_outline
+        lines = _build_explicit_file_outline(content, "data.txt", max_lines=20)
+        self.assertLessEqual(len(lines), 20)
+
+    def test_non_python_empty_returns_empty(self):
+        from openshard.native.executor import _build_explicit_file_outline
+        self.assertEqual(_build_explicit_file_outline("", "file.txt"), [])
 
 
 class TestExplicitFileContextInGeneratedPrompt(unittest.TestCase):
@@ -6067,7 +6220,7 @@ class TestBuildExplicitFileContext(unittest.TestCase):
             result = self._helper("what does openshard/cli/main.py do?", root=root)
         self.assertIn("[evidence]", result)
         self.assertIn("openshard/cli/main.py", result)
-        self.assertIn("def main", result)
+        self.assertIn("main", result)
 
     def test_returns_empty_for_plain_task(self):
         result = self._helper("improve the error handling")
@@ -6081,6 +6234,28 @@ class TestBuildExplicitFileContext(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             result = self._helper("what does openshard/cli/main.py do?", root=Path(tmp))
         self.assertEqual(result, "")
+
+    def test_python_outline_includes_def_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "openshard" / "cli").mkdir(parents=True)
+            (root / "openshard" / "cli" / "main.py").write_text(
+                "import click\n\n@click.command()\ndef run(): pass\n\ndef helper(): pass\n"
+            )
+            result = self._helper("what does openshard/cli/main.py do?", root=root)
+        self.assertIn("[defs]", result)
+        self.assertIn("helper", result)
+
+    def test_python_outline_exposes_commands(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "openshard" / "cli").mkdir(parents=True)
+            (root / "openshard" / "cli" / "main.py").write_text(
+                "import click\n\n@click.command()\ndef run(): pass\n"
+            )
+            result = self._helper("what does openshard/cli/main.py do?", root=root)
+        self.assertIn("[commands]", result)
+        self.assertIn("run", result)
 
 
 class TestPipelineExplicitFileContextInjection(unittest.TestCase):

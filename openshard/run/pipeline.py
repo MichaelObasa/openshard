@@ -76,7 +76,7 @@ def _build_explicit_file_context(task: str, *, root: Path | None = None) -> str:
     """
     from openshard.native.executor import (
         _extract_explicit_file_paths,
-        _extract_snippet_lines,
+        _build_explicit_file_outline,
         _MAX_EXPLICIT_SNIPPET_FILES,
     )
     from openshard.native.context import NativeEvidence, NativeFileSnippet, render_native_evidence
@@ -96,16 +96,20 @@ def _build_explicit_file_context(task: str, *, root: Path | None = None) -> str:
             continue
         try:
             content = resolved.read_text(encoding="utf-8", errors="replace")
-            lines = _extract_snippet_lines(content, 1, radius=0, max_lines=8)
-            if not lines:
+            outline = _build_explicit_file_outline(content, path_str)
+            if not outline:
                 continue
-            snippets.append(NativeFileSnippet(path=path_str, lines=lines))
+            snippets.append(NativeFileSnippet(path=path_str, lines=outline))
         except Exception:
             continue
 
     if not snippets:
         return ""
-    return render_native_evidence(NativeEvidence(file_snippets=snippets))
+    return render_native_evidence(
+        NativeEvidence(file_snippets=snippets),
+        limit=3000,
+        max_lines_per_snippet=25,
+    )
 
 
 @dataclass

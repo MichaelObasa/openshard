@@ -189,6 +189,149 @@ def _extract_snippet_lines(content: str, lineno: int, *, radius: int = 2, max_li
     return [f"{start + i + 1}: {line}" for i, line in enumerate(selected)]
 
 
+# ── Explicit-file outline helpers ─────────────────────────────────────────────
+
+def _extract_module_docstring(lines: list[str]) -> str | None:
+    """Return the first content line of the module docstring, or None."""
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i >= len(lines):
+        return None
+    stripped = lines[i].strip()
+    for delim in ('"""', "'''"):
+        if stripped.startswith(delim):
+            inner = stripped[len(delim):]
+            if inner.endswith(delim) and len(inner) >= len(delim):
+                return inner[: -len(delim)].strip() or None
+            return inner.strip() or None
+    return None
+
+
+_IMPORT_RE = re.compile(r"^(?:from\s+([\w.]+)|import\s+([\w., ]+))")
+
+
+def _collect_import_names(lines: list[str]) -> list[str]:
+    """Return deduplicated root module names from top-of-file imports."""
+    seen: list[str] = []
+    in_docstring = False
+    docstring_delim: str = ""
+    for line in lines:
+        stripped = line.strip()
+        if in_docstring:
+            if docstring_delim in stripped:
+                in_docstring = False
+            continue
+        if not stripped or stripped.startswith("#"):
+            continue
+        for delim in ('"""', "'''"):
+            if stripped.startswith(delim):
+                rest = stripped[len(delim):]
+                if delim not in rest:
+                    in_docstring = True
+                    docstring_delim = delim
+                break
+        if in_docstring:
+            continue
+        m = _IMPORT_RE.match(stripped)
+        if m:
+            raw = m.group(1) or m.group(2).split(",")[0].strip()
+            root = raw.split(".")[0].split()[0]
+            if root and root not in seen:
+                seen.append(root)
+        elif stripped.startswith("__") and "=" in stripped:
+            continue
+        elif stripped.startswith(("@", "def ", "class ", "async def ")):
+            break
+    return seen
+
+
+_COMMAND_DECORATOR_RE = re.compile(r"^\s*@\w+\.(?:command|group)\b")
+
+
+def _has_command_decorator(lines: list[str], def_idx: int) -> bool:
+    """Return True if the def at def_idx is preceded by a @x.command/@x.group decorator."""
+    i = def_idx - 1
+    while i >= 0:
+        stripped = lines[i].strip()
+        if _COMMAND_DECORATOR_RE.match(lines[i]):
+            return True
+        if stripped.startswith("@") or not stripped or stripped.startswith("#"):
+            i -= 1
+            continue
+        break
+    return False
+
+
+def _build_generic_outline(content: str, max_lines: int) -> list[str]:
+    """Return first max_lines non-blank lines verbatim."""
+    result: list[str] = []
+    for line in content.splitlines():
+        if line.strip():
+            result.append(line)
+            if len(result) >= max_lines:
+                break
+    return result
+
+
+_TOP_LEVEL_DEF_RE = re.compile(r"^(?:async )?def (\w+)|^class (\w+)")
+
+
+def _build_explicit_file_outline(content: str, path: str, *, max_lines: int = 25) -> list[str]:
+    """Build a compact, bounded outline of *content* for explicit-file model evidence.
+
+    For .py files: module docstring, import summary, top-level def/class names,
+    and @xxx.command decorated functions labeled as [commands].
+    For non-.py files: first max_lines non-blank lines verbatim.
+    Falls back to generic outline when no Python symbols are found.
+    """
+    if not path.endswith(".py"):
+        return _build_generic_outline(content, max_lines)
+
+    lines = content.splitlines()
+    outline: list[str] = []
+
+    doc = _extract_module_docstring(lines)
+    if doc:
+        outline.append(f"[docstring] {doc}")
+
+    import_names = _collect_import_names(lines)
+    if import_names:
+        shown = import_names[:6]
+        suffix = ", ..." if len(import_names) > 6 else ""
+        outline.append(f"[imports] {', '.join(shown)}{suffix}")
+
+    defs: list[str] = []
+    classes: list[str] = []
+    commands: list[str] = []
+
+    for idx, line in enumerate(lines):
+        m = _TOP_LEVEL_DEF_RE.match(line)
+        if m:
+            name = m.group(1) or m.group(2)
+            if m.group(2):
+                classes.append(name)
+            elif _has_command_decorator(lines, idx):
+                commands.append(name)
+            else:
+                defs.append(name)
+
+    if classes:
+        outline.append(f"[classes] {', '.join(classes)}")
+    if defs:
+        outline.append(f"[defs] {', '.join(defs)}")
+    if commands:
+        outline.append(f"[commands] {', '.join(commands)}")
+
+    if not outline:
+        return _build_generic_outline(content, max_lines)
+
+    return outline[:max_lines]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 def _build_file_snippets_from_search(
     runner,
     search_lines: list[str],
@@ -433,7 +576,7 @@ class NativeAgentExecutor:
             self.native_meta.tool_trace.append(self._runner.trace_entry(read_call, result))
             if not result.ok:
                 continue
-            snippet_lines = _extract_snippet_lines(result.output, 1, radius=0, max_lines=8)
+            snippet_lines = _build_explicit_file_outline(result.output, path)
             if not snippet_lines:
                 continue
             snippet = NativeFileSnippet(path=path, lines=snippet_lines)
@@ -1134,7 +1277,7 @@ class NativeAgentExecutor:
 
         evidence = self.native_meta.evidence
         if evidence is not None:
-            context_parts.append(render_native_evidence(evidence))
+            context_parts.append(render_native_evidence(evidence, limit=3000, max_lines_per_snippet=25))
             _injected_sources.add("evidence")
 
         osn_block = render_osn_loop_context(self.native_meta.osn_loop)
