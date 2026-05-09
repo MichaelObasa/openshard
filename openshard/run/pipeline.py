@@ -67,6 +67,47 @@ from openshard.skills.matcher import MatchedSkill, match_skills
 from openshard.verification.executor import run_verification_plan as _run_verification_plan, confirm_or_abort  # noqa: F401
 from openshard.verification.plan import CommandSafety, VerificationPlan, build_verification_plan
 
+
+def _build_explicit_file_context(task: str, *, root: Path | None = None) -> str:
+    """Return a rendered evidence block for repo-relative file paths named in *task*.
+
+    Used by the direct/staged execution path where NativeAgentExecutor is not active.
+    Returns "" when no safe, readable, named files are found.
+    """
+    from openshard.native.executor import (
+        _extract_explicit_file_paths,
+        _extract_snippet_lines,
+        _MAX_EXPLICIT_SNIPPET_FILES,
+    )
+    from openshard.native.context import NativeEvidence, NativeFileSnippet, render_native_evidence
+
+    paths = _extract_explicit_file_paths(task)
+    if not paths:
+        return ""
+
+    repo_root = root or Path.cwd()
+    snippets: list[NativeFileSnippet] = []
+    for path_str in paths[:_MAX_EXPLICIT_SNIPPET_FILES]:
+        try:
+            resolved = resolve_safe_repo_path(repo_root, path_str)
+        except UnsafePathError:
+            continue
+        if not resolved.is_file():
+            continue
+        try:
+            content = resolved.read_text(encoding="utf-8", errors="replace")
+            lines = _extract_snippet_lines(content, 1, radius=0, max_lines=8)
+            if not lines:
+                continue
+            snippets.append(NativeFileSnippet(path=path_str, lines=lines))
+        except Exception:
+            continue
+
+    if not snippets:
+        return ""
+    return render_native_evidence(NativeEvidence(file_snippets=snippets))
+
+
 @dataclass
 class RunResult:
     """Structured return value from RunPipeline.run()."""
@@ -527,6 +568,11 @@ class RunPipeline:
                 pass
         _skills_ctx = build_skills_context(_matched_skills)
 
+        if effective_executor != "native":
+            _explicit_ctx = _build_explicit_file_context(task)
+            if _explicit_ctx:
+                _skills_ctx = f"{_skills_ctx}\n\n{_explicit_ctx}" if _skills_ctx else _explicit_ctx
+
         if detail != "default":
             if _force_stages is None:
                 _wf_display = _wf_choice
@@ -604,8 +650,7 @@ class RunPipeline:
                 _stage_t0 = time.time()
 
                 if _stage.stage_type == "planning":
-                    if _plan_already_done:
-                        # --plan gate already ran the planning call; skip to avoid double billing.
+                    if _plan_already_done or dry_run:
                         continue
                     spinner.start("Planning - mapping out implementation approach")
                     try:
@@ -629,6 +674,8 @@ class RunPipeline:
                         spinner.stop()
 
                 elif _stage.stage_type == "implementation":
+                    if dry_run:
+                        continue
                     _stage_model = _routed_model or route_stage(_stage)
                     spinner.start(_exec_message(
                         _stage_model,

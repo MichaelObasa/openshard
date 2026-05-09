@@ -6001,3 +6001,141 @@ class TestExplicitFileContextInGeneratedPrompt(unittest.TestCase):
         ctx = kwargs["skills_context"]
         self.assertIn("[evidence]", ctx)
         self.assertIn("tests/test_foo.py", ctx)
+
+
+class TestStagedDryRunNoGeneratorCall(unittest.TestCase):
+    """Staged dry-run must not produce any provider calls."""
+
+    _RISKY_REPO = RepoFacts(
+        languages=["python"], package_files=[], framework=None,
+        test_command=None, risky_paths=["openshard/config/settings.py"], changed_files=[],
+    )
+
+    def _invoke_staged_dry_run(self, gen_mock, task="fix the bug", extra_args=()):
+        with patch("openshard.run.pipeline.ExecutionGenerator", return_value=gen_mock), \
+             patch("openshard.run.pipeline.NativeAgentExecutor", return_value=_make_native_mock()), \
+             patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=self._RISKY_REPO), \
+             patch("openshard.run.pipeline.build_verification_plan", return_value=_empty_plan()), \
+             patch("openshard.run.pipeline._log_run"), \
+             patch("openshard.run.pipeline._build_explicit_file_context", return_value=""):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run", "--dry-run"] + list(extra_args) + [task])
+        return result, gen_mock
+
+    def test_staged_dry_run_does_not_call_generate(self):
+        gen_mock = _make_generator_mock()
+        result, gen_mock = self._invoke_staged_dry_run(gen_mock)
+        self.assertEqual(result.exit_code, 0, result.output)
+        gen_mock.generate.assert_not_called()
+
+    def test_staged_dry_run_does_not_call_planning_stage(self):
+        gen_mock = _make_generator_mock()
+        with patch("openshard.run.pipeline.run_planning_stage") as plan_mock:
+            self._invoke_staged_dry_run(gen_mock)
+        plan_mock.assert_not_called()
+
+    def test_non_dry_run_staged_does_call_generate(self):
+        gen_mock = _make_generator_mock()
+        with patch("openshard.run.pipeline.ExecutionGenerator", return_value=gen_mock), \
+             patch("openshard.run.pipeline.NativeAgentExecutor", return_value=_make_native_mock()), \
+             patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=self._RISKY_REPO), \
+             patch("openshard.run.pipeline.build_verification_plan", return_value=_empty_plan()), \
+             patch("openshard.run.pipeline._log_run"), \
+             patch("openshard.run.pipeline._build_explicit_file_context", return_value=""):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run", "fix the bug"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        gen_mock.generate.assert_called_once()
+
+
+class TestBuildExplicitFileContext(unittest.TestCase):
+    """Unit tests for _build_explicit_file_context() in pipeline.py."""
+
+    def _helper(self, task, *, root=None):
+        from openshard.run.pipeline import _build_explicit_file_context
+        return _build_explicit_file_context(task, root=root)
+
+    def test_builds_evidence_for_named_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "openshard" / "cli").mkdir(parents=True)
+            (root / "openshard" / "cli" / "main.py").write_text("def main(): pass\n")
+            result = self._helper("what does openshard/cli/main.py do?", root=root)
+        self.assertIn("[evidence]", result)
+        self.assertIn("openshard/cli/main.py", result)
+        self.assertIn("def main", result)
+
+    def test_returns_empty_for_plain_task(self):
+        result = self._helper("improve the error handling")
+        self.assertEqual(result, "")
+
+    def test_rejects_unsafe_absolute_path(self):
+        result = self._helper("look at /etc/passwd please")
+        self.assertEqual(result, "")
+
+    def test_returns_empty_for_nonexistent_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._helper("what does openshard/cli/main.py do?", root=Path(tmp))
+        self.assertEqual(result, "")
+
+
+class TestPipelineExplicitFileContextInjection(unittest.TestCase):
+    """Pipeline's direct/staged generation path must receive explicit file context."""
+
+    _SAFE_REPO = RepoFacts(
+        languages=["python"], package_files=[], framework=None,
+        test_command=None, risky_paths=[], changed_files=[],
+    )
+    _RISKY_REPO = RepoFacts(
+        languages=["python"], package_files=[], framework=None,
+        test_command=None, risky_paths=["openshard/config/settings.py"], changed_files=[],
+    )
+    _KNOWN_CTX = "[evidence]\nsnippets:\nfoo/bar.py:\n  1: def hello(): pass"
+
+    def _run_with_explicit_ctx(self, repo_facts, extra_args=()):
+        gen_mock = _make_generator_mock()
+        with patch("openshard.run.pipeline.ExecutionGenerator", return_value=gen_mock), \
+             patch("openshard.run.pipeline.NativeAgentExecutor", return_value=_make_native_mock()), \
+             patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=repo_facts), \
+             patch("openshard.run.pipeline.build_verification_plan", return_value=_empty_plan()), \
+             patch("openshard.run.pipeline._log_run"), \
+             patch("openshard.run.pipeline._build_explicit_file_context", return_value=self._KNOWN_CTX):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run"] + list(extra_args) + ["what does foo/bar.py do?"])
+        return result, gen_mock
+
+    def test_direct_path_receives_explicit_file_content(self):
+        result, gen_mock = self._run_with_explicit_ctx(self._SAFE_REPO)
+        self.assertEqual(result.exit_code, 0, result.output)
+        gen_mock.generate.assert_called_once()
+        ctx = gen_mock.generate.call_args[1].get("skills_context", "")
+        self.assertIn("[evidence]", ctx)
+        self.assertIn("foo/bar.py", ctx)
+
+    def test_staged_path_receives_explicit_file_content(self):
+        result, gen_mock = self._run_with_explicit_ctx(self._RISKY_REPO)
+        self.assertEqual(result.exit_code, 0, result.output)
+        gen_mock.generate.assert_called_once()
+        ctx = gen_mock.generate.call_args[1].get("skills_context", "")
+        self.assertIn("[evidence]", ctx)
+        self.assertIn("foo/bar.py", ctx)
+
+    def test_native_path_does_not_call_build_explicit_file_context(self):
+        native_mock = _make_native_mock()
+        with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
+             patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=self._SAFE_REPO), \
+             patch("openshard.run.pipeline.build_verification_plan", return_value=_empty_plan()), \
+             patch("openshard.run.pipeline._log_run"), \
+             patch("openshard.run.pipeline._build_explicit_file_context") as ctx_mock:
+            runner = CliRunner()
+            runner.invoke(cli, ["run", "--workflow", "native", "what does foo/bar.py do?"])
+        ctx_mock.assert_not_called()
