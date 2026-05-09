@@ -2755,5 +2755,80 @@ class TestRoutingPreviewRendering(unittest.TestCase):
         self.assertNotIn("planner_tier:", out)
 
 
+class TestLastRoutingReceiptDisplay(unittest.TestCase):
+    """Tests for routing_receipt rendering via _render_log_entry (entry dict round-trip)."""
+
+    def _receipt_dict(self, **kwargs) -> dict:
+        defaults = {
+            "final_strategy": "frontier-heavy",
+            "planner_tier": "frontier",
+            "executor_tier": "fast",
+            "validator_tier": "low-cost",
+            "policy_mode": "strict",
+            "policy_affected": True,
+            "blocked_candidates": 2,
+            "trust_level": "good",
+            "confidence": "high",
+            "warnings_count": 1,
+            "summary": "frontier-heavy | policy=strict",
+        }
+        defaults.update(kwargs)
+        return defaults
+
+    def _entry_with_receipt(self, **kwargs) -> dict:
+        return {
+            "task": "native run",
+            "workflow": "native",
+            "executor": "native",
+            "routing_receipt": self._receipt_dict(**kwargs),
+        }
+
+    def test_more_renders_compact_receipt_line(self):
+        out = _render(self._entry_with_receipt(), detail="more")
+        self.assertIn("routing receipt:", out)
+        self.assertIn("strategy=frontier-heavy", out)
+        self.assertIn("policy=strict", out)
+        self.assertIn("trust=good", out)
+        self.assertIn("blocked=2", out)
+        self.assertIn("confidence=high", out)
+
+    def test_full_renders_receipt_section(self):
+        out = _render(self._entry_with_receipt(), detail="full")
+        self.assertIn("[routing receipt]", out)
+        self.assertIn("strategy:", out)
+        self.assertIn("planner:", out)
+        self.assertIn("executor:", out)
+        self.assertIn("validator:", out)
+        self.assertIn("policy_mode:", out)
+        self.assertIn("policy_affected:", out)
+        self.assertIn("blocked_candidates:", out)
+        self.assertIn("trust:", out)
+        self.assertIn("confidence:", out)
+        self.assertIn("warnings_count:", out)
+        self.assertIn("summary:", out)
+
+    def test_default_hides_receipt(self):
+        out = _render(self._entry_with_receipt(), detail="default")
+        self.assertNotIn("routing receipt", out)
+
+    def test_old_entry_without_receipt_does_not_crash(self):
+        entry = {
+            "task": "native run",
+            "workflow": "native",
+            "executor": "native",
+            # no routing_receipt key
+        }
+        out = _render(entry, detail="more")
+        self.assertNotIn("routing receipt", out)
+
+    def test_policy_affected_shown_as_yes(self):
+        out = _render(self._entry_with_receipt(policy_affected=True), detail="full")
+        self.assertIn("yes", out)
+
+    def test_policy_affected_shown_as_no(self):
+        out = _render(self._entry_with_receipt(policy_affected=False), detail="full")
+        self.assertIn("no", out)
+
+
 if __name__ == "__main__":
     unittest.main()

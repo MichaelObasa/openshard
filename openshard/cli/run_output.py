@@ -1001,6 +1001,46 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                 lines.append(f"  policy_changed_selection: {'yes' if _rp_changed else 'no'}")
                 lines.append(f"  warnings:                {len(_rp_warnings or [])}")
 
+    if detail in ("more", "full"):
+        rr = getattr(native_meta, "routing_receipt", None)
+        if rr is not None:
+            def _rr(key, default=""):
+                return rr.get(key, default) if isinstance(rr, dict) else getattr(rr, key, default)
+
+            _rr_strategy   = _rr("final_strategy", "")
+            _rr_policy     = _rr("policy_mode", "")
+            _rr_trust      = _rr("trust_level", "")
+            _rr_blocked    = _rr("blocked_candidates", 0)
+            _rr_confidence = _rr("confidence", "")
+            _rr_planner    = _rr("planner_tier", "")
+            _rr_executor   = _rr("executor_tier", "")
+            _rr_validator  = _rr("validator_tier", "")
+            _rr_affected   = _rr("policy_affected", False)
+            _rr_warnings   = _rr("warnings_count", 0)
+            _rr_summary    = _rr("summary", "")
+
+            lines.append(
+                f"  routing receipt: strategy={_rr_strategy},"
+                f" policy={_rr_policy},"
+                f" trust={_rr_trust},"
+                f" blocked={_rr_blocked},"
+                f" confidence={_rr_confidence}"
+            )
+            has_content = True
+            if detail == "full":
+                lines.append("  [routing receipt]")
+                lines.append(f"  strategy:           {_rr_strategy}")
+                lines.append(f"  planner:            {_rr_planner}")
+                lines.append(f"  executor:           {_rr_executor}")
+                lines.append(f"  validator:          {_rr_validator}")
+                lines.append(f"  policy_mode:        {_rr_policy}")
+                lines.append(f"  policy_affected:    {'yes' if _rr_affected else 'no'}")
+                lines.append(f"  blocked_candidates: {_rr_blocked}")
+                lines.append(f"  trust:              {_rr_trust}")
+                lines.append(f"  confidence:         {_rr_confidence}")
+                lines.append(f"  warnings_count:     {_rr_warnings}")
+                lines.append(f"  summary:            {_rr_summary}")
+
     return lines if has_content else []
 
 
@@ -1074,6 +1114,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "model_policy": entry.get("model_policy"),
         "model_policy_receipt": entry.get("model_policy_receipt"),
         "routing_preview": entry.get("routing_preview"),
+        "routing_receipt": entry.get("routing_receipt"),
     })
 
 

@@ -40,6 +40,7 @@ from openshard.native.context import (
     NativeModelPolicy,
     NativeModelPolicyReceipt,
     NativeRoutingPreview,
+    NativeRoutingReceipt,
     NativeValidationContract,
     OSNLoopMeta,
     OSNLoopStep,
@@ -136,6 +137,7 @@ class NativeRunMeta:
     model_policy: NativeModelPolicy | None = None
     model_policy_receipt: NativeModelPolicyReceipt | None = None
     routing_preview: NativeRoutingPreview | None = None
+    routing_receipt: NativeRoutingReceipt | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
