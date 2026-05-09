@@ -46,7 +46,7 @@ from openshard.history.metrics import load_runs
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
 from openshard.providers.manager import ProviderManager
 from openshard.providers.openrouter import MODEL_PRICING, compute_cost
-from openshard.routing.engine import ESCALATION_CHAIN, RoutingDecision, route
+from openshard.routing.engine import ESCALATION_CHAIN, RoutingDecision, route, is_readonly_task
 from openshard.routing.profiles import (
     ProfileDecision,
     ProfileHistorySummary,
@@ -577,6 +577,19 @@ class RunPipeline:
             if _explicit_ctx:
                 _skills_ctx = f"{_skills_ctx}\n\n{_explicit_ctx}" if _skills_ctx else _explicit_ctx
 
+        _readonly_task = is_readonly_task(task)
+        if _readonly_task and not dry_run:
+            _ro_instruction = (
+                "\n\n[IMPORTANT] This is a read-only analysis/explanation task. "
+                "Do not propose file changes. Do not create, update, delete, or rewrite files. "
+                "The `files` field in your response must be empty ([]). "
+                "Write your response as a third-person explanation of what the code does "
+                "(e.g. 'This file handles…', 'The function does…'). "
+                "Do NOT use phrases like 'Implemented', 'Updated', 'Created', or 'Added' "
+                "in your summary — those imply you made changes."
+            )
+            _skills_ctx = f"{_skills_ctx}{_ro_instruction}" if _skills_ctx else _ro_instruction
+
         if detail != "default":
             if _force_stages is None:
                 _wf_display = _wf_choice
@@ -741,6 +754,19 @@ class RunPipeline:
                 usage.estimated_cost = total_stage_cost
             else:
                 usage.estimated_cost = total_stage_cost or None
+
+        # Safety net: discard generated file changes for read-only tasks even if the
+        # model ignored the read-only instruction injected into the context.
+        # For dry-run, exec_result.files is already [] so this block never fires.
+        if _readonly_task and exec_result.files:
+            click.echo(f"\n[info] read-only task — {len(exec_result.files)} generated change(s) ignored")
+            exec_result = ExecutionResult(
+                summary=exec_result.summary,
+                files=[],
+                notes=exec_result.notes,
+                usage=exec_result.usage,
+            )
+
         final_files = exec_result.files
 
         if not opencode_mode and _repo_facts is not None:
