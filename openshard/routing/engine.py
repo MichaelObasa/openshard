@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -116,6 +117,48 @@ def route(task: str) -> RoutingDecision:
         category="standard",
         rationale="standard feature implementation",
     )
+
+
+# ---------------------------------------------------------------------------
+# Read-only intent detection
+# ---------------------------------------------------------------------------
+
+_READONLY_PREFIXES: tuple[str, ...] = (
+    "what does ", "what is ", "what are ", "what's ",
+    "explain ", "summarise ", "summarize ",
+    "describe ", "walk me through ",
+    "where is ", "where are ",
+    "show me ", "how does ", "how do ",
+    "tell me about ", "list the ", "list all ",
+    "find where ", "find what ",
+)
+
+_WRITE_IMPERATIVES: tuple[str, ...] = (
+    "fix ", "add ", "update ", "implement ", "refactor ",
+    "create ", "remove ", "delete ", "migrate ", "rewrite ",
+    "change ", "replace ", "set up ", "install ", "write ",
+    "make ", "build ", "edit ", "modify ", "rename ",
+)
+
+_AND_WRITE_RE = re.compile(
+    r"\band\s+(fix|add|update|implement|remove|delete|change|edit|modify)\b"
+)
+
+
+def is_readonly_task(task: str) -> bool:
+    """Return True if *task* is a read-only explanation/analysis request.
+
+    Detection is prefix-based and deterministic:
+    - Tasks starting with a write-imperative verb are never read-only.
+    - Tasks containing "and <write-verb>" (e.g. "find and fix") are never read-only.
+    - Tasks starting with an interrogative/explanation prefix are read-only.
+    """
+    t = task.strip().lower()
+    if any(t.startswith(w) for w in _WRITE_IMPERATIVES):
+        return False
+    if _AND_WRITE_RE.search(t):
+        return False
+    return any(t.startswith(p) for p in _READONLY_PREFIXES)
 
 
 # ---------------------------------------------------------------------------
