@@ -302,6 +302,8 @@ class RunPipeline:
 
         opencode_mode = (effective_executor == "opencode")
         routing_decision: RoutingDecision | None = route(task) if not opencode_mode else None
+        if routing_decision is not None and is_readonly_task(task):
+            routing_decision.rationale = "read-only analysis"
         # When using a third-party provider, non-native routed models are not available.
         # Fall back to a sensible default for each provider.
         if (
@@ -788,7 +790,8 @@ class RunPipeline:
             click.echo("\nStages")
             for sr in stage_runs:
                 _sr_cost = f"${sr.cost:.4f}" if sr.cost is not None else "-"
-                click.echo(f"  {sr.stage.stage_type.capitalize()} ({_model_label(sr.model)}): {sr.duration:.1f}s, {_sr_cost}")
+                _stage_label = "Analysis" if (_readonly_task and sr.stage.stage_type == "implementation") else sr.stage.stage_type.capitalize()
+                click.echo(f"  {_stage_label} ({_model_label(sr.model)}): {sr.duration:.1f}s, {_sr_cost}")
 
         if exec_result.files:
             _fc = sum(1 for f in exec_result.files if f.change_type == "create")

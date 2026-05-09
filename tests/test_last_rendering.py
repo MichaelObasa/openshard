@@ -2825,5 +2825,61 @@ class TestLastRoutingReceiptDisplay(unittest.TestCase):
         self.assertIn("no", out)
 
 
+class TestLastReadonlyLabels(unittest.TestCase):
+    """Stage and model-line labels use analysis wording for saved read-only runs."""
+
+    def _ro_entry(self) -> dict:
+        return {
+            "task": "what does openshard/cli/main.py do?",
+            "routing_rationale": "read-only analysis",
+            "stage_runs": [
+                {"model": "z-ai/glm-5.1", "stage_type": "planning",        "duration": 0.5, "cost": 0.0001},
+                {"model": "z-ai/glm-5.1", "stage_type": "implementation",  "duration": 1.2, "cost": 0.0003},
+            ],
+        }
+
+    def _write_entry(self) -> dict:
+        return {
+            "task": "fix the bug in utils.py",
+            "routing_rationale": "standard feature implementation",
+            "stage_runs": [
+                {"model": "z-ai/glm-5.1", "stage_type": "planning",        "duration": 0.5, "cost": 0.0001},
+                {"model": "z-ai/glm-5.1", "stage_type": "implementation",  "duration": 1.2, "cost": 0.0003},
+            ],
+        }
+
+    def test_readonly_stage_label_says_analysis(self):
+        out = _render(self._ro_entry(), detail="more")
+        self.assertIn("Analysis", out)
+
+    def test_readonly_stage_label_not_implementation(self):
+        out = _render(self._ro_entry(), detail="more")
+        self.assertNotIn("Implementation", out)
+
+    def test_readonly_model_line_says_analysis(self):
+        out = _render(self._ro_entry(), detail="more")
+        self.assertIn("analysis", out)
+
+    def test_readonly_model_line_not_implementation(self):
+        out = _render(self._ro_entry(), detail="more")
+        self.assertNotIn("implementation", out)
+
+    def test_write_stage_label_says_implementation(self):
+        out = _render(self._write_entry(), detail="more")
+        self.assertIn("Implementation", out)
+
+    def test_write_model_line_says_implementation(self):
+        out = _render(self._write_entry(), detail="more")
+        self.assertIn("implementation", out)
+
+    def test_readonly_default_detail_no_stage_section(self):
+        out = _render(self._ro_entry(), detail="default")
+        self.assertNotIn("Stages", out)
+
+    def test_write_default_detail_no_stage_section(self):
+        out = _render(self._write_entry(), detail="default")
+        self.assertNotIn("Stages", out)
+
+
 if __name__ == "__main__":
     unittest.main()
