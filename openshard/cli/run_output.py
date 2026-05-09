@@ -140,6 +140,7 @@ _RATIONALE_SHORT: dict[str, str] = {
     "multi-file or long-horizon task":                    "complex task",
     "low-risk boilerplate task":                          "boilerplate",
     "standard feature implementation":                    "standard coding",
+    "read-only analysis":                                 "read-only analysis",
 }
 
 _ABBREV_WORDS = {"gpt", "llm", "ai", "api", "url", "id", "ui", "ml"}
@@ -208,6 +209,7 @@ def _exec_message(model: str, rationale: str) -> str:
         "multi-file or long-horizon task":                    f"{label} working through multi-file changes",
         "low-risk boilerplate task":                          f"{label} generating boilerplate",
         "standard feature implementation":                    f"{label} writing implementation",
+        "read-only analysis":                                 f"{label} analysing",
     }
     return "Executing - " + desc.get(rationale, f"{label} running task")
 
@@ -218,11 +220,13 @@ def _build_model_line(
     model: str | None = None,
 ) -> str | None:
     """Return a single 'Model: ...' or 'Models: ...' line for default output."""
+    _is_ro = routing_decision is not None and routing_decision.rationale == "read-only analysis"
     if stage_runs:
         seen: dict[str, list[str]] = {}
         for sr in stage_runs:
             label = _model_label(sr.model)
-            seen.setdefault(label, []).append(sr.stage.stage_type)
+            stype = "analysis" if (_is_ro and sr.stage.stage_type == "implementation") else sr.stage.stage_type
+            seen.setdefault(label, []).append(stype)
         parts = []
         for label, types in seen.items():
             reason = " + ".join(types)

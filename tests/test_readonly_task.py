@@ -267,3 +267,37 @@ class TestReadonlyPipelineIntegration(unittest.TestCase):
         )
         gen_mock.generate.assert_called_once()
         self.assertNotIn("[info] read-only task", result.output)
+
+
+# ---------------------------------------------------------------------------
+# Output label tests
+# ---------------------------------------------------------------------------
+
+class TestReadonlyOutputLabels(unittest.TestCase):
+
+    def test_readonly_routing_label_no_feature_implementation(self):
+        """[routing] line must not say 'feature implementation' for read-only tasks."""
+        result, _ = _invoke("what does openshard/cli/main.py do?", extra_args=("--full",))
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertNotIn("feature implementation", result.output)
+
+    def test_readonly_routing_label_says_readonly_analysis(self):
+        """[routing] line must contain 'read-only analysis' for read-only tasks."""
+        result, _ = _invoke("what does openshard/cli/main.py do?", extra_args=("--full",))
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("read-only analysis", result.output)
+
+    def test_write_task_routing_label_unchanged(self):
+        """Write task routing must still say 'standard feature implementation'."""
+        # Task must route to standard category (no security/visual/complex/boilerplate keywords).
+        result, _ = _invoke("implement the new pagination feature", extra_args=("--full",))
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("standard feature implementation", result.output)
+
+    def test_dry_run_readonly_exits_cleanly(self):
+        """Dry-run of a read-only task must complete without error."""
+        result, _ = _invoke(
+            "what does openshard/cli/main.py do?",
+            extra_args=("--dry-run",),
+        )
+        self.assertEqual(result.exit_code, 0, result.output)

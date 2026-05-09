@@ -645,11 +645,13 @@ def _render_log_entry(entry: dict, detail: str) -> None:
         click.echo(summary)
 
     # Model line — always shown
+    _is_ro = routing_rationale == "read-only analysis"
     if stage_runs_data:
         seen: dict[str, list[str]] = {}
         for sr in stage_runs_data:
             lbl = _model_label(sr["model"])
-            seen.setdefault(lbl, []).append(sr["stage_type"])
+            stype = "analysis" if (_is_ro and sr["stage_type"] == "implementation") else sr["stage_type"]
+            seen.setdefault(lbl, []).append(stype)
         parts = [f"{lbl} ({' + '.join(types)})" for lbl, types in seen.items()]
         prefix = "Model" if len(seen) == 1 else "Models"
         click.echo(f"\n{prefix}: {', '.join(parts)}")
@@ -664,7 +666,8 @@ def _render_log_entry(entry: dict, detail: str) -> None:
         click.echo("\nStages")
         for sr in stage_runs_data:
             cost_s = f"${sr['cost']:.4f}" if sr.get("cost") is not None else "-"
-            click.echo(f"  {sr['stage_type'].capitalize()} ({_model_label(sr['model'])}): {sr['duration']:.1f}s, {cost_s}")
+            _stage_label = "Analysis" if (_is_ro and sr['stage_type'] == "implementation") else sr['stage_type'].capitalize()
+            click.echo(f"  {_stage_label} ({_model_label(sr['model'])}): {sr['duration']:.1f}s, {cost_s}")
 
     # Routing (--more / --full)
     if detail != "default" and "routing_category" in entry:
