@@ -2689,6 +2689,64 @@ def build_native_routing_preview(
     )
 
 
+@dataclass
+class NativeRoutingReceipt:
+    final_strategy: str = ""
+    planner_tier: str = "unknown"
+    executor_tier: str = "unknown"
+    validator_tier: str = "unknown"
+    policy_mode: str = "auto"
+    policy_affected: bool = False
+    blocked_candidates: int = 0
+    trust_level: str = "unknown"
+    confidence: str = "medium"
+    warnings_count: int = 0
+    summary: str = ""
+
+
+def build_native_routing_receipt(
+    *,
+    routing_preview=None,
+    model_policy_receipt=None,
+    run_trust_score=None,
+) -> "NativeRoutingReceipt":
+    def _get(obj, key, default=None):
+        if obj is None:
+            return default
+        return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
+
+    final_strategy = _get(routing_preview, "strategy", "") or ""
+    planner_tier = _get(routing_preview, "planner_tier", "unknown") or "unknown"
+    executor_tier = _get(routing_preview, "executor_tier", "unknown") or "unknown"
+    validator_tier = _get(routing_preview, "validator_tier", "unknown") or "unknown"
+    policy_mode = _get(routing_preview, "policy_mode", "auto") or "auto"
+    blocked_candidates = int(_get(routing_preview, "blocked_candidates", 0) or 0)
+    confidence = _get(routing_preview, "confidence", "medium") or "medium"
+    summary = _get(routing_preview, "summary", "") or ""
+    preview_trust = _get(routing_preview, "trust_level", "unknown") or "unknown"
+
+    policy_affected = bool(_get(model_policy_receipt, "affected_selection", False))
+    warnings_count = int(_get(model_policy_receipt, "warnings_count", 0) or 0)
+
+    trust_level = _get(run_trust_score, "level", None)
+    if not trust_level:
+        trust_level = preview_trust
+
+    return NativeRoutingReceipt(
+        final_strategy=final_strategy,
+        planner_tier=planner_tier,
+        executor_tier=executor_tier,
+        validator_tier=validator_tier,
+        policy_mode=policy_mode,
+        policy_affected=policy_affected,
+        blocked_candidates=blocked_candidates,
+        trust_level=trust_level,
+        confidence=confidence,
+        warnings_count=warnings_count,
+        summary=summary,
+    )
+
+
 def sync_native_model_selection_decision_with_candidate_scoring(
     model_selection_decision: "NativeModelSelectionDecision | None",
     model_candidate_scoring: "NativeModelCandidateScoring | None",
