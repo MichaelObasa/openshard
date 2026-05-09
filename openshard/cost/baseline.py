@@ -10,6 +10,8 @@ BASELINE_MODELS: list[tuple[str, str]] = [
 
 def _multiplier_suffix(actual_cost: float, baseline_cost: float) -> str:
     ratio = baseline_cost / actual_cost
+    if ratio < 1.05:
+        return ""
     if ratio >= 10:
         return f" (~{round(ratio)}x higher)"
     return f" (~{ratio:.1f}x higher)"
