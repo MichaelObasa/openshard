@@ -329,7 +329,12 @@ def render_native_observation(
     return (rendered[: max(0, limit - len(suffix))].rstrip() + suffix)[:limit]
 
 
-def render_native_evidence(evidence: NativeEvidence, *, limit: int = 1000) -> str:
+def render_native_evidence(
+    evidence: NativeEvidence,
+    *,
+    limit: int = 1000,
+    max_lines_per_snippet: int = 8,
+) -> str:
     lines = ["[evidence]"]
 
     if evidence.search_results:
@@ -344,7 +349,7 @@ def render_native_evidence(evidence: NativeEvidence, *, limit: int = 1000) -> st
         lines.append("snippets:")
         for snippet in evidence.file_snippets[:2]:
             lines.append(f"{snippet.path}:")
-            for line in snippet.lines[:8]:
+            for line in snippet.lines[:max_lines_per_snippet]:
                 lines.append(f"  {line}")
 
     rendered = "\n".join(lines)
