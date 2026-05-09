@@ -2537,5 +2537,223 @@ class TestNativeModelPolicyReceiptRendering(unittest.TestCase):
         self.assertNotIn("receipt", out)
 
 
+class TestRoutingPreviewRendering(unittest.TestCase):
+    """Tests for routing_preview compact and full rendering."""
+
+    def _preview_ns(self, **overrides):
+        from types import SimpleNamespace
+        defaults = dict(
+            strategy="cost-balanced",
+            policy_mode="cheapest-safe",
+            planner_tier="frontier-reasoning-model",
+            executor_tier="balanced-coding-model",
+            validator_tier="independent-validator-model",
+            risk_level="medium",
+            confidence="high",
+            trust_level="good",
+            blocked_candidates=3,
+            policy_changed_selection=True,
+            warnings=["w1"],
+            summary="cost-balanced | planner=frontier-reasoning-model ...",
+        )
+        defaults.update(overrides)
+        return SimpleNamespace(**defaults)
+
+    def _meta_with_preview(self, preview):
+        from types import SimpleNamespace
+        ns = SimpleNamespace
+        return ns(
+            routing_preview=preview,
+            repo_context_summary=None, observation=None, plan=None,
+            write_path="pipeline", verification_loop=None,
+            verification_command_summary=None, diff_review=None,
+            final_report=None, native_loop_steps=[], native_loop_trace=ns(events=[]),
+            native_backend=None, native_backend_available=True,
+            native_backend_notes=[], native_backend_proof=None,
+            read_search_findings=[], patch_proposal=None,
+            command_policy_preview=None, context_packet=None,
+            file_context=None, context_quality_score=None,
+            context_quality_advisory=None, change_budget=None,
+            change_budget_preview=None, change_budget_soft_gate=None,
+            approval_request=None, approval_receipt=None,
+            verification_plan=None, clarification_request=None,
+            context_usage_summary=None, failure_memory=None,
+            osn_loop=None, deepagents_adapter=None,
+            validation_contract=None, context_provenance=None,
+            run_trust_score=None, model_selection_decision=None,
+            model_candidate_scoring=None, model_policy=None,
+            model_policy_receipt=None,
+        )
+
+    def _entry_with_preview(self, **rp_overrides):
+        rp = dict(
+            strategy="cost-balanced",
+            policy_mode="cheapest-safe",
+            planner_tier="frontier-reasoning-model",
+            executor_tier="balanced-coding-model",
+            validator_tier="independent-validator-model",
+            risk_level="medium",
+            confidence="high",
+            trust_level="good",
+            blocked_candidates=3,
+            policy_changed_selection=True,
+            warnings=["w1"],
+            summary="",
+        )
+        rp.update(rp_overrides)
+        return {
+            "task": "add feature",
+            "workflow": "native",
+            "executor": "native",
+            "routing_preview": rp,
+        }
+
+    # --- compact line (--more) ---
+
+    def test_compact_line_contains_strategy(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns())
+        combined = "\n".join(_render_native_demo_block(meta, detail="more"))
+        self.assertIn("cost-balanced", combined)
+
+    def test_compact_line_contains_changed_yes(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns(policy_changed_selection=True))
+        combined = "\n".join(_render_native_demo_block(meta, detail="more"))
+        self.assertIn("changed=yes", combined)
+
+    def test_compact_line_contains_changed_no(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns(policy_changed_selection=False))
+        combined = "\n".join(_render_native_demo_block(meta, detail="more"))
+        self.assertIn("changed=no", combined)
+
+    def test_compact_line_contains_blocked_count(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns(blocked_candidates=3))
+        combined = "\n".join(_render_native_demo_block(meta, detail="more"))
+        self.assertIn("blocked=3", combined)
+
+    def test_compact_line_contains_trust_level(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns(trust_level="good"))
+        combined = "\n".join(_render_native_demo_block(meta, detail="more"))
+        self.assertIn("trust=good", combined)
+
+    def test_compact_line_contains_confidence(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns(confidence="high"))
+        combined = "\n".join(_render_native_demo_block(meta, detail="more"))
+        self.assertIn("confidence=high", combined)
+
+    def test_compact_line_does_not_expose_raw_warning_text(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns(warnings=["secret-warning-text"]))
+        combined = "\n".join(_render_native_demo_block(meta, detail="more"))
+        self.assertNotIn("secret-warning-text", combined)
+
+    def test_compact_line_no_warnings_token_when_empty(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns(warnings=[]))
+        combined = "\n".join(_render_native_demo_block(meta, detail="more"))
+        self.assertNotIn("warnings=", combined)
+
+    # --- full block (--full) uses new field labels ---
+
+    def test_full_block_uses_planner_label(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns())
+        combined = "\n".join(_render_native_demo_block(meta, detail="full"))
+        self.assertIn("planner:", combined)
+        self.assertNotIn("planner_tier:", combined)
+
+    def test_full_block_uses_executor_label(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns())
+        combined = "\n".join(_render_native_demo_block(meta, detail="full"))
+        self.assertIn("executor:", combined)
+        self.assertNotIn("executor_tier:", combined)
+
+    def test_full_block_uses_validator_label(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns())
+        combined = "\n".join(_render_native_demo_block(meta, detail="full"))
+        self.assertIn("validator:", combined)
+        self.assertNotIn("validator_tier:", combined)
+
+    def test_full_block_uses_risk_label(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns())
+        combined = "\n".join(_render_native_demo_block(meta, detail="full"))
+        self.assertIn("risk:", combined)
+        self.assertNotIn("risk_level:", combined)
+
+    def test_full_block_uses_trust_label(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns())
+        combined = "\n".join(_render_native_demo_block(meta, detail="full"))
+        self.assertIn("trust:", combined)
+        self.assertNotIn("trust_level:", combined)
+
+    def test_full_block_uses_policy_changed_selection_label(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns())
+        combined = "\n".join(_render_native_demo_block(meta, detail="full"))
+        self.assertIn("policy_changed_selection:", combined)
+
+    def test_full_block_shows_warnings_count_not_text(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(self._preview_ns(warnings=["secret-text"]))
+        combined = "\n".join(_render_native_demo_block(meta, detail="full"))
+        self.assertIn("warnings:", combined)
+        self.assertNotIn("secret-text", combined)
+
+    # --- missing routing_preview does not crash ---
+
+    def test_missing_routing_preview_no_crash_more(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(None)
+        try:
+            _render_native_demo_block(meta, detail="more")
+        except Exception as exc:
+            self.fail(f"crashed with missing routing_preview: {exc}")
+
+    def test_missing_routing_preview_no_crash_full(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(None)
+        try:
+            _render_native_demo_block(meta, detail="full")
+        except Exception as exc:
+            self.fail(f"crashed with missing routing_preview: {exc}")
+
+    def test_missing_routing_preview_shows_no_routing_section(self):
+        from openshard.cli.run_output import _render_native_demo_block
+        meta = self._meta_with_preview(None)
+        combined = "\n".join(_render_native_demo_block(meta, detail="more"))
+        self.assertNotIn("routing preview", combined)
+
+    # --- default detail hides routing preview ---
+
+    def test_default_detail_hides_routing_preview(self):
+        out = _render(self._entry_with_preview(), detail="default")
+        self.assertNotIn("routing preview", out)
+
+    # --- integration: dict entry round-trip ---
+
+    def test_compact_via_entry_contains_all_key_fields(self):
+        out = _render(self._entry_with_preview(), detail="more")
+        self.assertIn("routing preview:", out)
+        self.assertIn("changed=yes", out)
+        self.assertIn("blocked=3", out)
+        self.assertIn("trust=good", out)
+        self.assertIn("confidence=high", out)
+
+    def test_full_via_entry_uses_new_labels(self):
+        out = _render(self._entry_with_preview(), detail="full")
+        self.assertIn("[routing preview]", out)
+        self.assertIn("planner:", out)
+        self.assertNotIn("planner_tier:", out)
+
+
 if __name__ == "__main__":
     unittest.main()
