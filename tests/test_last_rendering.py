@@ -2551,8 +2551,8 @@ class TestRoutingPreviewRendering(unittest.TestCase):
             risk_level="medium",
             confidence="high",
             trust_level="good",
-            blocked_candidates=3,
-            policy_changed_selection=True,
+            blocked_count=3,
+            policy_affected=True,
             warnings=["w1"],
             summary="cost-balanced | planner=frontier-reasoning-model ...",
         )
@@ -2595,8 +2595,8 @@ class TestRoutingPreviewRendering(unittest.TestCase):
             risk_level="medium",
             confidence="high",
             trust_level="good",
-            blocked_candidates=3,
-            policy_changed_selection=True,
+            blocked_count=3,
+            policy_affected=True,
             warnings=["w1"],
             summary="",
         )
@@ -2618,19 +2618,19 @@ class TestRoutingPreviewRendering(unittest.TestCase):
 
     def test_compact_line_contains_changed_yes(self):
         from openshard.cli.run_output import _render_native_demo_block
-        meta = self._meta_with_preview(self._preview_ns(policy_changed_selection=True))
+        meta = self._meta_with_preview(self._preview_ns(policy_affected=True))
         combined = "\n".join(_render_native_demo_block(meta, detail="more"))
         self.assertIn("changed=yes", combined)
 
     def test_compact_line_contains_changed_no(self):
         from openshard.cli.run_output import _render_native_demo_block
-        meta = self._meta_with_preview(self._preview_ns(policy_changed_selection=False))
+        meta = self._meta_with_preview(self._preview_ns(policy_affected=False))
         combined = "\n".join(_render_native_demo_block(meta, detail="more"))
         self.assertIn("changed=no", combined)
 
     def test_compact_line_contains_blocked_count(self):
         from openshard.cli.run_output import _render_native_demo_block
-        meta = self._meta_with_preview(self._preview_ns(blocked_candidates=3))
+        meta = self._meta_with_preview(self._preview_ns(blocked_count=3))
         combined = "\n".join(_render_native_demo_block(meta, detail="more"))
         self.assertIn("blocked=3", combined)
 
@@ -2695,11 +2695,11 @@ class TestRoutingPreviewRendering(unittest.TestCase):
         self.assertIn("trust:", combined)
         self.assertNotIn("trust_level:", combined)
 
-    def test_full_block_uses_policy_changed_selection_label(self):
+    def test_full_block_uses_policy_affected_label(self):
         from openshard.cli.run_output import _render_native_demo_block
         meta = self._meta_with_preview(self._preview_ns())
         combined = "\n".join(_render_native_demo_block(meta, detail="full"))
-        self.assertIn("policy_changed_selection:", combined)
+        self.assertIn("policy_affected:", combined)
 
     def test_full_block_shows_warnings_count_not_text(self):
         from openshard.cli.run_output import _render_native_demo_block
@@ -2760,13 +2760,13 @@ class TestLastRoutingReceiptDisplay(unittest.TestCase):
 
     def _receipt_dict(self, **kwargs) -> dict:
         defaults = {
-            "final_strategy": "frontier-heavy",
+            "strategy": "frontier-heavy",
             "planner_tier": "frontier",
             "executor_tier": "fast",
             "validator_tier": "low-cost",
             "policy_mode": "strict",
             "policy_affected": True,
-            "blocked_candidates": 2,
+            "blocked_count": 2,
             "trust_level": "good",
             "confidence": "high",
             "warnings_count": 1,
@@ -2783,14 +2783,9 @@ class TestLastRoutingReceiptDisplay(unittest.TestCase):
             "routing_receipt": self._receipt_dict(**kwargs),
         }
 
-    def test_more_renders_compact_receipt_line(self):
+    def test_more_hides_receipt(self):
         out = _render(self._entry_with_receipt(), detail="more")
-        self.assertIn("routing receipt:", out)
-        self.assertIn("strategy=frontier-heavy", out)
-        self.assertIn("policy=strict", out)
-        self.assertIn("trust=good", out)
-        self.assertIn("blocked=2", out)
-        self.assertIn("confidence=high", out)
+        self.assertNotIn("routing receipt", out)
 
     def test_full_renders_receipt_section(self):
         out = _render(self._entry_with_receipt(), detail="full")
@@ -2801,7 +2796,7 @@ class TestLastRoutingReceiptDisplay(unittest.TestCase):
         self.assertIn("validator:", out)
         self.assertIn("policy_mode:", out)
         self.assertIn("policy_affected:", out)
-        self.assertIn("blocked_candidates:", out)
+        self.assertIn("blocked_count:", out)
         self.assertIn("trust:", out)
         self.assertIn("confidence:", out)
         self.assertIn("warnings_count:", out)

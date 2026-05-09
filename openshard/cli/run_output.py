@@ -819,6 +819,7 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
             _msd_roles = getattr(msd, "roles", []) or []
             _planner_tier = ""
             _executor_tier = ""
+            _validator_tier = ""
             for _r in _msd_roles:
                 _rname = _r.get("role", "") if isinstance(_r, dict) else getattr(_r, "role", "")
                 _rtier = _r.get("model_tier", "") if isinstance(_r, dict) else getattr(_r, "model_tier", "")
@@ -826,15 +827,18 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                     _planner_tier = _rtier
                 if _rname == "executor":
                     _executor_tier = _rtier
+                if _rname == "validator":
+                    _validator_tier = _rtier
             _msd_warnings_compact = getattr(msd, "warnings", []) or []
             _msd_compact = (
-                f"  model selection: {_msd_strategy}"
-                f"  confidence={_msd_confidence}"
-                f"  planner={_planner_tier}"
-                f"  executor={_executor_tier}"
+                f"  model selection: {_msd_strategy},"
+                f" confidence={_msd_confidence},"
+                f" planner={_planner_tier},"
+                f" executor={_executor_tier},"
+                f" validator={_validator_tier}"
             )
             if _msd_warnings_compact:
-                _msd_compact += f"  warnings={len(_msd_warnings_compact)}"
+                _msd_compact += f", warnings={len(_msd_warnings_compact)}"
             lines.append(_msd_compact)
             has_content = True
             if detail == "full":
@@ -976,8 +980,8 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
             _rp_risk       = _rp("risk_level", "")
             _rp_confidence = _rp("confidence", "")
             _rp_trust      = _rp("trust_level", "")
-            _rp_blocked    = _rp("blocked_candidates", 0)
-            _rp_changed    = _rp("policy_changed_selection", False)
+            _rp_blocked    = _rp("blocked_count", 0)
+            _rp_changed    = _rp("policy_affected", False)
             _rp_warnings   = _rp("warnings", [])
             _changed_str   = "yes" if _rp_changed else "no"
             lines.append(
@@ -997,20 +1001,20 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                 lines.append(f"  risk:                    {_rp_risk}")
                 lines.append(f"  confidence:              {_rp_confidence}")
                 lines.append(f"  trust:                   {_rp_trust}")
-                lines.append(f"  blocked_candidates:      {_rp_blocked}")
-                lines.append(f"  policy_changed_selection: {'yes' if _rp_changed else 'no'}")
+                lines.append(f"  blocked_count:           {_rp_blocked}")
+                lines.append(f"  policy_affected:         {'yes' if _rp_changed else 'no'}")
                 lines.append(f"  warnings:                {len(_rp_warnings or [])}")
 
-    if detail in ("more", "full"):
+    if detail == "full":
         rr = getattr(native_meta, "routing_receipt", None)
         if rr is not None:
             def _rr(key, default=""):
                 return rr.get(key, default) if isinstance(rr, dict) else getattr(rr, key, default)
 
-            _rr_strategy   = _rr("final_strategy", "")
+            _rr_strategy   = _rr("strategy", "")
             _rr_policy     = _rr("policy_mode", "")
             _rr_trust      = _rr("trust_level", "")
-            _rr_blocked    = _rr("blocked_candidates", 0)
+            _rr_blocked    = _rr("blocked_count", 0)
             _rr_confidence = _rr("confidence", "")
             _rr_planner    = _rr("planner_tier", "")
             _rr_executor   = _rr("executor_tier", "")
@@ -1019,27 +1023,19 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
             _rr_warnings   = _rr("warnings_count", 0)
             _rr_summary    = _rr("summary", "")
 
-            lines.append(
-                f"  routing receipt: strategy={_rr_strategy},"
-                f" policy={_rr_policy},"
-                f" trust={_rr_trust},"
-                f" blocked={_rr_blocked},"
-                f" confidence={_rr_confidence}"
-            )
             has_content = True
-            if detail == "full":
-                lines.append("  [routing receipt]")
-                lines.append(f"  strategy:           {_rr_strategy}")
-                lines.append(f"  planner:            {_rr_planner}")
-                lines.append(f"  executor:           {_rr_executor}")
-                lines.append(f"  validator:          {_rr_validator}")
-                lines.append(f"  policy_mode:        {_rr_policy}")
-                lines.append(f"  policy_affected:    {'yes' if _rr_affected else 'no'}")
-                lines.append(f"  blocked_candidates: {_rr_blocked}")
-                lines.append(f"  trust:              {_rr_trust}")
-                lines.append(f"  confidence:         {_rr_confidence}")
-                lines.append(f"  warnings_count:     {_rr_warnings}")
-                lines.append(f"  summary:            {_rr_summary}")
+            lines.append("  [routing receipt]")
+            lines.append(f"  strategy:        {_rr_strategy}")
+            lines.append(f"  planner:         {_rr_planner}")
+            lines.append(f"  executor:        {_rr_executor}")
+            lines.append(f"  validator:       {_rr_validator}")
+            lines.append(f"  policy_mode:     {_rr_policy}")
+            lines.append(f"  policy_affected: {'yes' if _rr_affected else 'no'}")
+            lines.append(f"  blocked_count:   {_rr_blocked}")
+            lines.append(f"  trust:           {_rr_trust}")
+            lines.append(f"  confidence:      {_rr_confidence}")
+            lines.append(f"  warnings_count:  {_rr_warnings}")
+            lines.append(f"  summary:         {_rr_summary}")
 
     return lines if has_content else []
 

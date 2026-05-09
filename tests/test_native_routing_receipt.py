@@ -32,8 +32,8 @@ class TestNativeRoutingReceiptDefaults(unittest.TestCase):
     def setUp(self) -> None:
         self.receipt = NativeRoutingReceipt()
 
-    def test_final_strategy_default(self):
-        self.assertEqual(self.receipt.final_strategy, "")
+    def test_strategy_default(self):
+        self.assertEqual(self.receipt.strategy, "")
 
     def test_planner_tier_default(self):
         self.assertEqual(self.receipt.planner_tier, "unknown")
@@ -50,8 +50,8 @@ class TestNativeRoutingReceiptDefaults(unittest.TestCase):
     def test_policy_affected_default(self):
         self.assertFalse(self.receipt.policy_affected)
 
-    def test_blocked_candidates_default(self):
-        self.assertEqual(self.receipt.blocked_candidates, 0)
+    def test_blocked_count_default(self):
+        self.assertEqual(self.receipt.blocked_count, 0)
 
     def test_trust_level_default(self):
         self.assertEqual(self.receipt.trust_level, "unknown")
@@ -76,8 +76,8 @@ class TestBuildNativeRoutingReceiptAllNone(unittest.TestCase):
         r = _build()
         self.assertIsInstance(r, NativeRoutingReceipt)
 
-    def test_final_strategy_empty(self):
-        self.assertEqual(_build().final_strategy, "")
+    def test_strategy_empty(self):
+        self.assertEqual(_build().strategy, "")
 
     def test_trust_level_unknown(self):
         self.assertEqual(_build().trust_level, "unknown")
@@ -85,8 +85,8 @@ class TestBuildNativeRoutingReceiptAllNone(unittest.TestCase):
     def test_policy_affected_false(self):
         self.assertFalse(_build().policy_affected)
 
-    def test_blocked_candidates_zero(self):
-        self.assertEqual(_build().blocked_candidates, 0)
+    def test_blocked_count_zero(self):
+        self.assertEqual(_build().blocked_count, 0)
 
     def test_warnings_count_zero(self):
         self.assertEqual(_build().warnings_count, 0)
@@ -108,7 +108,7 @@ class TestBuildNativeRoutingReceiptFromRoutingPreview(unittest.TestCase):
             executor_tier="fast",
             validator_tier="low-cost",
             policy_mode="strict",
-            blocked_candidates=2,
+            blocked_count=2,
             confidence="high",
             summary="frontier-heavy | planner=frontier executor=fast validator=low-cost | policy=strict",
             trust_level="good",
@@ -116,9 +116,9 @@ class TestBuildNativeRoutingReceiptFromRoutingPreview(unittest.TestCase):
         defaults.update(kwargs)
         return NativeRoutingPreview(**defaults)
 
-    def test_final_strategy(self):
+    def test_strategy(self):
         r = _build(routing_preview=self._preview())
-        self.assertEqual(r.final_strategy, "frontier-heavy")
+        self.assertEqual(r.strategy, "frontier-heavy")
 
     def test_planner_tier(self):
         r = _build(routing_preview=self._preview())
@@ -136,9 +136,9 @@ class TestBuildNativeRoutingReceiptFromRoutingPreview(unittest.TestCase):
         r = _build(routing_preview=self._preview())
         self.assertEqual(r.policy_mode, "strict")
 
-    def test_blocked_candidates(self):
+    def test_blocked_count(self):
         r = _build(routing_preview=self._preview())
-        self.assertEqual(r.blocked_candidates, 2)
+        self.assertEqual(r.blocked_count, 2)
 
     def test_confidence(self):
         r = _build(routing_preview=self._preview())
@@ -161,13 +161,13 @@ class TestBuildNativeRoutingReceiptFromRoutingPreview(unittest.TestCase):
             "executor_tier": "fast",
             "validator_tier": "fast",
             "policy_mode": "auto",
-            "blocked_candidates": 0,
+            "blocked_count": 0,
             "confidence": "medium",
             "summary": "cost-balanced",
             "trust_level": "weak",
         }
         r = _build(routing_preview=rp_dict)
-        self.assertEqual(r.final_strategy, "cost-balanced")
+        self.assertEqual(r.strategy, "cost-balanced")
         self.assertEqual(r.trust_level, "weak")
 
 
@@ -238,13 +238,13 @@ class TestNativeRoutingReceiptAsdict(unittest.TestCase):
 
     def test_json_serializable(self):
         r = NativeRoutingReceipt(
-            final_strategy="frontier-heavy",
+            strategy="frontier-heavy",
             planner_tier="frontier",
             executor_tier="fast",
             validator_tier="low-cost",
             policy_mode="strict",
             policy_affected=True,
-            blocked_candidates=2,
+            blocked_count=2,
             trust_level="good",
             confidence="high",
             warnings_count=1,
@@ -253,15 +253,15 @@ class TestNativeRoutingReceiptAsdict(unittest.TestCase):
         d = asdict(r)
         raw = json.dumps(d)
         parsed = json.loads(raw)
-        self.assertEqual(parsed["final_strategy"], "frontier-heavy")
+        self.assertEqual(parsed["strategy"], "frontier-heavy")
         self.assertEqual(parsed["trust_level"], "good")
         self.assertTrue(parsed["policy_affected"])
-        self.assertEqual(parsed["blocked_candidates"], 2)
+        self.assertEqual(parsed["blocked_count"], 2)
 
     def test_asdict_round_trip(self):
         r = _build()
         d = asdict(r)
-        self.assertIn("final_strategy", d)
+        self.assertIn("strategy", d)
         self.assertIn("warnings_count", d)
 
 
@@ -282,13 +282,13 @@ class TestNativeMetaFromEntryRoutingReceipt(unittest.TestCase):
 
     def test_with_routing_receipt_dict(self):
         entry = self._native_entry(routing_receipt={
-            "final_strategy": "cost-balanced",
+            "strategy": "cost-balanced",
             "planner_tier": "fast",
             "executor_tier": "fast",
             "validator_tier": "fast",
             "policy_mode": "auto",
             "policy_affected": False,
-            "blocked_candidates": 0,
+            "blocked_count": 0,
             "trust_level": "good",
             "confidence": "medium",
             "warnings_count": 0,
@@ -297,7 +297,7 @@ class TestNativeMetaFromEntryRoutingReceipt(unittest.TestCase):
         meta = _native_meta_from_entry(entry)
         rr = getattr(meta, "routing_receipt", None)
         self.assertIsNotNone(rr)
-        self.assertEqual(getattr(rr, "final_strategy", None), "cost-balanced")
+        self.assertEqual(getattr(rr, "strategy", None), "cost-balanced")
 
     def test_non_native_entry_returns_none(self):
         meta = _native_meta_from_entry({"task": "x"})
@@ -310,13 +310,13 @@ class TestNativeMetaFromEntryRoutingReceipt(unittest.TestCase):
 
 def _meta_with_receipt(**kwargs) -> SimpleNamespace:
     defaults = dict(
-        final_strategy="frontier-heavy",
+        strategy="frontier-heavy",
         planner_tier="frontier",
         executor_tier="fast",
         validator_tier="low-cost",
         policy_mode="strict",
         policy_affected=True,
-        blocked_candidates=2,
+        blocked_count=2,
         trust_level="good",
         confidence="high",
         warnings_count=1,
@@ -334,22 +334,16 @@ class TestNativeRoutingReceiptRendering(unittest.TestCase):
         combined = "\n".join(lines)
         self.assertNotIn("routing receipt", combined)
 
-    def test_compact_line_at_more(self):
+    def test_hidden_at_more(self):
         meta = _meta_with_receipt()
         lines = _render_native_demo_block(meta, detail="more")
         combined = "\n".join(lines)
-        self.assertIn("routing receipt:", combined)
-        self.assertIn("strategy=frontier-heavy", combined)
-        self.assertIn("policy=strict", combined)
-        self.assertIn("trust=good", combined)
-        self.assertIn("blocked=2", combined)
-        self.assertIn("confidence=high", combined)
+        self.assertNotIn("routing receipt", combined)
 
     def test_full_section_at_full(self):
         meta = _meta_with_receipt()
         lines = _render_native_demo_block(meta, detail="full")
         combined = "\n".join(lines)
-        self.assertIn("routing receipt:", combined)
         self.assertIn("[routing receipt]", combined)
         self.assertIn("strategy:", combined)
         self.assertIn("planner:", combined)
@@ -357,7 +351,7 @@ class TestNativeRoutingReceiptRendering(unittest.TestCase):
         self.assertIn("validator:", combined)
         self.assertIn("policy_mode:", combined)
         self.assertIn("policy_affected:", combined)
-        self.assertIn("blocked_candidates:", combined)
+        self.assertIn("blocked_count:", combined)
         self.assertIn("trust:", combined)
         self.assertIn("confidence:", combined)
         self.assertIn("warnings_count:", combined)
@@ -392,20 +386,20 @@ class TestNativeRoutingReceiptRendering(unittest.TestCase):
     def test_dict_receipt_renders(self):
         # Simulates deserialized history entry — receipt is a plain dict
         receipt_dict = {
-            "final_strategy": "cost-balanced",
+            "strategy": "cost-balanced",
             "planner_tier": "fast",
             "executor_tier": "fast",
             "validator_tier": "fast",
             "policy_mode": "auto",
             "policy_affected": False,
-            "blocked_candidates": 0,
+            "blocked_count": 0,
             "trust_level": "fair",
             "confidence": "medium",
             "warnings_count": 0,
             "summary": "cost-balanced",
         }
         meta = _ns(routing_receipt=receipt_dict)
-        lines = _render_native_demo_block(meta, detail="more")
+        lines = _render_native_demo_block(meta, detail="full")
         combined = "\n".join(lines)
-        self.assertIn("routing receipt:", combined)
-        self.assertIn("strategy=cost-balanced", combined)
+        self.assertIn("[routing receipt]", combined)
+        self.assertIn("cost-balanced", combined)
