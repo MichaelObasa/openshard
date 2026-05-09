@@ -376,9 +376,9 @@ class TestNativeRoutingPreviewRendering(unittest.TestCase):
         self.assertIn("[routing preview]", combined)
         self.assertIn("strategy:", combined)
         self.assertIn("policy_mode:", combined)
-        self.assertIn("planner_tier:", combined)
-        self.assertIn("executor_tier:", combined)
-        self.assertIn("validator_tier:", combined)
+        self.assertIn("planner:", combined)
+        self.assertIn("executor:", combined)
+        self.assertIn("validator:", combined)
 
     def test_routing_preview_hidden_in_default(self):
         meta = self._meta_with_preview()
@@ -403,7 +403,7 @@ class TestNativeRoutingPreviewRendering(unittest.TestCase):
         meta = self._meta_with_preview()
         lines = _render_native_demo_block(meta, detail="full")
         combined = "\n".join(lines)
-        self.assertIn("warnings:              1", combined)
+        self.assertIn("warnings:                1", combined)
 
 
 # ---------------------------------------------------------------------------
@@ -477,7 +477,7 @@ class TestNativeMetaFromEntryRoutingPreview(unittest.TestCase):
         lines = _render_native_demo_block(meta, detail="full")
         combined = "\n".join(lines)
         self.assertIn("[routing preview]", combined)
-        self.assertIn("planner_tier:", combined)
+        self.assertIn("planner:", combined)
 
     def test_saved_entry_routing_preview_hidden_in_default(self):
         entry = self._entry_with_preview()
