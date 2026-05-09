@@ -718,7 +718,7 @@ def _render_log_entry(entry: dict, detail: str) -> None:
     # Token / model detail (--more / --full)
     if detail != "default":
         full_model = entry.get("execution_model", "")
-        if full_model and not stage_runs_data:
+        if full_model and not stage_runs_data and not routing_model:
             click.echo(f"\nModel: {full_model}")
         pt = entry.get("prompt_tokens", 0)
         ct = entry.get("completion_tokens", 0)
