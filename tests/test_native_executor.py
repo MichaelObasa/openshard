@@ -57,8 +57,10 @@ from openshard.native.context import (
 from openshard.native.executor import (
     NativeAgentExecutor,
     NativeRunMeta,
+    _MAX_EXPLICIT_SNIPPET_FILES,
     _MAX_OSN_LOOP_STEPS,
     _build_native_plan,
+    _extract_explicit_file_paths,
     _extract_search_query,
     _extract_snippet_lines,
     _parse_search_result_line,
@@ -5819,3 +5821,183 @@ class TestGenerateOSNIntegration(unittest.TestCase):
             self.assertIn("[osn loop]", skills_context)
         else:
             self.assertNotIn("[osn loop]", skills_context)
+
+
+class TestExtractExplicitFilePaths(unittest.TestCase):
+    """Unit tests for _extract_explicit_file_paths()."""
+
+    def test_detects_path_with_dirs(self):
+        paths = _extract_explicit_file_paths("what does openshard/cli/main.py do?")
+        self.assertIn("openshard/cli/main.py", paths)
+
+    def test_detects_known_extension_no_dir(self):
+        paths = _extract_explicit_file_paths("see README.md for details")
+        self.assertIn("README.md", paths)
+
+    def test_detects_multiple_paths(self):
+        paths = _extract_explicit_file_paths("compare openshard/cli/main.py and tests/test_foo.py")
+        self.assertIn("openshard/cli/main.py", paths)
+        self.assertIn("tests/test_foo.py", paths)
+
+    def test_deduplicates(self):
+        paths = _extract_explicit_file_paths("openshard/cli/main.py and openshard/cli/main.py again")
+        self.assertEqual(paths.count("openshard/cli/main.py"), 1)
+
+    def test_ignores_url_fragment(self):
+        paths = _extract_explicit_file_paths("see http://example.com/openshard/cli/main.py")
+        self.assertNotIn("openshard/cli/main.py", paths)
+
+    def test_empty_task_returns_empty(self):
+        self.assertEqual(_extract_explicit_file_paths(""), [])
+
+    def test_path_without_extension_not_matched(self):
+        paths = _extract_explicit_file_paths("look at openshard/cli")
+        self.assertNotIn("openshard/cli", paths)
+
+    def test_absolute_path_not_returned(self):
+        paths = _extract_explicit_file_paths("see /etc/passwd please")
+        self.assertNotIn("/etc/passwd", paths)
+
+
+class TestExplicitFileSnippetsObservePhase(unittest.TestCase):
+    """Explicit file paths in task text must end up in NativeEvidence.file_snippets."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor
+
+    def _make_executor_no_repo(self):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock())
+        return executor
+
+    def test_explicit_file_included_when_named_in_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "foo").mkdir()
+            (root / "foo" / "bar.py").write_text("def hello(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("what does foo/bar.py do?")
+        evidence = executor.native_meta.evidence
+        self.assertIsNotNone(evidence)
+        paths = [s.path for s in evidence.file_snippets]
+        self.assertIn("foo/bar.py", paths)
+
+    def test_snippet_lines_are_non_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "foo").mkdir()
+            (root / "foo" / "bar.py").write_text("x = 1\ny = 2\nz = 3\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("what does foo/bar.py do?")
+        evidence = executor.native_meta.evidence
+        snippet = next(s for s in evidence.file_snippets if s.path == "foo/bar.py")
+        self.assertGreater(len(snippet.lines), 0)
+
+    def test_nonexistent_path_is_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("what does openshard/missing.py do?")
+        self.assertIsNone(executor.native_meta.evidence)
+
+    def test_unsafe_traversal_path_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("what does ../secret.py do?")
+        self.assertIsNone(executor.native_meta.evidence)
+
+    def test_snippet_lines_capped_at_8(self):
+        big = "\n".join(f"line_{i} = {i}" for i in range(100))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "big.py").write_text(big)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("what does big.py do?")
+        evidence = executor.native_meta.evidence
+        self.assertIsNotNone(evidence)
+        snippet = next(s for s in evidence.file_snippets if s.path == "big.py")
+        self.assertLessEqual(len(snippet.lines), 8)
+
+    def test_no_runner_returns_early(self):
+        executor = self._make_executor_no_repo()
+        executor._run_observe_phase("what does openshard/cli/main.py do?")
+        self.assertIsNone(executor.native_meta.evidence)
+
+    def test_explicit_snippet_not_duplicated_when_search_also_finds_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "foo").mkdir()
+            (root / "foo" / "bar.py").write_text("def login(): pass\n")
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("where is login in foo/bar.py")
+        evidence = executor.native_meta.evidence
+        self.assertIsNotNone(evidence)
+        paths = [s.path for s in evidence.file_snippets]
+        self.assertEqual(paths.count("foo/bar.py"), 1)
+
+    def test_explicit_snippets_respect_max_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for i in range(5):
+                (root / f"file{i}.py").write_text(f"x = {i}\n")
+            task = " ".join(f"file{i}.py" for i in range(5))
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase(f"what do {task} do?")
+        evidence = executor.native_meta.evidence
+        if evidence is not None:
+            self.assertLessEqual(len(evidence.file_snippets), _MAX_EXPLICIT_SNIPPET_FILES)
+
+    def test_no_evidence_without_file_paths_or_search_words(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("fix the bug in the code")
+        self.assertIsNone(executor.native_meta.evidence)
+
+
+class TestExplicitFileContextInGeneratedPrompt(unittest.TestCase):
+    """Explicit file content must reach the model context via evidence rendering."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor, fake_gen
+
+    def test_generate_includes_explicit_file_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "foo").mkdir()
+            (root / "foo" / "bar.py").write_text("def hello(): pass\n")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("what does foo/bar.py do?")
+        _, kwargs = fake_gen.generate.call_args
+        ctx = kwargs["skills_context"]
+        self.assertIn("[evidence]", ctx)
+        self.assertIn("foo/bar.py", ctx)
+
+    def test_generate_no_evidence_for_plain_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("improve the error handling")
+        _, kwargs = fake_gen.generate.call_args
+        ctx = kwargs.get("skills_context", "")
+        self.assertNotIn("[evidence]", ctx)
+
+    def test_explicit_file_does_not_require_search_trigger_words(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tests").mkdir()
+            (root / "tests" / "test_foo.py").write_text("def test_it(): pass\n")
+            executor, fake_gen = self._make_executor_with_repo(root)
+            executor.generate("explain tests/test_foo.py")
+        _, kwargs = fake_gen.generate.call_args
+        ctx = kwargs["skills_context"]
+        self.assertIn("[evidence]", ctx)
+        self.assertIn("tests/test_foo.py", ctx)

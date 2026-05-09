@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -229,6 +230,25 @@ def _extract_search_query(task: str) -> str | None:
     return " ".join(filtered[:3])
 
 
+_EXPLICIT_PATH_RE = re.compile(
+    r"(?<![:/\w])"
+    r"([\w][\w.-]*/[\w./][\w./-]*\.[\w]{1,10}"
+    r"|[\w][\w.-]*\.(?:py|md|txt|toml|json|yaml|yml|cfg|ini|sh|js|ts|rs|go|rb|tsx|jsx|lock|env))"
+    r"(?![\w/])"
+)
+_MAX_EXPLICIT_SNIPPET_FILES: int = 2
+
+
+def _extract_explicit_file_paths(task: str) -> list[str]:
+    """Return unique apparent repo-relative file paths found literally in task text."""
+    seen: list[str] = []
+    for m in _EXPLICIT_PATH_RE.finditer(task):
+        path = m.group(1)
+        if path not in seen:
+            seen.append(path)
+    return seen
+
+
 def _build_native_plan(
     task: str,
     *,
@@ -372,6 +392,8 @@ class NativeAgentExecutor:
         if diff_result.ok and diff_result.output.strip():
             observation.dirty_diff_present = True
 
+        evidence: NativeEvidence | None = None
+
         task_lower = task.lower()
         if any(trigger in task_lower.split() for trigger in _SEARCH_TRIGGER_WORDS):
             query = _extract_search_query(task)
@@ -389,12 +411,41 @@ class NativeAgentExecutor:
                         raw_lines[:3],
                     )
                     self.native_meta.tool_trace.extend(read_traces)
-                    self.native_meta.evidence = NativeEvidence(
+                    evidence = NativeEvidence(
                         search_results=raw_lines[:3],
                         file_snippets=file_snippets,
                         truncated=truncated,
                     )
-                    self.record_loop_step("evidence")
+
+        # Gather content for any repo-relative file paths named explicitly in the task,
+        # regardless of whether search trigger words are present.
+        explicit_paths = _extract_explicit_file_paths(task)
+        existing_snippet_paths = {s.path for s in evidence.file_snippets} if evidence else set()
+        for path in explicit_paths:
+            if len(existing_snippet_paths) >= _MAX_EXPLICIT_SNIPPET_FILES:
+                break
+            if path in existing_snippet_paths:
+                continue
+            if not self._is_safe_repo_path(path):
+                continue
+            read_call = NativeToolCall(tool_name="read_file", args={"path": path})
+            result = self._runner.run(read_call)
+            self.native_meta.tool_trace.append(self._runner.trace_entry(read_call, result))
+            if not result.ok:
+                continue
+            snippet_lines = _extract_snippet_lines(result.output, 1, radius=0, max_lines=8)
+            if not snippet_lines:
+                continue
+            snippet = NativeFileSnippet(path=path, lines=snippet_lines)
+            if evidence is None:
+                evidence = NativeEvidence(file_snippets=[snippet])
+            else:
+                evidence.file_snippets.append(snippet)
+            existing_snippet_paths.add(path)
+
+        if evidence is not None:
+            self.native_meta.evidence = evidence
+            self.record_loop_step("evidence")
 
         self.native_meta.observation = observation
         self.record_loop_step("observation")
