@@ -2479,7 +2479,7 @@ class NativeModelPolicy:
 
 
 def build_native_model_policy(mode: str | None) -> "NativeModelPolicy":
-    """Parse a mode string into a NativeModelPolicy. Metadata-only v1 — no routing effect."""
+    """Parse a mode string into a NativeModelPolicy. Enforced in candidate scoring."""
     if mode is None or mode == "auto":
         return NativeModelPolicy()
     if mode == "cheapest-safe":
@@ -2618,8 +2618,8 @@ class NativeRoutingPreview:
     validator_tier: str = "unknown"
     risk_level: str = "unknown"
     confidence: str = "medium"
-    blocked_candidates: int = 0
-    policy_changed_selection: bool = False
+    blocked_count: int = 0
+    policy_affected: bool = False
     trust_level: str = "unknown"
     summary: str = ""
     warnings: list[str] = field(default_factory=list)
@@ -2657,8 +2657,8 @@ def build_native_routing_preview(
     confidence = _get(model_candidate_scoring, "confidence", "") or _get(model_selection_decision, "confidence", "medium") or "medium"
     risk_level = _get(model_selection_decision, "risk_level", "unknown") or "unknown"
     policy_mode = _get(model_policy_receipt, "mode", "auto") or "auto"
-    policy_changed_selection = bool(_get(model_policy_receipt, "affected_selection", False))
-    blocked_candidates = int(_get(model_policy_receipt, "blocked_count", 0) or 0)
+    policy_affected = bool(_get(model_policy_receipt, "affected_selection", False))
+    blocked_count = int(_get(model_policy_receipt, "blocked_count", 0) or 0)
     trust_level = _get(run_trust_score, "level", "unknown") or "unknown"
 
     planner_tier = _tier("planner")
@@ -2681,8 +2681,8 @@ def build_native_routing_preview(
         validator_tier=validator_tier,
         risk_level=risk_level,
         confidence=confidence,
-        blocked_candidates=blocked_candidates,
-        policy_changed_selection=policy_changed_selection,
+        blocked_count=blocked_count,
+        policy_affected=policy_affected,
         trust_level=trust_level,
         summary=summary,
         warnings=warnings,
@@ -2691,13 +2691,13 @@ def build_native_routing_preview(
 
 @dataclass
 class NativeRoutingReceipt:
-    final_strategy: str = ""
+    strategy: str = ""
     planner_tier: str = "unknown"
     executor_tier: str = "unknown"
     validator_tier: str = "unknown"
     policy_mode: str = "auto"
     policy_affected: bool = False
-    blocked_candidates: int = 0
+    blocked_count: int = 0
     trust_level: str = "unknown"
     confidence: str = "medium"
     warnings_count: int = 0
@@ -2715,12 +2715,12 @@ def build_native_routing_receipt(
             return default
         return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
 
-    final_strategy = _get(routing_preview, "strategy", "") or ""
+    strategy = _get(routing_preview, "strategy", "") or ""
     planner_tier = _get(routing_preview, "planner_tier", "unknown") or "unknown"
     executor_tier = _get(routing_preview, "executor_tier", "unknown") or "unknown"
     validator_tier = _get(routing_preview, "validator_tier", "unknown") or "unknown"
     policy_mode = _get(routing_preview, "policy_mode", "auto") or "auto"
-    blocked_candidates = int(_get(routing_preview, "blocked_candidates", 0) or 0)
+    blocked_count = int(_get(routing_preview, "blocked_count", 0) or 0)
     confidence = _get(routing_preview, "confidence", "medium") or "medium"
     summary = _get(routing_preview, "summary", "") or ""
     preview_trust = _get(routing_preview, "trust_level", "unknown") or "unknown"
@@ -2733,13 +2733,13 @@ def build_native_routing_receipt(
         trust_level = preview_trust
 
     return NativeRoutingReceipt(
-        final_strategy=final_strategy,
+        strategy=strategy,
         planner_tier=planner_tier,
         executor_tier=executor_tier,
         validator_tier=validator_tier,
         policy_mode=policy_mode,
         policy_affected=policy_affected,
-        blocked_candidates=blocked_candidates,
+        blocked_count=blocked_count,
         trust_level=trust_level,
         confidence=confidence,
         warnings_count=warnings_count,

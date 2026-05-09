@@ -68,11 +68,11 @@ class TestNativeRoutingPreviewDefaults(unittest.TestCase):
     def test_confidence_default(self):
         self.assertEqual(self.preview.confidence, "medium")
 
-    def test_blocked_candidates_default(self):
-        self.assertEqual(self.preview.blocked_candidates, 0)
+    def test_blocked_count_default(self):
+        self.assertEqual(self.preview.blocked_count, 0)
 
-    def test_policy_changed_selection_default(self):
-        self.assertFalse(self.preview.policy_changed_selection)
+    def test_policy_affected_default(self):
+        self.assertFalse(self.preview.policy_affected)
 
     def test_trust_level_default(self):
         self.assertEqual(self.preview.trust_level, "unknown")
@@ -108,10 +108,10 @@ class TestBuildNativeRoutingPreviewAllNone(unittest.TestCase):
         self.assertEqual(self.preview.validator_tier, "unknown")
 
     def test_blocked_zero(self):
-        self.assertEqual(self.preview.blocked_candidates, 0)
+        self.assertEqual(self.preview.blocked_count, 0)
 
     def test_policy_changed_false(self):
-        self.assertFalse(self.preview.policy_changed_selection)
+        self.assertFalse(self.preview.policy_affected)
 
     def test_trust_unknown(self):
         self.assertEqual(self.preview.trust_level, "unknown")
@@ -201,22 +201,22 @@ class TestBuildNativeRoutingPreviewPolicyFields(unittest.TestCase):
         preview = _build(model_policy_receipt=mpr)
         self.assertEqual(preview.policy_mode, "open-source-only")
 
-    def test_policy_changed_selection_true(self):
+    def test_policy_affected_true(self):
         mpr = NativeModelPolicyReceipt(affected_selection=True)
         preview = _build(model_policy_receipt=mpr)
-        self.assertTrue(preview.policy_changed_selection)
+        self.assertTrue(preview.policy_affected)
 
-    def test_blocked_candidates_from_receipt(self):
+    def test_blocked_count_from_receipt(self):
         mpr = NativeModelPolicyReceipt(blocked_count=3)
         preview = _build(model_policy_receipt=mpr)
-        self.assertEqual(preview.blocked_candidates, 3)
+        self.assertEqual(preview.blocked_count, 3)
 
     def test_receipt_dict_input(self):
         mpr = {"mode": "cheapest-safe", "affected_selection": True, "blocked_count": 1}
         preview = _build(model_policy_receipt=mpr)
         self.assertEqual(preview.policy_mode, "cheapest-safe")
-        self.assertTrue(preview.policy_changed_selection)
-        self.assertEqual(preview.blocked_candidates, 1)
+        self.assertTrue(preview.policy_affected)
+        self.assertEqual(preview.blocked_count, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -304,16 +304,16 @@ class TestNativeRoutingPreviewAsdict(unittest.TestCase):
             validator_tier="fast",
             risk_level="low",
             confidence="high",
-            blocked_candidates=2,
-            policy_changed_selection=True,
+            blocked_count=2,
+            policy_affected=True,
             trust_level="good",
             summary="cheapest-safe | planner=fast executor=fast validator=fast | policy=cheapest-safe",
             warnings=["w"],
         )
         d = asdict(preview)
         self.assertEqual(d["strategy"], "cheapest-safe")
-        self.assertEqual(d["blocked_candidates"], 2)
-        self.assertTrue(d["policy_changed_selection"])
+        self.assertEqual(d["blocked_count"], 2)
+        self.assertTrue(d["policy_affected"])
         self.assertEqual(d["warnings"], ["w"])
 
 
@@ -332,8 +332,8 @@ class TestNativeRoutingPreviewRendering(unittest.TestCase):
             validator_tier="fast",
             risk_level="high",
             confidence="high",
-            blocked_candidates=0,
-            policy_changed_selection=False,
+            blocked_count=0,
+            policy_affected=False,
             trust_level="good",
             summary="frontier-heavy | planner=frontier executor=frontier validator=fast | policy=auto",
             warnings=["internal warning"],
@@ -424,8 +424,8 @@ class TestNativeMetaFromEntryRoutingPreview(unittest.TestCase):
                 "validator_tier": "fast",
                 "risk_level": "low",
                 "confidence": "high",
-                "blocked_candidates": 1,
-                "policy_changed_selection": True,
+                "blocked_count": 1,
+                "policy_affected": True,
                 "trust_level": "good",
                 "summary": "cheapest-safe | planner=fast executor=fast validator=fast | policy=cheapest-safe",
                 "warnings": [],
