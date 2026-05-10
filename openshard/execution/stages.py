@@ -106,15 +106,18 @@ def should_use_stages(category: str) -> bool:
 # Planning call helper
 # ---------------------------------------------------------------------------
 
-def run_planning_stage(client, task: str, skills_context: str = "") -> tuple[str, object]:
+def run_planning_stage(
+    client, task: str, skills_context: str = "", model: str = MODEL_STRONG
+) -> tuple[str, object]:
     """Send a planning request and return ``(plan_text, usage)``.
 
-    Uses MODEL_STRONG (Sonnet) unconditionally — planning is cheap in tokens
-    and benefits from careful reasoning.
+    Uses MODEL_STRONG (Sonnet) by default — planning benefits from careful
+    reasoning.  Pass *model* explicitly when tier dispatch resolves a different
+    planner model.
     """
     prompt = f"{skills_context}\n\nTask: {task}" if skills_context else f"Task: {task}"
     response = client.execute(
-        model=MODEL_STRONG,
+        model=model,
         prompt=prompt,
         system=PLANNING_SYSTEM,
     )

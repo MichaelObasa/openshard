@@ -2798,3 +2798,113 @@ def sync_native_model_selection_decision_with_candidate_scoring(
             synced.fallback_reason = "candidate scoring applied model policy constraints"
 
     return synced
+
+
+# ---------------------------------------------------------------------------
+# Tier dispatch receipt
+# ---------------------------------------------------------------------------
+
+@dataclass
+class NativeTierDispatchReceipt:
+    enabled: bool = False
+    applied: bool = False
+    tier_source: str = ""           # "candidate_scoring" | "category_fallback" | ""
+    planner_tier: str = ""
+    planner_model: str | None = None
+    executor_tier: str = ""
+    executor_model: str | None = None
+    validator_tier: str = ""
+    validator_model: str | None = None
+    fallback_used: bool = False
+    fallback_reason: str = ""
+    warnings: list[str] = field(default_factory=list)
+
+
+def build_native_tier_dispatch_receipt(
+    *,
+    routing_receipt=None,
+    model_candidate_scoring=None,
+    routing_category: str | None = None,
+    experimental_tier_dispatch: bool = False,
+    applied: bool = False,
+    not_applied_reason: str = "",
+) -> "NativeTierDispatchReceipt":
+    """Build a tier dispatch receipt.
+
+    Priority for tier source:
+    1. routing_receipt tiers (planner_tier / executor_tier / validator_tier)
+    2. model_candidate_scoring.selected_by_role
+    3. routing_category fallback (category_fallback)
+
+    applied=True means the resolved models were actually used for generation.
+    not_applied_reason explains why applied=False (e.g. "dry-run", "native tier dispatch is recorded only in v1").
+    """
+    if not experimental_tier_dispatch:
+        return NativeTierDispatchReceipt(enabled=False)
+
+    from openshard.native.dispatch import resolve_tier, resolve_tier_for_category
+
+    def _get(obj, key, default=""):
+        if obj is None:
+            return default
+        return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
+
+    # Try routing_receipt tiers first
+    p_tier = _get(routing_receipt, "planner_tier", "") or ""
+    e_tier = _get(routing_receipt, "executor_tier", "") or ""
+    v_tier = _get(routing_receipt, "validator_tier", "") or ""
+
+    # Fall through to candidate scoring selected_by_role
+    if not (p_tier or e_tier or v_tier) and model_candidate_scoring is not None:
+        selected = _get(model_candidate_scoring, "selected_by_role", {}) or {}
+        p_tier = selected.get("planner", "") or ""
+        e_tier = selected.get("executor", "") or ""
+        v_tier = selected.get("validator", "") or ""
+
+    tier_source: str
+    if p_tier or e_tier or v_tier:
+        # Selected tier metadata available
+        tier_source = "candidate_scoring"
+        p_model, p_fb, p_reason = resolve_tier(p_tier or None)
+        e_model, e_fb, e_reason = resolve_tier(e_tier or None)
+        v_model, v_fb, v_reason = resolve_tier(v_tier or None)
+    else:
+        # No selected tiers — fall back to routing category
+        tier_source = "category_fallback"
+        # Planner is always frontier tier
+        p_tier = "frontier-reasoning-model"
+        p_model, p_fb, p_reason = resolve_tier(p_tier)
+        # Executor from category
+        e_model, e_tier_resolved, e_fb, e_reason = resolve_tier_for_category(routing_category)
+        e_tier = e_tier_resolved or ""
+        # Validator is always independent tier
+        v_tier = "independent-validator-model"
+        v_model, v_fb, v_reason = resolve_tier(v_tier)
+
+    any_fallback = p_fb or e_fb or v_fb
+    tier_reasons = [r for r in (p_reason, e_reason, v_reason) if r]
+    first_tier_reason = tier_reasons[0] if tier_reasons else ""
+    effective_fallback_reason = not_applied_reason or first_tier_reason
+
+    warnings: list[str] = []
+    if p_fb and p_reason:
+        warnings.append(f"planner fallback: {p_reason}")
+    if e_fb and e_reason:
+        warnings.append(f"executor fallback: {e_reason}")
+    if v_fb and v_reason:
+        warnings.append(f"validator fallback: {v_reason}")
+
+    return NativeTierDispatchReceipt(
+        enabled=True,
+        applied=applied,
+        tier_source=tier_source,
+        planner_tier=p_tier,
+        planner_model=p_model,
+        executor_tier=e_tier,
+        executor_model=e_model,
+        validator_tier=v_tier,
+        validator_model=v_model,
+        fallback_used=any_fallback,
+        fallback_reason=effective_fallback_reason,
+        warnings=warnings,
+    )

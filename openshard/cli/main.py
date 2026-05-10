@@ -127,6 +127,13 @@ def plan(task: str):
     help="Invoke a minimal read-only DeepAgents agent as a proof step. Requires --native-backend deepagents. No write or shell tools are provided.",
 )
 @click.option(
+    "--experimental-tier-dispatch",
+    "experimental_tier_dispatch",
+    is_flag=True,
+    default=False,
+    help="[Experimental] Resolve routing tier names to model IDs and use them during execution. Recorded in run log; shown at --more/--full.",
+)
+@click.option(
     "--native-loop",
     "native_loop",
     type=click.Choice(["experimental"], case_sensitive=False),
@@ -155,7 +162,7 @@ def plan(task: str):
     default=None,
     help="Model selection policy mode (metadata-only v1): auto, cheapest-safe, frontier-heavy, open-source-only, local-only, custom.",
 )
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, native_backend: str | None, experimental_deepagents_run: bool, native_loop: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool, model_policy: str | None):
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, native_backend: str | None, experimental_deepagents_run: bool, experimental_tier_dispatch: bool, native_loop: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool, model_policy: str | None):
     """Execute TASK and return a structured result."""
     if native_loop is not None and workflow != "native":
         raise click.UsageError("--native-loop experimental requires --workflow native")
@@ -181,6 +188,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         detail=detail,
         native_backend=native_backend,
         experimental_deepagents_run=experimental_deepagents_run,
+        experimental_tier_dispatch=experimental_tier_dispatch,
         native_loop=native_loop,
         model_policy=model_policy,
     )
@@ -741,6 +749,14 @@ def _render_log_entry(entry: dict, detail: str) -> None:
     # Native inspection (--more / --full)
     if detail != "default":
         _render_native_inspection(entry, detail)
+
+    # Tier dispatch for non-native runs (native gets it inside _render_native_inspection)
+    if detail != "default" and entry.get("workflow") != "native":
+        _tdr = entry.get("tier_dispatch_receipt")
+        if _tdr and _tdr.get("enabled"):
+            from openshard.cli.run_output import _render_tier_dispatch_block
+            for line in _render_tier_dispatch_block(_tdr, detail):
+                click.echo(line)
 
     duration = entry.get("duration_seconds", 0)
     cost = entry.get("estimated_cost")

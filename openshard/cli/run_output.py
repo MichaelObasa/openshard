@@ -1041,6 +1041,14 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
             lines.append(f"  warnings_count:  {_rr_warnings}")
             lines.append(f"  summary:         {_rr_summary}")
 
+    if detail in ("more", "full"):
+        _tdr = getattr(native_meta, "tier_dispatch_receipt", None)
+        if _tdr is not None:
+            _tdr_lines = _render_tier_dispatch_block(_tdr, detail)
+            lines.extend(_tdr_lines)
+            if _tdr_lines:
+                has_content = True
+
     return lines if has_content else []
 
 
@@ -1115,6 +1123,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "model_policy_receipt": entry.get("model_policy_receipt"),
         "routing_preview": entry.get("routing_preview"),
         "routing_receipt": entry.get("routing_receipt"),
+        "tier_dispatch_receipt": entry.get("tier_dispatch_receipt"),
     })
 
 
@@ -1139,3 +1148,56 @@ def _print_dry_run(files: list[ChangedFile]) -> None:
         else:
             click.echo(f.content)
         click.echo("")
+
+
+def _render_tier_dispatch_block(tdr: Any, detail: str) -> list[str]:
+    """Render tier dispatch receipt as lines. tdr can be dict or SimpleNamespace."""
+    def _g(key: str, default: Any = "") -> Any:
+        return tdr.get(key, default) if isinstance(tdr, dict) else getattr(tdr, key, default)
+    if not _g("enabled", False):
+        return []
+    p_tier  = _g("planner_tier", "")
+    p_model = _g("planner_model") or "-"
+    e_tier  = _g("executor_tier", "")
+    e_model = _g("executor_model") or "-"
+    v_tier  = _g("validator_tier", "")
+    v_model = _g("validator_model") or "-"
+    applied = _g("applied", False)
+    fb      = _g("fallback_used", False)
+    source  = _g("tier_source", "")
+    warns   = _g("warnings", []) or []
+    lines: list[str] = []
+    fb_str = " [fallback]" if fb else ""
+    lines.append(
+        f"  tier dispatch: applied={'yes' if applied else 'no'}"
+        f" source={source}{fb_str}"
+        f" planner={p_tier}->{_model_label(p_model)}"
+        f" executor={e_tier}->{_model_label(e_model)}"
+        f" validator={v_tier}->{_model_label(v_model)}"
+    )
+    if warns:
+        lines.append(f"  tier dispatch warnings: {len(warns)}")
+    if detail == "full":
+        reason = _g("fallback_reason", "")
+        lines.append("  [tier dispatch]")
+        lines.append("  enabled:         yes")
+        lines.append(f"  applied:         {'yes' if applied else 'no'}")
+        lines.append(f"  tier_source:     {source}")
+        lines.append(f"  planner_tier:    {p_tier}")
+        lines.append(f"  planner_model:   {p_model}")
+        lines.append(f"  executor_tier:   {e_tier}")
+        lines.append(f"  executor_model:  {e_model}")
+        lines.append(f"  validator_tier:  {v_tier}")
+        lines.append(f"  validator_model: {v_model}")
+        lines.append(f"  fallback_used:   {'yes' if fb else 'no'}")
+        if reason:
+            lines.append(f"  fallback_reason: {reason}")
+        lines.append(f"  warnings:        {len(warns)}")
+        for w in warns:
+            lines.append(f"    - {w}")
+    return lines
+
+
+def _print_tier_dispatch_block(tdr: Any, detail: str) -> None:
+    for line in _render_tier_dispatch_block(tdr, detail):
+        click.echo(line)
