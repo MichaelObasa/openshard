@@ -1152,6 +1152,8 @@ def _print_dry_run(files: list[ChangedFile]) -> None:
 
 def _render_tier_dispatch_block(tdr: Any, detail: str) -> list[str]:
     """Render tier dispatch receipt as lines. tdr can be dict or SimpleNamespace."""
+    if detail not in ("more", "full"):
+        return []
     def _g(key: str, default: Any = "") -> Any:
         return tdr.get(key, default) if isinstance(tdr, dict) else getattr(tdr, key, default)
     if not _g("enabled", False):
@@ -1166,35 +1168,51 @@ def _render_tier_dispatch_block(tdr: Any, detail: str) -> list[str]:
     fb      = _g("fallback_used", False)
     source  = _g("tier_source", "")
     warns   = _g("warnings", []) or []
+
+    def _lbl(m: str) -> str:
+        return _model_label(m) if m and m != "-" else "-"
+
+    source_label = source.replace("_", " ")
     lines: list[str] = []
-    fb_str = " [fallback]" if fb else ""
-    lines.append(
-        f"  tier dispatch: applied={'yes' if applied else 'no'}"
-        f" source={source}{fb_str}"
-        f" planner={p_tier}->{_model_label(p_model)}"
-        f" executor={e_tier}->{_model_label(e_model)}"
-        f" validator={v_tier}->{_model_label(v_model)}"
-    )
-    if warns:
-        lines.append(f"  tier dispatch warnings: {len(warns)}")
-    if detail == "full":
+
+    if detail == "more":
+        lines.append("  Model plan")
+        lines.append(f"    Planning:  {_lbl(p_model)}")
+        lines.append(f"    Work:      {_lbl(e_model)}")
+        lines.append(f"    Validator: {_lbl(v_model)} (reserved)")
+        lines.append("")
+        lines.append("  Dispatch")
+        lines.append(f"    Applied: {'yes' if applied else 'no'}")
+        lines.append(f"    Source:  {source_label}")
+        if fb:
+            lines.append("    Fallback: yes")
+        if warns:
+            lines.append(f"    Warnings: {len(warns)}")
+    else:  # full
         reason = _g("fallback_reason", "")
-        lines.append("  [tier dispatch]")
-        lines.append("  enabled:         yes")
-        lines.append(f"  applied:         {'yes' if applied else 'no'}")
-        lines.append(f"  tier_source:     {source}")
-        lines.append(f"  planner_tier:    {p_tier}")
-        lines.append(f"  planner_model:   {p_model}")
-        lines.append(f"  executor_tier:   {e_tier}")
-        lines.append(f"  executor_model:  {e_model}")
-        lines.append(f"  validator_tier:  {v_tier}")
-        lines.append(f"  validator_model: {v_model}")
-        lines.append(f"  fallback_used:   {'yes' if fb else 'no'}")
+        lines.append("  Model plan")
+        lines.append(f"    Planning: {_lbl(p_model)}")
+        lines.append(f"      Tier:  {p_tier}")
+        lines.append(f"      Model: {p_model}")
+        lines.append("")
+        lines.append(f"    Work: {_lbl(e_model)}")
+        lines.append(f"      Tier:  {e_tier}")
+        lines.append(f"      Model: {e_model}")
+        lines.append("")
+        lines.append(f"    Validator: {_lbl(v_model)}")
+        lines.append(f"      Tier:  {v_tier}")
+        lines.append(f"      Model: {v_model}")
+        lines.append("      Used:  no, reserved for validation")
+        lines.append("")
+        lines.append("  Dispatch")
+        lines.append(f"    Applied: {'yes' if applied else 'no'}")
+        lines.append(f"    Source:  {source_label}")
+        lines.append(f"    Fallback: {'yes' if fb else 'no'}")
+        lines.append(f"    Warnings: {len(warns)}")
         if reason:
-            lines.append(f"  fallback_reason: {reason}")
-        lines.append(f"  warnings:        {len(warns)}")
+            lines.append(f"    Reason:  {reason}")
         for w in warns:
-            lines.append(f"    - {w}")
+            lines.append(f"      - {w}")
     return lines
 
 
