@@ -678,30 +678,39 @@ def _render_log_entry(entry: dict, detail: str) -> None:
             _stage_label = "Analysis" if (_is_ro and sr['stage_type'] == "implementation") else sr['stage_type'].capitalize()
             click.echo(f"  {_stage_label} ({_model_label(sr['model'])}): {sr['duration']:.1f}s, {cost_s}")
 
+    # Task type (--more / --full, read-only only)
+    if detail != "default" and _is_ro:
+        click.echo("\nTask type")
+        click.echo("  Read-only analysis")
+        click.echo("  Reason: The prompt asks a question, so file changes are blocked.")
+
     # Routing (--more / --full)
     if detail != "default" and "routing_category" in entry:
-        click.echo(f"\n  [routing] category: {entry['routing_category']}")
+        click.echo(f"\n  Routing   {entry['routing_category']}")
         if entry.get("routing_used_fallback"):
-            click.echo(f"  [routing] candidates: {entry.get('routing_candidate_count')} -> fallback (keyword routing)")
+            click.echo(f"    Candidates: {entry.get('routing_candidate_count')} → fallback (keyword routing)")
         elif entry.get("routing_selected_model"):
             _prov = entry.get("routing_selected_provider")
             _prov_suffix = f" ({_prov})" if _prov else ""
-            click.echo(f"  [routing] candidates: {entry.get('routing_candidate_count')} -> {_model_label(entry['routing_selected_model'])}{_prov_suffix}")
+            click.echo(f"    Candidates: {entry.get('routing_candidate_count')} → {_model_label(entry['routing_selected_model'])}{_prov_suffix}")
 
     # Execution profile (--more / --full)
     if detail != "default" and entry.get("execution_profile"):
         _profile = entry["execution_profile"]
         _reason = entry.get("execution_profile_reason", "")
-        _profile_line = f"[profile] {_profile}"
+        click.echo(f"  Profile: {_profile}")
         if _reason:
-            _profile_line += f" - {_reason}"
-        click.echo(f"  {_profile_line}")
+            click.echo(f"    Reason: {_reason}")
 
     # Verification plan (--more / --full)
     if detail != "default" and "verification_plan" in entry:
         for _vc in entry["verification_plan"]:
             _argv_str = " ".join(_vc["argv"])
-            click.echo(f"  [verification] {_vc['name']} {_vc['safety']} {_vc['source']} {_argv_str}")
+            click.echo("  Verification")
+            click.echo(f"    Name:    {_vc['name']}")
+            click.echo(f"    Safety:  {_vc['safety']}")
+            click.echo(f"    Source:  {_vc['source']}")
+            click.echo(f"    Command: {_argv_str}")
 
     # Files
     fc = entry.get("files_created", 0)
