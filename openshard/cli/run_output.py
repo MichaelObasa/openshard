@@ -1150,7 +1150,7 @@ def _print_dry_run(files: list[ChangedFile]) -> None:
         click.echo("")
 
 
-def _render_tier_dispatch_block(tdr: Any, detail: str) -> list[str]:
+def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None = None) -> list[str]:
     """Render tier dispatch receipt as lines. tdr can be dict or SimpleNamespace."""
     if detail not in ("more", "full"):
         return []
@@ -1184,6 +1184,9 @@ def _render_tier_dispatch_block(tdr: Any, detail: str) -> list[str]:
         lines.append("  Dispatch")
         lines.append(f"    Applied: {'yes' if applied else 'no'}")
         lines.append(f"    Source:  {source_label}")
+        lines.append(f"    Work model: {_lbl(e_model)}")
+        if initial_model:
+            lines.append(f"    Initial candidate: {_model_label(initial_model)}")
         if fb:
             lines.append("    Fallback: yes")
         if warns:
@@ -1207,6 +1210,9 @@ def _render_tier_dispatch_block(tdr: Any, detail: str) -> list[str]:
         lines.append("  Dispatch")
         lines.append(f"    Applied: {'yes' if applied else 'no'}")
         lines.append(f"    Source:  {source_label}")
+        lines.append(f"    Work model: {_lbl(e_model)}")
+        if initial_model:
+            lines.append(f"    Initial candidate: {_model_label(initial_model)}")
         lines.append(f"    Fallback: {'yes' if fb else 'no'}")
         lines.append(f"    Warnings: {len(warns)}")
         if reason:

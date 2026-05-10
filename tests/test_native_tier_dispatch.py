@@ -344,6 +344,42 @@ class TestRenderingMore(unittest.TestCase):
         self.assertIn("Applied: no", joined)
         self.assertIn("Fallback: yes", joined)
 
+    def test_more_shows_work_model(self):
+        tdr = {
+            "enabled": True, "applied": True, "tier_source": "category_fallback",
+            "planner_tier": "frontier-reasoning-model", "planner_model": MODEL_STRONG,
+            "executor_tier": "balanced-coding-model", "executor_model": MODEL_MAIN,
+            "validator_tier": "independent-validator-model", "validator_model": MODEL_STRONG,
+            "fallback_used": False, "fallback_reason": "", "warnings": [],
+        }
+        lines = self._render(tdr, "more")
+        joined = "\n".join(lines)
+        self.assertIn("Work model:", joined)
+
+    def test_more_shows_initial_candidate_when_provided(self):
+        tdr = {
+            "enabled": True, "applied": True, "tier_source": "category_fallback",
+            "planner_tier": "frontier-reasoning-model", "planner_model": MODEL_STRONG,
+            "executor_tier": "balanced-coding-model", "executor_model": MODEL_MAIN,
+            "validator_tier": "independent-validator-model", "validator_model": MODEL_STRONG,
+            "fallback_used": False, "fallback_reason": "", "warnings": [],
+        }
+        lines = self._render(tdr, "more", initial_model="openrouter/deepseek-v4")
+        joined = "\n".join(lines)
+        self.assertIn("Initial candidate:", joined)
+
+    def test_more_no_initial_candidate_without_arg(self):
+        tdr = {
+            "enabled": True, "applied": True, "tier_source": "category_fallback",
+            "planner_tier": "frontier-reasoning-model", "planner_model": MODEL_STRONG,
+            "executor_tier": "balanced-coding-model", "executor_model": MODEL_MAIN,
+            "validator_tier": "independent-validator-model", "validator_model": MODEL_STRONG,
+            "fallback_used": False, "fallback_reason": "", "warnings": [],
+        }
+        lines = self._render(tdr, "more")
+        joined = "\n".join(lines)
+        self.assertNotIn("Initial candidate:", joined)
+
 
 class TestRenderingFull(unittest.TestCase):
     def setUp(self):
@@ -388,6 +424,42 @@ class TestRenderingFull(unittest.TestCase):
         }
         lines = self._render(tdr, "full")
         self.assertTrue(any("planner fallback" in ln for ln in lines))
+
+    def test_full_shows_work_model(self):
+        tdr = {
+            "enabled": True, "applied": True, "tier_source": "candidate_scoring",
+            "planner_tier": "frontier-reasoning-model", "planner_model": MODEL_STRONG,
+            "executor_tier": "balanced-coding-model", "executor_model": MODEL_MAIN,
+            "validator_tier": "independent-validator-model", "validator_model": MODEL_STRONG,
+            "fallback_used": False, "fallback_reason": "", "warnings": [],
+        }
+        lines = self._render(tdr, "full")
+        joined = "\n".join(lines)
+        self.assertIn("Work model:", joined)
+
+    def test_full_shows_initial_candidate_when_provided(self):
+        tdr = {
+            "enabled": True, "applied": True, "tier_source": "candidate_scoring",
+            "planner_tier": "frontier-reasoning-model", "planner_model": MODEL_STRONG,
+            "executor_tier": "balanced-coding-model", "executor_model": MODEL_MAIN,
+            "validator_tier": "independent-validator-model", "validator_model": MODEL_STRONG,
+            "fallback_used": False, "fallback_reason": "", "warnings": [],
+        }
+        lines = self._render(tdr, "full", initial_model="openrouter/deepseek-v4")
+        joined = "\n".join(lines)
+        self.assertIn("Initial candidate:", joined)
+
+    def test_full_no_initial_candidate_without_arg(self):
+        tdr = {
+            "enabled": True, "applied": True, "tier_source": "candidate_scoring",
+            "planner_tier": "frontier-reasoning-model", "planner_model": MODEL_STRONG,
+            "executor_tier": "balanced-coding-model", "executor_model": MODEL_MAIN,
+            "validator_tier": "independent-validator-model", "validator_model": MODEL_STRONG,
+            "fallback_used": False, "fallback_reason": "", "warnings": [],
+        }
+        lines = self._render(tdr, "full")
+        joined = "\n".join(lines)
+        self.assertNotIn("Initial candidate:", joined)
 
 
 class TestRenderingDefault(unittest.TestCase):

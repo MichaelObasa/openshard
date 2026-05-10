@@ -686,13 +686,17 @@ def _render_log_entry(entry: dict, detail: str) -> None:
 
     # Routing (--more / --full)
     if detail != "default" and "routing_category" in entry:
-        click.echo(f"\n  Routing   {entry['routing_category']}")
+        click.echo("\n  Routing")
+        click.echo(f"    Category: {entry['routing_category']}")
         if entry.get("routing_used_fallback"):
-            click.echo(f"    Candidates: {entry.get('routing_candidate_count')} → fallback (keyword routing)")
+            click.echo("    Initial candidate: fallback (keyword routing)")
         elif entry.get("routing_selected_model"):
             _prov = entry.get("routing_selected_provider")
             _prov_suffix = f" ({_prov})" if _prov else ""
-            click.echo(f"    Candidates: {entry.get('routing_candidate_count')} → {_model_label(entry['routing_selected_model'])}{_prov_suffix}")
+            click.echo(f"    Initial candidate: {_model_label(entry['routing_selected_model'])}{_prov_suffix}")
+        _tdr_check = entry.get("tier_dispatch_receipt")
+        if _tdr_check and _tdr_check.get("enabled") and _tdr_check.get("applied"):
+            click.echo("    Note: tier dispatch changed the work model shown below.")
 
     # Execution profile (--more / --full)
     if detail != "default" and entry.get("execution_profile"):
@@ -774,7 +778,8 @@ def _render_log_entry(entry: dict, detail: str) -> None:
         _tdr = entry.get("tier_dispatch_receipt")
         if _tdr and _tdr.get("enabled"):
             from openshard.cli.run_output import _render_tier_dispatch_block
-            for line in _render_tier_dispatch_block(_tdr, detail):
+            _init_model = entry.get("routing_selected_model")
+            for line in _render_tier_dispatch_block(_tdr, detail, initial_model=_init_model):
                 click.echo(line)
 
     duration = entry.get("duration_seconds", 0)
