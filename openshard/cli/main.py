@@ -859,6 +859,117 @@ def feedback(rating: str, note: str) -> None:
     click.echo(f"Feedback recorded: {rating.lower()}")
 
 
+def _demo_default() -> None:
+    click.echo("OpenShard demo")
+    click.echo("")
+    click.echo("This walkthrough shows the main steps OpenShard can follow during a task.")
+    click.echo("")
+    click.echo("1. Understand the task")
+    click.echo("   OpenShard reads your task prompt and decides whether it involves")
+    click.echo("   reading (questions, explanations) or writing (code changes, new files).")
+    click.echo("")
+    click.echo("2. Choose a workflow")
+    click.echo("   A workflow is selected — direct (single pass), staged (plan then code),")
+    click.echo("   or native (agent loop). You can override this with --workflow.")
+    click.echo("")
+    click.echo("3. Choose models")
+    click.echo("   One or more models are chosen based on task complexity and your config.")
+    click.echo("   The planning step typically uses a strong reasoning model.")
+    click.echo("")
+    click.echo("4. Protect files")
+    click.echo("   Read-only tasks (questions, explain, summarise) never write files.")
+    click.echo("   Write-guarded paths block accidental changes outside the project root.")
+    click.echo("")
+    click.echo("5. Record the run")
+    click.echo("   Each run is appended to .openshard/runs.jsonl with timing, model,")
+    click.echo("   cost, and file counts so you can review history later.")
+    click.echo("")
+    click.echo("6. Capture feedback")
+    click.echo("   After a run you can rate it with 'openshard feedback --rating good'.")
+    click.echo("   Ratings are stored alongside the run entry.")
+
+
+def _demo_readonly() -> None:
+    click.echo("Scenario: readonly")
+    click.echo("")
+    click.echo("Read-only tasks are prompts that ask a question or request an explanation")
+    click.echo("without asking OpenShard to change anything — for example:")
+    click.echo("")
+    click.echo('  openshard run "what does openshard/cli/main.py do?"')
+    click.echo('  openshard run "explain the pipeline execution flow"')
+    click.echo("")
+    click.echo("OpenShard detects these tasks automatically and enforces two protections:")
+    click.echo("")
+    click.echo("  - File writes are blocked. Even if a model returns file changes, they")
+    click.echo("    are discarded and a notice is shown.")
+    click.echo("  - The model receives an explicit instruction not to return file changes.")
+    click.echo("")
+    click.echo("File protection behaviour")
+    click.echo("  The write guard is enforced regardless of the --write flag.")
+    click.echo("  This means a read-only task cannot accidentally write files even if")
+    click.echo("  you pass --write on the command line.")
+
+
+def _demo_tier_dispatch() -> None:
+    click.echo("Scenario: tier-dispatch")
+    click.echo("")
+    click.echo("Tier dispatch is a model selection strategy where the routing stage")
+    click.echo("assigns each part of a task to a tier (fast, standard, capable),")
+    click.echo("then resolves those tier names to actual model IDs before execution.")
+    click.echo("")
+    click.echo("Model plan / dispatch")
+    click.echo("  Planning usually uses the strongest reasoning model because it decides")
+    click.echo("  how the task should be handled.")
+    click.echo("  A work model is then dispatched for the main task. For standard tasks")
+    click.echo("  this can be a balanced model like GLM-5.1; for harder tasks it can be")
+    click.echo("  a stronger model.")
+    click.echo("")
+    click.echo("  To enable tier dispatch on a run:")
+    click.echo('    openshard run "your task" --experimental-tier-dispatch')
+    click.echo("")
+    click.echo("  The dispatch decision is recorded in the run log and visible at:")
+    click.echo("    openshard last --more")
+
+
+def _demo_feedback() -> None:
+    click.echo("Scenario: feedback")
+    click.echo("")
+    click.echo("After each run you can attach a developer rating to the run entry.")
+    click.echo("This lets you track which tasks and models produced good results.")
+    click.echo("")
+    click.echo("Developer feedback capture")
+    click.echo("  Rate the most recent run with one of three values:")
+    click.echo("")
+    click.echo("    openshard feedback --rating good")
+    click.echo("    openshard feedback --rating mixed")
+    click.echo("    openshard feedback --rating bad")
+    click.echo("")
+    click.echo("  Add an optional note:")
+    click.echo('    openshard feedback --rating mixed --note "output was close but missed edge case"')
+    click.echo("")
+    click.echo("  Feedback is stored in .openshard/runs.jsonl alongside the run entry.")
+    click.echo("  You can view it with 'openshard last --more'.")
+
+
+@cli.command()
+@click.option(
+    "--scenario",
+    type=click.Choice(["readonly", "tier-dispatch", "feedback"], case_sensitive=False),
+    default=None,
+    help="Show a focused walkthrough for a specific scenario.",
+)
+def demo(scenario: str | None) -> None:
+    """Show a walkthrough of OpenShard concepts and common scenarios."""
+    if scenario is None:
+        _demo_default()
+    elif scenario.lower() == "readonly":
+        _demo_readonly()
+    elif scenario.lower() == "tier-dispatch":
+        _demo_tier_dispatch()
+    else:
+        _demo_feedback()
+
+
 @cli.group(invoke_without_command=True)
 @click.pass_context
 def eval(ctx: click.Context):
