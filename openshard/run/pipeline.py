@@ -46,7 +46,7 @@ from openshard.history.metrics import load_runs
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
 from openshard.providers.manager import ProviderManager
 from openshard.providers.openrouter import MODEL_PRICING, compute_cost
-from openshard.routing.engine import ESCALATION_CHAIN, RoutingDecision, route, is_readonly_task
+from openshard.routing.engine import ESCALATION_CHAIN, MODEL_STRONG, RoutingDecision, route, is_readonly_task
 from openshard.routing.profiles import (
     ProfileDecision,
     ProfileHistorySummary,
@@ -160,6 +160,7 @@ class RunPipeline:
         detail: str,
         native_backend: str | None = None,
         experimental_deepagents_run: bool = False,
+        experimental_tier_dispatch: bool = False,
         native_loop: str | None = None,
         model_policy: str | None = None,
     ) -> None:
@@ -179,6 +180,7 @@ class RunPipeline:
         self._detail = detail
         self._native_backend = native_backend or "builtin"
         self._experimental_deepagents_run = experimental_deepagents_run
+        self._experimental_tier_dispatch = experimental_tier_dispatch
         self._native_loop = native_loop
         self._model_policy = model_policy
 
@@ -623,6 +625,56 @@ class RunPipeline:
             if _routing_msg:
                 click.echo(_routing_msg)
 
+        # --- Experimental tier dispatch (non-native, non-opencode only) ----------
+        _tier_dispatch_receipt = None
+        _dispatch_planner_model: str | None = None
+        _dispatch_executor_model: str | None = None
+
+        _can_dispatch = (
+            self._experimental_tier_dispatch
+            and not opencode_mode
+            and effective_executor != "native"
+        )
+        if _can_dispatch:
+            from openshard.native.dispatch import resolve_tier, resolve_tier_for_category
+            from openshard.native.context import NativeTierDispatchReceipt
+
+            _cat = routing_decision.category if routing_decision else None
+            _p_tier = "frontier-reasoning-model"
+            _p_model, _p_fb, _p_reason = resolve_tier(_p_tier)
+            _e_model, _e_tier, _e_fb, _e_reason = resolve_tier_for_category(_cat)
+            _v_tier = "independent-validator-model"
+            _v_model, _v_fb, _v_reason = resolve_tier(_v_tier)
+
+            _any_fb = _p_fb or _e_fb or _v_fb
+            _warns = [r for r in [
+                (f"planner fallback: {_p_reason}" if _p_fb and _p_reason else ""),
+                (f"executor fallback: {_e_reason}" if _e_fb and _e_reason else ""),
+                (f"validator fallback: {_v_reason}" if _v_fb and _v_reason else ""),
+            ] if r]
+            _first_reason = next((r for r in (_p_reason, _e_reason, _v_reason) if r), "")
+
+            _applied = not dry_run
+            _not_applied_reason = "dry-run" if dry_run else ""
+
+            _tier_dispatch_receipt = NativeTierDispatchReceipt(
+                enabled=True,
+                applied=_applied,
+                tier_source="category_fallback",
+                planner_tier=_p_tier,
+                planner_model=_p_model,
+                executor_tier=_e_tier or "",
+                executor_model=_e_model,
+                validator_tier=_v_tier,
+                validator_model=_v_model,
+                fallback_used=_any_fb,
+                fallback_reason=_not_applied_reason or _first_reason,
+                warnings=_warns,
+            )
+            if _applied:
+                _dispatch_planner_model = _p_model
+                _dispatch_executor_model = _e_model
+
         # --- --plan gate: show plan and prompt for approval before executing --------
         _impl_task = task          # may be augmented with a plan
         _plan_already_done = False
@@ -642,7 +694,11 @@ class RunPipeline:
             if not opencode_mode:
                 spinner.start("Planning - generating implementation plan")
                 try:
-                    _plan_text, _ = run_planning_stage(generator.client, task, skills_context=_skills_ctx)
+                    _plan_text, _ = run_planning_stage(
+                        generator.client, task,
+                        skills_context=_skills_ctx,
+                        model=_dispatch_planner_model or MODEL_STRONG,
+                    )
                     _impl_task = (
                         f"Task: {task}\n\nImplementation plan:\n{_plan_text}"
                         "\n\nExecute the task following the plan above."
@@ -673,14 +729,19 @@ class RunPipeline:
                         continue
                     spinner.start("Planning - mapping out implementation approach")
                     try:
-                        _plan_text, _plan_usage = run_planning_stage(generator.client, task, skills_context=_skills_ctx)
+                        _plan_model = _dispatch_planner_model or MODEL_STRONG
+                        _plan_text, _plan_usage = run_planning_stage(
+                            generator.client, task,
+                            skills_context=_skills_ctx,
+                            model=_plan_model,
+                        )
                         _impl_task = (
                             f"Task: {task}\n\nImplementation plan:\n{_plan_text}"
                             "\n\nExecute the task following the plan above."
                         )
                         stage_runs.append(StageRun(
                             stage=_stage,
-                            model=route_stage(_stage),
+                            model=_plan_model,
                             duration=time.time() - _stage_t0,
                             cost=_plan_usage.estimated_cost if _plan_usage else None,
                             summary="Implementation plan produced",
@@ -695,7 +756,7 @@ class RunPipeline:
                 elif _stage.stage_type == "implementation":
                     if dry_run:
                         continue
-                    _stage_model = _routed_model or route_stage(_stage)
+                    _stage_model = _dispatch_executor_model or _routed_model or route_stage(_stage)
                     spinner.start(_exec_message(
                         _stage_model,
                         routing_decision.rationale if routing_decision else "",
@@ -724,8 +785,9 @@ class RunPipeline:
 
         # --- Single-stage execution (simple tasks, opencode, stages not triggered) -
         if exec_result is None:
+            _effective_model = _dispatch_executor_model or _routed_model
             _single_msg = (
-                _exec_message(_routed_model, routing_decision.rationale)
+                _exec_message(_effective_model, routing_decision.rationale)
                 if routing_decision is not None
                 else ("Executing - running with OpenCode" if opencode_mode else "Executing - running task")
             )
@@ -734,7 +796,7 @@ class RunPipeline:
                 if opencode_mode:
                     exec_result = generator.generate(task, workspace=workspace)
                 else:
-                    exec_result = generator.generate(task, model=_routed_model, repo_facts=_repo_facts, skills_context=_skills_ctx)
+                    exec_result = generator.generate(task, model=_effective_model, repo_facts=_repo_facts, skills_context=_skills_ctx)
             except RuntimeError as exc:
                 raise click.ClickException(str(exc))
             except ProviderAuthError:
@@ -827,6 +889,9 @@ class RunPipeline:
             else:
                 _print_dry_run(exec_result.files)
             _print_summary(start, generator, retry_triggered, final_files, usage=usage, detail=detail, model=_routed_model, stage_runs=stage_runs)
+            _dr_extra: dict | None = None
+            if _tier_dispatch_receipt is not None:
+                _dr_extra = {"tier_dispatch_receipt": asdict(_tier_dispatch_receipt)}
             try:
                 _log_run(start, task, generator, retry_triggered, final_files,
                          verification_attempted=False, verification_passed=None,
@@ -836,7 +901,8 @@ class RunPipeline:
                          _scored=_scored, repo_facts=_repo_facts,
                          matched_skills=_matched_skills,
                          profile_decision=_profile_decision,
-                         verification_plan=_verification_plan)
+                         verification_plan=_verification_plan,
+                         extra_metadata=_dr_extra)
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
             result_obj.exit_code = 0
@@ -1015,6 +1081,10 @@ class RunPipeline:
                 _print_summary(start, generator, retry_triggered, final_files,
                                usage=usage, retry_usage=retry_usage, detail=detail, model=_routed_model, stage_runs=stage_runs)
                 try:
+                    _vf_extra: dict | None = None
+                    if _tier_dispatch_receipt is not None:
+                        from dataclasses import asdict as _asdict
+                        _vf_extra = {"tier_dispatch_receipt": _asdict(_tier_dispatch_receipt)}
                     _log_run(start, task, generator, retry_triggered, final_files,
                              verification_attempted=True, verification_passed=False,
                              workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
@@ -1023,7 +1093,8 @@ class RunPipeline:
                              _scored=_scored, repo_facts=_repo_facts,
                              matched_skills=_matched_skills,
                              profile_decision=_profile_decision,
-                             verification_plan=_verification_plan)
+                             verification_plan=_verification_plan,
+                             extra_metadata=_vf_extra)
                 except Exception as exc:
                     click.echo(f"  [log] warning: {exc}")
                 result_obj.exit_code = code
@@ -1137,10 +1208,23 @@ class RunPipeline:
                 model_policy_receipt=_native_meta.model_policy_receipt,
                 run_trust_score=_native_meta.run_trust_score,
             )
+            if self._experimental_tier_dispatch:
+                from openshard.native.context import build_native_tier_dispatch_receipt
+                _native_meta.tier_dispatch_receipt = build_native_tier_dispatch_receipt(
+                    routing_receipt=_native_meta.routing_receipt,
+                    model_candidate_scoring=_native_meta.model_candidate_scoring,
+                    experimental_tier_dispatch=True,
+                    applied=False,
+                    not_applied_reason="native tier dispatch is recorded only in v1",
+                )
+                _tier_dispatch_receipt = _native_meta.tier_dispatch_receipt
         if _native_meta is not None and detail != "default":
             from openshard.cli.run_output import _print_native_demo_block, _print_native_summary
             _print_native_demo_block(_native_meta, detail=detail)
             _print_native_summary(_native_meta, detail=detail)
+        if _native_meta is None and _tier_dispatch_receipt is not None and detail != "default":
+            from openshard.cli.run_output import _print_tier_dispatch_block
+            _print_tier_dispatch_block(_tier_dispatch_receipt, detail)
         _extra_metadata: dict | None = None
         if _native_meta is not None:
             _extra_metadata = {
@@ -1325,7 +1409,16 @@ class RunPipeline:
                     if _native_meta is not None and _native_meta.routing_receipt is not None
                     else None
                 ),
+                "tier_dispatch_receipt": (
+                    asdict(_native_meta.tier_dispatch_receipt)
+                    if _native_meta is not None and _native_meta.tier_dispatch_receipt is not None
+                    else None
+                ),
             }
+        # For non-native staged/direct runs, save tier_dispatch_receipt at top level
+        if _native_meta is None and _tier_dispatch_receipt is not None:
+            from dataclasses import asdict as _asdict
+            _extra_metadata = {"tier_dispatch_receipt": _asdict(_tier_dispatch_receipt)}
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
                      verification_attempted=(write and verify),
