@@ -313,10 +313,11 @@ class TestRenderingMore(unittest.TestCase):
             "warnings": [],
         }
         lines = self._render(tdr, "more")
-        self.assertTrue(len(lines) >= 1)
-        first = lines[0]
-        self.assertIn("applied=yes", first)
-        self.assertIn("source=category_fallback", first)
+        joined = "\n".join(lines)
+        self.assertIn("Model plan", joined)
+        self.assertIn("Planning:", joined)
+        self.assertIn("Applied: yes", joined)
+        self.assertIn("Source:  category fallback", joined)
 
     def test_no_full_block_at_more(self):
         tdr = {
@@ -328,6 +329,7 @@ class TestRenderingMore(unittest.TestCase):
         }
         lines = self._render(tdr, "more")
         self.assertFalse(any("[tier dispatch]" in ln for ln in lines))
+        self.assertFalse(any("Tier:" in ln for ln in lines))
 
     def test_fallback_shown_in_compact(self):
         tdr = {
@@ -338,8 +340,9 @@ class TestRenderingMore(unittest.TestCase):
             "fallback_used": True, "fallback_reason": "dry-run", "warnings": [],
         }
         lines = self._render(tdr, "more")
-        self.assertIn("[fallback]", lines[0])
-        self.assertIn("applied=no", lines[0])
+        joined = "\n".join(lines)
+        self.assertIn("Applied: no", joined)
+        self.assertIn("Fallback: yes", joined)
 
 
 class TestRenderingFull(unittest.TestCase):
@@ -356,10 +359,11 @@ class TestRenderingFull(unittest.TestCase):
             "fallback_used": False, "fallback_reason": "", "warnings": [],
         }
         lines = self._render(tdr, "full")
-        self.assertTrue(any("[tier dispatch]" in ln for ln in lines))
-        self.assertTrue(any("enabled:" in ln for ln in lines))
-        self.assertTrue(any("tier_source:" in ln for ln in lines))
-        self.assertTrue(any("planner_model:" in ln for ln in lines))
+        joined = "\n".join(lines)
+        self.assertIn("Model plan", joined)
+        self.assertIn("Planning:", joined)
+        self.assertTrue(any("Tier:" in ln for ln in lines))
+        self.assertIn("Dispatch", joined)
 
     def test_fallback_reason_shown_in_full(self):
         tdr = {
@@ -371,7 +375,7 @@ class TestRenderingFull(unittest.TestCase):
             "warnings": [],
         }
         lines = self._render(tdr, "full")
-        self.assertTrue(any("fallback_reason:" in ln for ln in lines))
+        self.assertTrue(any("Reason:" in ln for ln in lines))
 
     def test_warnings_listed_in_full(self):
         tdr = {
@@ -393,6 +397,12 @@ class TestRenderingDefault(unittest.TestCase):
 
     def test_disabled_returns_empty_at_default(self):
         tdr = {"enabled": False}
+        self.assertEqual(self._render(tdr, "default"), [])
+
+    def test_enabled_also_returns_empty_at_default(self):
+        tdr = {"enabled": True, "applied": True, "tier_source": "category_fallback",
+               "planner_model": MODEL_STRONG, "executor_model": MODEL_MAIN,
+               "validator_model": MODEL_STRONG, "fallback_used": False, "warnings": []}
         self.assertEqual(self._render(tdr, "default"), [])
 
 
@@ -428,7 +438,7 @@ class TestLastNonNativeRender(unittest.TestCase):
         tdr = entry["tier_dispatch_receipt"]
         lines = _render_tier_dispatch_block(tdr, "more")
         self.assertTrue(len(lines) >= 1)
-        self.assertIn("applied=yes", lines[0])
+        self.assertTrue(any("Applied: yes" in ln for ln in lines))
 
     def test_disabled_receipt_not_rendered(self):
         from openshard.cli.run_output import _render_tier_dispatch_block
