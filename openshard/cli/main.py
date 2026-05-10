@@ -821,6 +821,21 @@ def last(more: bool, full: bool):
     _render_log_entry(entries[-1], detail)
 
 
+def _load_run_entries(log_path: Path) -> list[dict]:
+    if not log_path.exists():
+        return []
+    entries: list[dict] = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return entries
+
+
 @cli.command()
 @click.option(
     "--rating",
@@ -857,6 +872,68 @@ def feedback(rating: str, note: str) -> None:
         for entry in entries:
             fh.write(json.dumps(entry) + "\n")
     click.echo(f"Feedback recorded: {rating.lower()}")
+
+
+@cli.command("feedback-stats")
+def feedback_stats() -> None:
+    """Show local developer feedback stats."""
+    log_path = Path.cwd() / _LOG_PATH
+    entries = _load_run_entries(log_path)
+
+    if not log_path.exists():
+        click.echo("No run history found. Run a task first with 'openshard run'.")
+        return
+
+    if not entries:
+        click.echo("No runs recorded yet.")
+        return
+
+    total = len(entries)
+    feedback_entries = [e for e in entries if isinstance(e.get("feedback"), dict)]
+    feedback_count = len(feedback_entries)
+
+    if feedback_count == 0:
+        click.echo("Developer feedback\n")
+        click.echo(f"Runs: {total}")
+        click.echo("Feedback: 0 recorded")
+        click.echo("\nTip: add feedback with 'openshard feedback --rating good'")
+        return
+
+    counts = {"good": 0, "mixed": 0, "bad": 0}
+    by_model: dict[str, dict[str, int]] = {}
+    for entry in feedback_entries:
+        rating = entry["feedback"].get("rating", "")
+        if rating in counts:
+            counts[rating] += 1
+        raw_model = entry.get("execution_model") or entry.get("model") or "unknown"
+        label = _model_label(raw_model)
+        bucket = by_model.setdefault(label, {"good": 0, "mixed": 0, "bad": 0})
+        if rating in bucket:
+            bucket[rating] += 1
+
+    percent = round(feedback_count / total * 100)
+
+    click.echo("Developer feedback\n")
+    click.echo(f"Runs: {total}")
+    click.echo(f"Feedback: {feedback_count} recorded ({percent}%)")
+    click.echo(f"Good:  {counts['good']}")
+    click.echo(f"Mixed: {counts['mixed']}")
+    click.echo(f"Bad:   {counts['bad']}")
+
+    click.echo("\nBy model")
+    for lbl, bucket in by_model.items():
+        click.echo(f"  {lbl}: good={bucket['good']} mixed={bucket['mixed']} bad={bucket['bad']}")
+
+    notes = [
+        (e["feedback"].get("rating", ""), e["feedback"].get("note", ""))
+        for e in reversed(feedback_entries)
+        if e["feedback"].get("note", "").strip()
+    ][:5]
+
+    if notes:
+        click.echo("\nRecent notes")
+        for rating, note in notes:
+            click.echo(f"  {rating} — {note}")
 
 
 def _demo_default() -> None:
