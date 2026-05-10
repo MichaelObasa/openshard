@@ -45,8 +45,8 @@ class TestLastRoutingDisplay(unittest.TestCase):
             "routing_used_fallback": False,
         }
         out = _render(entry)
-        self.assertIn("[routing] category: standard", out)
-        self.assertIn("candidates: 5", out)
+        self.assertIn("Routing   standard", out)
+        self.assertIn("Candidates: 5", out)
         self.assertIn(_model_label("openrouter/fast-model"), out)
         self.assertIn("openrouter", out)
 
@@ -60,7 +60,7 @@ class TestLastRoutingDisplay(unittest.TestCase):
             "routing_used_fallback": True,
         }
         out = _render(entry)
-        self.assertIn("[routing] category: visual", out)
+        self.assertIn("Routing   visual", out)
         self.assertIn("fallback (keyword routing)", out)
 
     def test_routing_section_absent_without_fields(self):
@@ -78,7 +78,8 @@ class TestLastProfileDisplay(unittest.TestCase):
             "execution_profile_reason": "security category",
         }
         out = _render(entry, detail="more")
-        self.assertIn("[profile] native_deep - security category", out)
+        self.assertIn("Profile: native_deep", out)
+        self.assertIn("Reason: security category", out)
 
     def test_full_shows_profile_when_present(self):
         entry = {
@@ -87,7 +88,8 @@ class TestLastProfileDisplay(unittest.TestCase):
             "execution_profile_reason": "simple/safe task",
         }
         out = _render(entry, detail="full")
-        self.assertIn("[profile] native_light - simple/safe task", out)
+        self.assertIn("Profile: native_light", out)
+        self.assertIn("Reason: simple/safe task", out)
 
     def test_profile_without_reason(self):
         entry = {
@@ -95,17 +97,17 @@ class TestLastProfileDisplay(unittest.TestCase):
             "execution_profile": "native_swarm",
         }
         out = _render(entry, detail="more")
-        self.assertIn("[profile] native_swarm", out)
+        self.assertIn("Profile: native_swarm", out)
 
     def test_no_crash_on_entry_without_profile_fields(self):
         entry = {"task": "do a thing"}
         out = _render(entry, detail="more")
-        self.assertNotIn("[profile]", out)
+        self.assertNotIn("Profile:", out)
 
     def test_no_crash_on_entry_without_profile_fields_full(self):
         entry = {"task": "do a thing"}
         out = _render(entry, detail="full")
-        self.assertNotIn("[profile]", out)
+        self.assertNotIn("Profile:", out)
 
     def test_default_detail_does_not_show_profile(self):
         entry = {
@@ -114,7 +116,7 @@ class TestLastProfileDisplay(unittest.TestCase):
             "execution_profile_reason": "security category",
         }
         out = _render(entry, detail="default")
-        self.assertNotIn("[profile]", out)
+        self.assertNotIn("Profile:", out)
 
 
 class TestLastVerificationDisplay(unittest.TestCase):
@@ -135,13 +137,13 @@ class TestLastVerificationDisplay(unittest.TestCase):
 
     def test_more_shows_verification_plan(self):
         out = _render(self._PLAN_ENTRY, detail="more")
-        self.assertIn("[verification]", out)
+        self.assertIn("Verification", out)
         self.assertIn("safe", out)
         self.assertIn("detected", out)
 
     def test_full_shows_verification_plan(self):
         out = _render(self._PLAN_ENTRY, detail="full")
-        self.assertIn("[verification]", out)
+        self.assertIn("Verification", out)
         self.assertIn("safe", out)
         self.assertIn("detected", out)
 
@@ -151,12 +153,12 @@ class TestLastVerificationDisplay(unittest.TestCase):
 
     def test_default_detail_hides_verification_plan(self):
         out = _render(self._PLAN_ENTRY, detail="default")
-        self.assertNotIn("[verification]", out)
+        self.assertNotIn("Verification", out)
 
     def test_old_entry_without_plan_no_crash(self):
         entry = {"task": "old run"}
         out = _render(entry, detail="more")
-        self.assertNotIn("[verification]", out)
+        self.assertNotIn("Verification", out)
 
     def test_config_source_shown(self):
         entry = {
@@ -175,6 +177,34 @@ class TestLastVerificationDisplay(unittest.TestCase):
         out = _render(entry, detail="more")
         self.assertIn("config", out)
         self.assertIn("pytest", out)
+
+
+class TestLastReadonlyTaskTypeBlock(unittest.TestCase):
+
+    _RO_ENTRY = {
+        "task": "explain the routing engine",
+        "routing_rationale": "read-only analysis",
+    }
+
+    def test_more_shows_task_type_for_readonly(self):
+        out = _render(self._RO_ENTRY, detail="more")
+        self.assertIn("Task type", out)
+        self.assertIn("Read-only analysis", out)
+        self.assertIn("Reason:", out)
+
+    def test_full_shows_task_type_for_readonly(self):
+        out = _render(self._RO_ENTRY, detail="full")
+        self.assertIn("Task type", out)
+        self.assertIn("Read-only analysis", out)
+
+    def test_default_does_not_show_task_type(self):
+        out = _render(self._RO_ENTRY, detail="default")
+        self.assertNotIn("Task type", out)
+
+    def test_write_task_does_not_show_task_type(self):
+        entry = {"task": "add a helper function", "routing_rationale": "standard feature implementation"}
+        out = _render(entry, detail="more")
+        self.assertNotIn("Task type", out)
 
 
 def _native_entry() -> dict:

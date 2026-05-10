@@ -230,8 +230,8 @@ class TestReadonlyPipelineIntegration(unittest.TestCase):
             result=_fake_result_with_files(),
         )
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertIn("[info] read-only task", result.output)
-        self.assertIn("ignored", result.output)
+        self.assertIn("Read-only task", result.output)
+        self.assertIn("discarded", result.output)
 
     def test_dry_run_readonly_does_not_call_generate(self):
         """Dry-run must not call the provider even for a read-only task."""
@@ -266,7 +266,7 @@ class TestReadonlyPipelineIntegration(unittest.TestCase):
             result=_fake_result_with_files(),
         )
         gen_mock.generate.assert_called_once()
-        self.assertNotIn("[info] read-only task", result.output)
+        self.assertNotIn("Read-only task", result.output)
 
 
 # ---------------------------------------------------------------------------

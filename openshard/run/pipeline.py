@@ -823,7 +823,7 @@ class RunPipeline:
         # model ignored the read-only instruction injected into the context.
         # For dry-run, exec_result.files is already [] so this block never fires.
         if _readonly_task and exec_result.files:
-            click.echo(f"\n[info] read-only task — {len(exec_result.files)} generated change(s) ignored")
+            click.echo(f"\nRead-only task — {len(exec_result.files)} generated change(s) discarded.")
             exec_result = ExecutionResult(
                 summary=exec_result.summary,
                 files=[],
