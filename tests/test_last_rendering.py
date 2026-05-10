@@ -2881,5 +2881,77 @@ class TestLastReadonlyLabels(unittest.TestCase):
         self.assertNotIn("Stages", out)
 
 
+class TestFeedbackRendering(unittest.TestCase):
+    """Tests for the Developer feedback section in _render_log_entry."""
+
+    def _entry(self, rating: str = "good", note: str = "") -> dict:
+        return {
+            "task": "do a thing",
+            "feedback": {
+                "schema_version": 1,
+                "rating": rating,
+                "note": note,
+                "created_at": "2025-01-01T00:00:00Z",
+            },
+        }
+
+    def test_more_shows_developer_feedback_header(self):
+        out = _render(self._entry(), detail="more")
+        self.assertIn("Developer feedback", out)
+
+    def test_full_shows_developer_feedback_header(self):
+        out = _render(self._entry(), detail="full")
+        self.assertIn("Developer feedback", out)
+
+    def test_default_hides_feedback(self):
+        out = _render(self._entry(), detail="default")
+        self.assertNotIn("Developer feedback", out)
+        self.assertNotIn("Rating:", out)
+
+    def test_rating_shown(self):
+        out = _render(self._entry(rating="good"), detail="more")
+        self.assertIn("Rating: good", out)
+
+    def test_note_shown_when_present(self):
+        out = _render(self._entry(note="GLM was good enough for this analysis"), detail="more")
+        self.assertIn("Note: GLM was good enough for this analysis", out)
+
+    def test_note_line_absent_when_empty(self):
+        out = _render(self._entry(note=""), detail="more")
+        self.assertNotIn("Note:", out)
+
+    def test_bad_rating_rendered(self):
+        out = _render(self._entry(rating="bad"), detail="more")
+        self.assertIn("Rating: bad", out)
+
+    def test_mixed_rating_rendered(self):
+        out = _render(self._entry(rating="mixed"), detail="full")
+        self.assertIn("Rating: mixed", out)
+
+    def test_old_entry_no_feedback_no_crash_more(self):
+        entry = {"task": "old run"}
+        out = _render(entry, detail="more")
+        self.assertNotIn("Developer feedback", out)
+
+    def test_old_entry_no_feedback_no_crash_full(self):
+        entry = {"task": "old run"}
+        out = _render(entry, detail="full")
+        self.assertNotIn("Developer feedback", out)
+
+    def test_old_entry_no_feedback_no_crash_default(self):
+        entry = {"task": "old run"}
+        out = _render(entry, detail="default")
+        self.assertNotIn("Developer feedback", out)
+
+    def test_feedback_rendered_after_notes(self):
+        entry = {
+            "task": "do a thing",
+            "notes": ["a pipeline note"],
+            "feedback": {"schema_version": 1, "rating": "good", "note": ""},
+        }
+        out = _render(entry, detail="more")
+        self.assertGreater(out.index("Developer feedback"), out.index("Notes"))
+
+
 if __name__ == "__main__":
     unittest.main()

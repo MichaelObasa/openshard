@@ -1,3 +1,4 @@
+import datetime
 import json
 import sys
 import tempfile
@@ -726,6 +727,15 @@ def _render_log_entry(entry: dict, detail: str) -> None:
             for note in _notes:
                 click.echo(f"  {note}")
 
+    # Developer feedback (--more / --full)
+    _feedback = entry.get("feedback")
+    if detail != "default" and _feedback:
+        click.echo("\nDeveloper feedback")
+        click.echo(f"  Rating: {_feedback.get('rating', '')}")
+        _fb_note = _feedback.get("note", "")
+        if _fb_note:
+            click.echo(f"  Note: {_fb_note}")
+
     # Token / model detail (--more / --full)
     if detail != "default":
         full_model = entry.get("execution_model", "")
@@ -800,6 +810,44 @@ def last(more: bool, full: bool):
         click.echo("No runs recorded yet.")
         return
     _render_log_entry(entries[-1], detail)
+
+
+@cli.command()
+@click.option(
+    "--rating",
+    type=click.Choice(["good", "bad", "mixed"], case_sensitive=False),
+    required=True,
+    help="Your rating for the most recent run.",
+)
+@click.option("--note", default="", help="Optional free-text note about this run.")
+def feedback(rating: str, note: str) -> None:
+    """Attach developer feedback to the most recent run."""
+    log_path = Path.cwd() / _LOG_PATH
+    if not log_path.exists():
+        click.echo("No run history found. Run a task first with 'openshard run'.")
+        return
+    entries: list[dict] = []
+    for line in log_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    if not entries:
+        click.echo("No runs recorded yet.")
+        return
+    entries[-1]["feedback"] = {
+        "schema_version": 1,
+        "rating": rating.lower(),
+        "note": note,
+        "created_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+    with log_path.open("w", encoding="utf-8") as fh:
+        for entry in entries:
+            fh.write(json.dumps(entry) + "\n")
+    click.echo(f"Feedback recorded: {rating.lower()}")
 
 
 @cli.group(invoke_without_command=True)
