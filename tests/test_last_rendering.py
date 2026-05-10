@@ -45,8 +45,8 @@ class TestLastRoutingDisplay(unittest.TestCase):
             "routing_used_fallback": False,
         }
         out = _render(entry)
-        self.assertIn("Routing   standard", out)
-        self.assertIn("Candidates: 5", out)
+        self.assertIn("Category: standard", out)
+        self.assertIn("Initial candidate:", out)
         self.assertIn(_model_label("openrouter/fast-model"), out)
         self.assertIn("openrouter", out)
 
@@ -60,13 +60,36 @@ class TestLastRoutingDisplay(unittest.TestCase):
             "routing_used_fallback": True,
         }
         out = _render(entry)
-        self.assertIn("Routing   visual", out)
-        self.assertIn("fallback (keyword routing)", out)
+        self.assertIn("Category: visual", out)
+        self.assertIn("Initial candidate: fallback (keyword routing)", out)
 
     def test_routing_section_absent_without_fields(self):
         entry = {"task": "do a thing"}
         out = _render(entry)
         self.assertNotIn("[routing]", out)
+
+    def test_routing_no_tier_dispatch_note_without_receipt(self):
+        entry = {
+            "task": "do a thing",
+            "routing_category": "standard",
+            "routing_selected_model": "openrouter/fast-model",
+            "routing_selected_provider": "openrouter",
+            "routing_used_fallback": False,
+        }
+        out = _render(entry)
+        self.assertNotIn("tier dispatch changed", out)
+
+    def test_routing_tier_dispatch_applied_shows_note(self):
+        entry = {
+            "task": "do a thing",
+            "routing_category": "standard",
+            "routing_selected_model": "openrouter/deepseek-v4",
+            "routing_selected_provider": "openrouter",
+            "routing_used_fallback": False,
+            "tier_dispatch_receipt": {"enabled": True, "applied": True},
+        }
+        out = _render(entry)
+        self.assertIn("Note: tier dispatch changed the work model shown below.", out)
 
 
 class TestLastProfileDisplay(unittest.TestCase):
