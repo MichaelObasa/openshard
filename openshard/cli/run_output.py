@@ -145,6 +145,13 @@ _RATIONALE_SHORT: dict[str, str] = {
 
 _ABBREV_WORDS = {"gpt", "llm", "ai", "api", "url", "id", "ui", "ml"}
 
+_PROFILE_LABEL: dict[str, str] = {
+    "native_light": "Standard run",
+    "native_deep": "Careful run",
+    "native_swarm": "Parallel run",
+    "native": "OSN run",
+}
+
 
 def _format_model_slug(raw: str) -> str:
     """Format an unknown model ID into a readable label.
@@ -180,6 +187,12 @@ def _format_model_slug(raw: str) -> str:
 
 def _model_label(model: str) -> str:
     return _MODEL_SHORT.get(model, _format_model_slug(model))
+
+
+def _profile_display_label(profile: str | None) -> str:
+    if not profile:
+        return "-"
+    return _PROFILE_LABEL.get(profile, profile.replace("_", " ").title())
 
 
 def _build_routing_line(
