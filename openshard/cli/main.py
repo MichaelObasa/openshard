@@ -704,7 +704,8 @@ def _render_log_entry(entry: dict, detail: str) -> None:
         _profile = entry["execution_profile"]
         _reason = entry.get("execution_profile_reason", "")
         click.echo("  Execution")
-        click.echo(f"    Mode: {_profile_display_label(_profile)}")
+        _is_ro = entry.get("routing_rationale") == "read-only analysis"
+        click.echo(f"    Mode: {_profile_display_label(_profile, is_readonly=_is_ro)}")
         if _reason:
             click.echo(f"    Reason: {_reason}")
 

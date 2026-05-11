@@ -294,6 +294,12 @@ class TestReadonlyOutputLabels(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("standard feature implementation", result.output)
 
+    def test_readonly_more_shows_ask_mode(self):
+        """--more output must show 'Mode: Ask' for read-only tasks."""
+        result, _ = _invoke("what does openshard/cli/main.py do?", extra_args=("--more",))
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("Mode: Ask", result.output)
+
     def test_dry_run_readonly_exits_cleanly(self):
         """Dry-run of a read-only task must complete without error."""
         result, _ = _invoke(

@@ -146,10 +146,10 @@ _RATIONALE_SHORT: dict[str, str] = {
 _ABBREV_WORDS = {"gpt", "llm", "ai", "api", "url", "id", "ui", "ml"}
 
 _PROFILE_LABEL: dict[str, str] = {
-    "native_light": "Standard run",
-    "native_deep": "Careful run",
-    "native_swarm": "Parallel run",
-    "native": "OSN run",
+    "native_light": "Run",
+    "native_deep": "Deep Run",
+    "native_swarm": "Team Run",
+    "native": "OSN Run",
 }
 
 
@@ -189,7 +189,9 @@ def _model_label(model: str) -> str:
     return _MODEL_SHORT.get(model, _format_model_slug(model))
 
 
-def _profile_display_label(profile: str | None) -> str:
+def _profile_display_label(profile: str | None, is_readonly: bool = False) -> str:
+    if is_readonly:
+        return "Ask"
     if not profile:
         return "-"
     return _PROFILE_LABEL.get(profile, profile.replace("_", " ").title())
