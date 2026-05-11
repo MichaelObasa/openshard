@@ -944,6 +944,83 @@ def feedback_stats() -> None:
             click.echo(f"  {rating} — {note}")
 
 
+def _export_run_entry(entry: dict, include_notes: bool = False) -> dict:
+    stage_runs = entry.get("stage_runs") or []
+    is_ro = entry.get("routing_rationale") == "read-only analysis"
+
+    def _stage_key(sr: dict) -> str | None:
+        return sr.get("stage_type") or sr.get("stage")
+
+    _ANALYSIS_STAGE_TYPES = {"analysis", "implementation", "execution", "work"}
+
+    planning_model = next(
+        (sr.get("model") for sr in stage_runs if _stage_key(sr) == "planning"), None
+    )
+    analysis_model = next(
+        (sr.get("model") for sr in stage_runs if _stage_key(sr) in _ANALYSIS_STAGE_TYPES), None
+    )
+
+    feedback = entry.get("feedback") or {}
+    tdr = entry.get("tier_dispatch_receipt") or {}
+
+    row: dict = {
+        "task":                      entry.get("task"),
+        "timestamp":                 entry.get("timestamp"),
+        "workflow":                  entry.get("workflow"),
+        "execution_model":           entry.get("execution_model"),
+        "planning_model":            planning_model,
+        "analysis_model":            analysis_model,
+        "routing_category":          entry.get("routing_category"),
+        "routing_rationale":         entry.get("routing_rationale"),
+        "routing_selected_model":    entry.get("routing_selected_model"),
+        "routing_selected_provider": entry.get("routing_selected_provider"),
+        "execution_profile":         entry.get("execution_profile"),
+        "execution_mode_label":      _profile_display_label(entry.get("execution_profile"), is_readonly=is_ro),
+        "verification_attempted":    entry.get("verification_attempted"),
+        "verification_passed":       entry.get("verification_passed"),
+        "duration_seconds":          entry.get("duration_seconds"),
+        "total_cost_usd":            entry.get("estimated_cost"),
+        "prompt_tokens":             entry.get("prompt_tokens"),
+        "completion_tokens":         entry.get("completion_tokens"),
+        "total_tokens":              entry.get("total_tokens"),
+        "files_created":             entry.get("files_created"),
+        "files_updated":             entry.get("files_updated"),
+        "files_deleted":             entry.get("files_deleted"),
+        "feedback_rating":           feedback.get("rating"),
+        "feedback_note":             feedback.get("note"),
+        "tier_dispatch_enabled":     tdr.get("enabled"),
+        "tier_dispatch_applied":     tdr.get("applied"),
+        "tier_dispatch_work_model":  tdr.get("executor_model"),
+        "summary":                   entry.get("summary"),
+    }
+    if include_notes:
+        row["notes"] = entry.get("notes") or []
+    return row
+
+
+@cli.command("export-runs")
+@click.option("--output", default=None, help="Write JSONL to this path instead of stdout.")
+@click.option("--limit", default=None, type=click.IntRange(min=1), help="Export most recent N entries.")
+@click.option("--with-notes", is_flag=True, default=False, help="Include run notes in export.")
+def export_runs(output: str | None, limit: int | None, with_notes: bool) -> None:
+    """Export run history as clean JSONL for eval analysis and review."""
+    log_path = Path.cwd() / _LOG_PATH
+    if not log_path.exists():
+        click.echo("No run history found. Run a task first with 'openshard run'.")
+        return
+    entries = _load_run_entries(log_path)
+    if not entries:
+        click.echo("No runs recorded yet.")
+        return
+    if limit is not None:
+        entries = entries[-limit:]
+    lines = "\n".join(json.dumps(_export_run_entry(e, include_notes=with_notes)) for e in entries)
+    if output:
+        Path(output).write_text(lines + "\n", encoding="utf-8")
+    else:
+        click.echo(lines)
+
+
 def _demo_default() -> None:
     click.echo("OpenShard demo")
     click.echo("")
