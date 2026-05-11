@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from openshard.cost.baseline import BASELINE_MODELS, format_baseline_line
+from openshard.cost.baseline import BASELINE_MODELS, compute_baseline_comparison, format_baseline_line
 
 
 class TestFormatBaselineLine(unittest.TestCase):
@@ -152,3 +152,34 @@ class TestBaselineModelsConstant(unittest.TestCase):
 
     def test_sonnet46_is_second(self):
         self.assertEqual(BASELINE_MODELS[1][1], "anthropic/claude-sonnet-4.6")
+
+
+class TestComputeBaselineComparison(unittest.TestCase):
+
+    def test_returns_none_when_tokens_zero(self):
+        self.assertIsNone(compute_baseline_comparison(0, 0, 0.01))
+
+    def test_returns_none_when_actual_cost_none(self):
+        self.assertIsNone(compute_baseline_comparison(1_000, 500, None))
+
+    def test_returns_correct_dict(self):
+        # anthropic/claude-sonnet-4.6: (3.00, 15.00) per million
+        # 500k prompt + 500k completion = 1.50 + 7.50 = $9.000
+        result = compute_baseline_comparison(500_000, 500_000, 1.0)
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result["actual_cost_usd"], 1.0)
+        self.assertAlmostEqual(result["frontier_baseline_cost_usd"], 9.0)
+        self.assertAlmostEqual(result["estimated_saving_usd"], 8.0)
+        # round(8.0 / 9.0 * 100) = round(88.89) = 89
+        self.assertEqual(result["estimated_saving_percent"], 89)
+
+    def test_saving_percent_none_when_actual_cost_zero(self):
+        result = compute_baseline_comparison(500_000, 500_000, 0.0)
+        self.assertIsNotNone(result)
+        self.assertIsNone(result["estimated_saving_percent"])
+        self.assertAlmostEqual(result["frontier_baseline_cost_usd"], 9.0)
+        self.assertAlmostEqual(result["estimated_saving_usd"], 9.0)
+
+    def test_returns_none_when_model_unresolvable(self):
+        with patch("openshard.cost.baseline.compute_cost", return_value=None):
+            self.assertIsNone(compute_baseline_comparison(1_000, 500, 0.01))

@@ -44,3 +44,34 @@ def format_baseline_line(
     if not parts:
         return None
     return "Baseline estimate: " + ", ".join(parts)
+
+
+FRONTIER_BASELINE_MODEL = "anthropic/claude-sonnet-4.6"
+
+
+def compute_baseline_comparison(
+    prompt_tokens: int,
+    completion_tokens: int,
+    actual_cost: float | None,
+) -> dict | None:
+    """Return a cost comparison dict, or None if it cannot be calculated.
+
+    Returns None when tokens are both zero, actual_cost is None, or the
+    frontier baseline model cannot be priced. estimated_saving_percent is
+    None when actual_cost is zero (avoids division by zero).
+    """
+    if not prompt_tokens and not completion_tokens:
+        return None
+    if actual_cost is None:
+        return None
+    baseline_cost = compute_cost(FRONTIER_BASELINE_MODEL, prompt_tokens, completion_tokens)
+    if baseline_cost is None:
+        return None
+    saving = baseline_cost - actual_cost
+    percent: int | None = round(saving / baseline_cost * 100) if actual_cost > 0 else None
+    return {
+        "actual_cost_usd": actual_cost,
+        "frontier_baseline_cost_usd": baseline_cost,
+        "estimated_saving_usd": saving,
+        "estimated_saving_percent": percent,
+    }

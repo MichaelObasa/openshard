@@ -3026,5 +3026,55 @@ class TestFeedbackRendering(unittest.TestCase):
         self.assertGreater(out.index("Developer feedback"), out.index("Notes"))
 
 
+class TestLastCostComparisonBlock(unittest.TestCase):
+
+    _ENTRY_WITH_COST = {
+        "task": "do a thing",
+        "estimated_cost": 0.005,
+        "prompt_tokens": 100_000,
+        "completion_tokens": 50_000,
+    }
+
+    def test_more_shows_cost_comparison(self):
+        out = _render(self._ENTRY_WITH_COST, detail="more")
+        self.assertIn("Cost comparison", out)
+        self.assertIn("Actual cost:", out)
+        self.assertIn("Frontier-only baseline:", out)
+        self.assertIn("Estimated saving:", out)
+
+    def test_full_shows_cost_comparison(self):
+        out = _render(self._ENTRY_WITH_COST, detail="full")
+        self.assertIn("Cost comparison", out)
+        self.assertIn("Actual cost:", out)
+        self.assertIn("Frontier-only baseline:", out)
+        self.assertIn("Estimated saving:", out)
+
+    def test_default_does_not_show_cost_comparison(self):
+        out = _render(self._ENTRY_WITH_COST, detail="default")
+        self.assertNotIn("Cost comparison", out)
+
+    def test_skips_when_tokens_missing(self):
+        entry = {"task": "do a thing", "estimated_cost": 0.005}
+        out = _render(entry, detail="more")
+        self.assertNotIn("Cost comparison", out)
+
+    def test_skips_when_actual_cost_missing(self):
+        entry = {"task": "do a thing", "prompt_tokens": 100_000, "completion_tokens": 50_000}
+        out = _render(entry, detail="more")
+        self.assertNotIn("Cost comparison", out)
+
+    def test_handles_actual_cost_zero(self):
+        entry = {
+            "task": "do a thing",
+            "estimated_cost": 0.0,
+            "prompt_tokens": 500_000,
+            "completion_tokens": 500_000,
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("Cost comparison", out)
+        saving_line = [ln for ln in out.splitlines() if "Estimated saving:" in ln][0]
+        self.assertNotIn("(", saving_line)
+
+
 if __name__ == "__main__":
     unittest.main()
