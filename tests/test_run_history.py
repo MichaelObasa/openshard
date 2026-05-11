@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 
 from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import _log_run
+from openshard.execution.stages import Stage, StageRun
+from openshard.routing.engine import MODEL_MAIN, MODEL_STRONG
 from openshard.scoring.requirements import TaskRequirements
 from openshard.scoring.scorer import ScoredRoutingResult, select_with_info
 from openshard.providers.base import ModelInfo
@@ -380,6 +382,81 @@ class TestVerificationPlanLogging(unittest.TestCase):
         self.assertEqual(entry["task"], "my task")
         self.assertIn("timestamp", entry)
         self.assertIn("execution_model", entry)
+
+
+class TestStageRunsDispatchLogging(unittest.TestCase):
+    """Verify _log_run serialises stage_runs with dispatch models correctly."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._tmpdir = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _call(self, **kwargs):
+        defaults = dict(
+            start=time.time(),
+            task="test task",
+            generator=_make_generator(),
+            retry_triggered=False,
+            files=[],
+            verification_attempted=False,
+            verification_passed=None,
+            workspace=None,
+        )
+        defaults.update(kwargs)
+        with patch("openshard.cli.main.Path.cwd", return_value=self._tmpdir):
+            _log_run(**defaults)
+
+    def _read_entry(self) -> dict:
+        log_path = self._tmpdir / ".openshard" / "runs.jsonl"
+        lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        return json.loads(lines[-1])
+
+    def _make_stage_run(self, stage_type: str, model: str) -> StageRun:
+        return StageRun(
+            stage=Stage(stage_type=stage_type, description="test stage"),
+            model=model,
+            duration=0.5,
+            cost=0.0001,
+            summary="done",
+        )
+
+    def test_planning_stage_model_logged(self):
+        sr = self._make_stage_run("planning", MODEL_STRONG)
+        self._call(stage_runs=[sr])
+        entry = self._read_entry()
+        self.assertIn("stage_runs", entry)
+        self.assertEqual(entry["stage_runs"][0]["model"], MODEL_STRONG)
+        self.assertEqual(entry["stage_runs"][0]["stage_type"], "planning")
+
+    def test_implementation_stage_model_logged(self):
+        sr = self._make_stage_run("implementation", MODEL_MAIN)
+        self._call(stage_runs=[sr])
+        entry = self._read_entry()
+        self.assertIn("stage_runs", entry)
+        self.assertEqual(entry["stage_runs"][0]["model"], MODEL_MAIN)
+        self.assertEqual(entry["stage_runs"][0]["stage_type"], "implementation")
+
+    def test_dispatch_models_both_stages(self):
+        """Planning uses MODEL_STRONG and implementation uses MODEL_MAIN (dispatch scenario)."""
+        stage_runs = [
+            self._make_stage_run("planning", MODEL_STRONG),
+            self._make_stage_run("implementation", MODEL_MAIN),
+        ]
+        self._call(stage_runs=stage_runs)
+        entry = self._read_entry()
+        self.assertEqual(len(entry["stage_runs"]), 2)
+        plan_logged = next(sr for sr in entry["stage_runs"] if sr["stage_type"] == "planning")
+        impl_logged = next(sr for sr in entry["stage_runs"] if sr["stage_type"] == "implementation")
+        self.assertEqual(plan_logged["model"], MODEL_STRONG)
+        self.assertEqual(impl_logged["model"], MODEL_MAIN)
+
+    def test_no_stage_runs_key_when_empty(self):
+        self._call(stage_runs=[])
+        entry = self._read_entry()
+        self.assertNotIn("stage_runs", entry)
 
 
 if __name__ == "__main__":

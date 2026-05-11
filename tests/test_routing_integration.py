@@ -9,6 +9,8 @@ from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry
+from openshard.routing.engine import MODEL_MAIN, MODEL_STRONG
+from openshard.routing.workflow_selector import WorkflowDecision
 
 _DEFAULT_CONFIG = {"approval_mode": "smart"}
 
@@ -531,3 +533,81 @@ class TestVerificationPlanDisplay(unittest.TestCase):
         )
         result = self._run(["fix a bug"], repo_facts=repo)
         self.assertNotIn("[verification]", result.output, result.output)
+
+
+_DISPATCH_ENTRY = _make_entry("openrouter/test-model", pricing={"prompt": "0.0000005"})
+_DISPATCH_ROUTED = "openrouter/test-model"
+
+
+class TestTierDispatchRouting(unittest.TestCase):
+    """Verify --experimental-tier-dispatch wires dispatch models into staged execution."""
+
+    def _run_staged(self, extra_args: list[str]):
+        manager = _make_manager_mock([_DISPATCH_ENTRY], ["openrouter"])
+        generator = _make_generator_mock()
+        plan_mock = MagicMock(return_value=("mock plan", None))
+        log_mock = MagicMock()
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.run.pipeline.run_planning_stage", plan_mock), \
+             patch("openshard.run.pipeline.select_workflow",
+                   return_value=WorkflowDecision("staged", "test forced")), \
+             patch("openshard.run.pipeline._log_run", log_mock):
+            runner = CliRunner()
+            runner.invoke(cli, ["run", "implement a feature"] + extra_args)
+        return generator, plan_mock, log_mock
+
+    def test_flag_off_uses_routed_model(self):
+        """Without dispatch flag, implementation stage uses the scored-routing model."""
+        generator, _, _ = self._run_staged([])
+        generator.generate.assert_called_once()
+        self.assertEqual(generator.generate.call_args.kwargs["model"], _DISPATCH_ROUTED)
+
+    def test_flag_on_executor_uses_dispatch_model(self):
+        """With dispatch flag, standard task routes implementation to MODEL_MAIN (GLM-5.1).
+
+        This test would fail if the implementation stage still used _routed_model
+        (_DISPATCH_ROUTED) instead of _dispatch_executor_model (MODEL_MAIN).
+        """
+        generator, _, _ = self._run_staged(["--experimental-tier-dispatch"])
+        generator.generate.assert_called_once()
+        self.assertEqual(generator.generate.call_args.kwargs["model"], MODEL_MAIN)
+
+    def test_flag_on_planner_uses_dispatch_model(self):
+        """With dispatch flag, planning stage receives frontier-reasoning-model (MODEL_STRONG)."""
+        _, plan_mock, _ = self._run_staged(["--experimental-tier-dispatch"])
+        plan_mock.assert_called_once()
+        self.assertEqual(plan_mock.call_args.kwargs["model"], MODEL_STRONG)
+
+    def test_flag_on_stage_runs_logged_with_dispatch_models(self):
+        """With dispatch flag, _log_run is called with stage_runs reflecting dispatch models."""
+        _, _, log_mock = self._run_staged(["--experimental-tier-dispatch"])
+        log_mock.assert_called_once()
+        stage_runs = log_mock.call_args.kwargs.get("stage_runs", [])
+        self.assertEqual(len(stage_runs), 2)
+        plan_run = next(sr for sr in stage_runs if sr.stage.stage_type == "planning")
+        impl_run = next(sr for sr in stage_runs if sr.stage.stage_type == "implementation")
+        self.assertEqual(plan_run.model, MODEL_STRONG)
+        self.assertEqual(impl_run.model, MODEL_MAIN)
+
+    def test_unresolved_executor_falls_back_to_routed(self):
+        """When dispatch executor resolves to None (unknown category), falls back to routed model."""
+        manager = _make_manager_mock([_DISPATCH_ENTRY], ["openrouter"])
+        generator = _make_generator_mock()
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.run.pipeline.run_planning_stage",
+                   return_value=("mock plan", None)), \
+             patch("openshard.run.pipeline.select_workflow",
+                   return_value=WorkflowDecision("staged", "test forced")), \
+             patch("openshard.native.dispatch.resolve_tier_for_category",
+                   return_value=(None, "", True, "unknown category in test")), \
+             patch("openshard.run.pipeline._log_run"):
+            runner = CliRunner()
+            runner.invoke(cli, ["run", "implement a feature", "--experimental-tier-dispatch"])
+        generator.generate.assert_called_once()
+        self.assertEqual(generator.generate.call_args.kwargs["model"], _DISPATCH_ROUTED)

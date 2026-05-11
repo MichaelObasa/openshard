@@ -7,6 +7,7 @@ import click
 from click.testing import CliRunner
 
 from openshard.cli.main import _model_label, _render_log_entry
+from openshard.routing.engine import MODEL_MAIN, MODEL_STRONG
 from openshard.native.context import (
     NativeContextQualityScore,
     NativeModelCandidateScore,
@@ -3024,6 +3025,90 @@ class TestFeedbackRendering(unittest.TestCase):
         }
         out = _render(entry, detail="more")
         self.assertGreater(out.index("Developer feedback"), out.index("Notes"))
+
+
+class TestLastStagesDispatchModels(unittest.TestCase):
+    """Verify stage_runs rendering and dispatch receipt / stage model consistency."""
+
+    def _two_stage_entry(self) -> dict:
+        return {
+            "task": "implement a feature",
+            "stage_runs": [
+                {"model": MODEL_STRONG, "stage_type": "planning",        "duration": 0.5,  "cost": 0.0001},
+                {"model": MODEL_MAIN,   "stage_type": "implementation",  "duration": 1.2,  "cost": 0.0003},
+            ],
+        }
+
+    def test_stages_different_models_both_shown(self):
+        out = _render(self._two_stage_entry(), detail="more")
+        self.assertIn(_model_label(MODEL_STRONG), out)
+        self.assertIn(_model_label(MODEL_MAIN), out)
+
+    def test_stage_plan_model_shown(self):
+        entry = {
+            "task": "implement a feature",
+            "stage_runs": [
+                {"model": MODEL_STRONG, "stage_type": "planning", "duration": 0.5, "cost": 0.0001},
+            ],
+        }
+        out = _render(entry, detail="more")
+        self.assertIn(_model_label(MODEL_STRONG), out)
+
+    def test_stage_exec_model_shown(self):
+        entry = {
+            "task": "implement a feature",
+            "stage_runs": [
+                {"model": MODEL_MAIN, "stage_type": "implementation", "duration": 1.2, "cost": 0.0003},
+            ],
+        }
+        out = _render(entry, detail="more")
+        self.assertIn(_model_label(MODEL_MAIN), out)
+
+    def test_default_detail_no_stages_section(self):
+        out = _render(self._two_stage_entry(), detail="default")
+        self.assertNotIn("Stages", out)
+
+    def test_dispatch_receipt_note_consistent_with_stages(self):
+        """Model plan block (from receipt) and Stages block (from stage_runs) show the same models.
+
+        This guards against drift where execution uses one model but output claims another.
+        """
+        entry = {
+            "task": "implement a feature",
+            "routing_category": "standard",
+            "routing_selected_model": "mock-routed-model",
+            "routing_selected_provider": "openrouter",
+            "routing_used_fallback": False,
+            "stage_runs": [
+                {"model": MODEL_STRONG, "stage_type": "planning",       "duration": 0.5,  "cost": 0.0001},
+                {"model": MODEL_MAIN,   "stage_type": "implementation", "duration": 1.2,  "cost": 0.0003},
+            ],
+            "tier_dispatch_receipt": {
+                "enabled": True,
+                "applied": True,
+                "tier_source": "category_fallback",
+                "planner_tier": "frontier-reasoning-model",
+                "planner_model": MODEL_STRONG,
+                "executor_tier": "balanced-coding-model",
+                "executor_model": MODEL_MAIN,
+                "validator_tier": "independent-validator-model",
+                "validator_model": MODEL_STRONG,
+                "fallback_used": False,
+                "fallback_reason": "",
+                "warnings": [],
+            },
+        }
+        out = _render(entry, detail="more")
+        sonnet_label = _model_label(MODEL_STRONG)
+        glm_label = _model_label(MODEL_MAIN)
+        self.assertIn(sonnet_label, out)
+        self.assertIn(glm_label, out)
+        self.assertIn("Model plan", out)
+        self.assertIn("Stages", out)
+        # Both the Model plan and Stages sections reference GLM-5.1 as the work/implementation model
+        glm_idx_first = out.index(glm_label)
+        glm_idx_second = out.index(glm_label, glm_idx_first + 1)
+        self.assertGreater(glm_idx_second, glm_idx_first)
 
 
 class TestLastCostComparisonBlock(unittest.TestCase):
