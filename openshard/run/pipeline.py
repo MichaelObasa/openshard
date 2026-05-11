@@ -617,7 +617,7 @@ class RunPipeline:
                     click.echo(_rl)
             click.echo("")
             click.echo("Execution")
-            click.echo(f"  Mode: {_profile_display_label(_profile_decision.profile)}")
+            click.echo(f"  Mode: {_profile_display_label(_profile_decision.profile, is_readonly=_readonly_task)}")
             click.echo(f"  Reason: {_profile_decision.reason}")
             click.echo("")
             click.echo("Verification")
