@@ -102,7 +102,7 @@ class TestLastProfileDisplay(unittest.TestCase):
         }
         out = _render(entry, detail="more")
         self.assertIn("Execution", out)
-        self.assertIn("Mode: Careful run", out)
+        self.assertIn("Mode: Deep Run", out)
         self.assertIn("Reason: security category", out)
 
     def test_full_shows_profile_when_present(self):
@@ -113,7 +113,7 @@ class TestLastProfileDisplay(unittest.TestCase):
         }
         out = _render(entry, detail="full")
         self.assertIn("Execution", out)
-        self.assertIn("Mode: Standard run", out)
+        self.assertIn("Mode: Run", out)
         self.assertIn("Reason: simple/safe task", out)
 
     def test_profile_without_reason(self):
@@ -123,7 +123,7 @@ class TestLastProfileDisplay(unittest.TestCase):
         }
         out = _render(entry, detail="more")
         self.assertIn("Execution", out)
-        self.assertIn("Mode: Parallel run", out)
+        self.assertIn("Mode: Team Run", out)
 
     def test_no_crash_on_entry_without_profile_fields(self):
         entry = {"task": "do a thing"}

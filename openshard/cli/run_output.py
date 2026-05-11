@@ -182,6 +182,18 @@ def _model_label(model: str) -> str:
     return _MODEL_SHORT.get(model, _format_model_slug(model))
 
 
+_PROFILE_LABEL: dict[str, str] = {
+    "native_light": "Run",
+    "native_deep": "Deep Run",
+    "native_swarm": "Team Run",
+    "native": "Run",
+}
+
+
+def _profile_display_label(profile: str) -> str:
+    return _PROFILE_LABEL.get(profile, profile.replace("_", " ").title())
+
+
 def _build_routing_line(
     routing_decision: RoutingDecision | None,
     use_stages: bool,

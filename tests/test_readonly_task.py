@@ -301,3 +301,30 @@ class TestReadonlyOutputLabels(unittest.TestCase):
             extra_args=("--dry-run",),
         )
         self.assertEqual(result.exit_code, 0, result.output)
+
+    def test_readonly_execution_mode_is_ask(self):
+        """Read-only tasks must show Mode: Ask in the Execution section."""
+        result, _ = _invoke("what does openshard/cli/main.py do?", extra_args=("--full",))
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("Mode: Ask", result.output)
+
+    def test_readonly_execution_mode_does_not_expose_profile_name(self):
+        """Raw profile names must not appear in --full output for read-only tasks."""
+        result, _ = _invoke("what does openshard/cli/main.py do?", extra_args=("--full",))
+        self.assertEqual(result.exit_code, 0, result.output)
+        for raw in ("native_light", "native_deep", "native_swarm"):
+            self.assertNotIn(raw, result.output)
+
+    def test_stored_profile_value_is_raw_name(self):
+        """The run log must receive the raw internal profile name, not the display label."""
+        from unittest.mock import patch as _patch
+        with _patch("openshard.run.pipeline._log_run") as log_mock:
+            _invoke("what does openshard/cli/main.py do?")
+        if log_mock.call_args is not None:
+            kwargs = log_mock.call_args[1] if log_mock.call_args[1] else {}
+            if "execution_profile" in kwargs:
+                self.assertIn(
+                    kwargs["execution_profile"],
+                    ("native_light", "native_deep", "native_swarm"),
+                    f"Stored profile should be a raw name, got: {kwargs['execution_profile']!r}",
+                )

@@ -400,20 +400,39 @@ class TestExecutionProfileDisplay(unittest.TestCase):
 
     def test_security_task_shows_native_deep(self):
         result = self._run(["add login endpoint with jwt auth", "--more"])
-        self.assertIn("Careful run", result.output, result.output)
+        self.assertIn("Deep Run", result.output, result.output)
 
     def test_simple_task_shows_native_light(self):
         result = self._run(["fix typo in README", "--more"])
-        self.assertIn("Standard run", result.output, result.output)
+        self.assertIn("Run", result.output, result.output)
 
     def test_profile_override_native_swarm(self):
         result = self._run(["fix typo in README", "--more", "--profile", "native_swarm"])
-        self.assertIn("Parallel run", result.output, result.output)
+        self.assertIn("Team Run", result.output, result.output)
         self.assertIn("explicit override", result.output, result.output)
 
     def test_profile_line_absent_without_more(self):
         result = self._run(["implement a feature"])
         self.assertNotIn("[profile]", result.output, result.output)
+
+    def test_raw_profile_names_not_in_more_output(self):
+        """Internal profile identifiers must never appear in user-facing --more output."""
+        for task in ["fix typo in README", "add login endpoint with jwt auth"]:
+            result = self._run([task, "--more"])
+            for raw in ("native_light", "native_deep", "native_swarm"):
+                self.assertNotIn(raw, result.output, f"{raw!r} leaked into output for {task!r}")
+
+    def test_native_light_displays_as_run(self):
+        result = self._run(["fix typo in README", "--more"])
+        self.assertIn("Mode: Run", result.output, result.output)
+
+    def test_native_deep_displays_as_deep_run(self):
+        result = self._run(["add login endpoint with jwt auth", "--more"])
+        self.assertIn("Mode: Deep Run", result.output, result.output)
+
+    def test_native_swarm_displays_as_team_run(self):
+        result = self._run(["fix typo in README", "--more", "--profile", "native_swarm"])
+        self.assertIn("Mode: Team Run", result.output, result.output)
 
 
 class TestHistoryScoringProfileSelection(unittest.TestCase):
@@ -443,30 +462,30 @@ class TestHistoryScoringProfileSelection(unittest.TestCase):
 
     def test_without_history_scoring_poor_history_does_not_escalate(self):
         result = self._run(["fix typo in README", "--more"], runs=self._POOR_PASS_RUNS)
-        self.assertIn("Standard run", result.output, result.output)
-        self.assertNotIn("Careful run", result.output, result.output)
+        self.assertIn("Run", result.output, result.output)
+        self.assertNotIn("Deep Run", result.output, result.output)
 
     def test_history_scoring_poor_pass_rate_escalates_to_native_deep(self):
         result = self._run(["fix typo in README", "--more", "--history-scoring"], runs=self._POOR_PASS_RUNS)
-        self.assertIn("Careful run", result.output, result.output)
+        self.assertIn("Deep Run", result.output, result.output)
 
     def test_history_scoring_high_retry_rate_escalates_to_native_deep(self):
         result = self._run(["fix typo in README", "--more", "--history-scoring"], runs=self._HIGH_RETRY_RUNS)
-        self.assertIn("Careful run", result.output, result.output)
+        self.assertIn("Deep Run", result.output, result.output)
 
     def test_profile_override_wins_even_with_poor_history(self):
         result = self._run(
             ["fix typo in README", "--more", "--history-scoring", "--profile", "native_light"],
             runs=self._POOR_PASS_RUNS,
         )
-        self.assertIn("Standard run", result.output, result.output)
+        self.assertIn("Run", result.output, result.output)
         self.assertIn("explicit override", result.output, result.output)
 
     def test_native_swarm_never_auto_selected_with_history_scoring(self):
         result = self._run(["fix typo in README", "--more", "--history-scoring"], runs=self._POOR_PASS_RUNS)
         lines = [ln for ln in result.output.splitlines() if "Mode:" in ln]
         for line in lines:
-            self.assertNotIn("Parallel run", line, result.output)
+            self.assertNotIn("Team Run", line, result.output)
 
 
 class TestVerificationPlanDisplay(unittest.TestCase):
