@@ -408,7 +408,7 @@ class TestExecutionProfileDisplay(unittest.TestCase):
 
     def test_profile_override_native_swarm(self):
         result = self._run(["fix typo in README", "--more", "--profile", "native_swarm"])
-        self.assertIn("Team Run", result.output, result.output)
+        self.assertIn("Deep Run", result.output, result.output)
         self.assertIn("explicit override", result.output, result.output)
 
     def test_profile_line_absent_without_more(self):
@@ -420,7 +420,6 @@ class TestExecutionProfileDisplay(unittest.TestCase):
         self.assertIn("Mode: Ask", result.output, result.output)
         self.assertNotIn("Mode: Run", result.output, result.output)
         self.assertNotIn("Mode: Deep Run", result.output, result.output)
-        self.assertNotIn("Mode: Team Run", result.output, result.output)
 
 
 class TestHistoryScoringProfileSelection(unittest.TestCase):
@@ -473,7 +472,7 @@ class TestHistoryScoringProfileSelection(unittest.TestCase):
         result = self._run(["fix typo in README", "--more", "--history-scoring"], runs=self._POOR_PASS_RUNS)
         lines = [ln for ln in result.output.splitlines() if "Mode:" in ln]
         for line in lines:
-            self.assertNotIn("Team Run", line, result.output)
+            self.assertNotIn("native_swarm", line, result.output)
 
 
 class TestVerificationPlanDisplay(unittest.TestCase):

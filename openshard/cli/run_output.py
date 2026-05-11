@@ -148,7 +148,7 @@ _ABBREV_WORDS = {"gpt", "llm", "ai", "api", "url", "id", "ui", "ml"}
 _PROFILE_LABEL: dict[str, str] = {
     "native_light": "Run",
     "native_deep": "Deep Run",
-    "native_swarm": "Team Run",
+    "native_swarm": "Deep Run",
     "native": "OSN Run",
 }
 
