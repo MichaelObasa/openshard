@@ -85,6 +85,21 @@ class TestExportRunsCommand(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0]["task"], "mytask")
 
+    def test_nested_output_dir_created(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            log_path = _write_runs([_make_entry(task="nested")])
+            before = log_path.read_bytes()
+            result = runner.invoke(cli, ["export-runs", "--output", "exports/sample-runs.jsonl"])
+            self.assertEqual(result.exit_code, 0)
+            out = Path("exports/sample-runs.jsonl")
+            self.assertTrue(out.exists())
+            rows = _parse_jsonl(out.read_text(encoding="utf-8"))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["task"], "nested")
+            after = log_path.read_bytes()
+            self.assertEqual(before, after)
+
     # 5. Export does not mutate .openshard/runs.jsonl.
     def test_does_not_mutate_runs_jsonl(self):
         runner = CliRunner()
