@@ -1055,6 +1055,46 @@ def demo(scenario: str | None) -> None:
         _demo_feedback()
 
 
+def _demo_run() -> None:
+    click.echo("Task: Add rate limiting to the API gateway")
+    click.echo("")
+    click.echo("Execution")
+    click.echo("  Mode: Run")
+    click.echo("")
+    click.echo("Routing")
+    click.echo("  Category: standard")
+    click.echo("  Initial candidate: Sonnet 4.6")
+    click.echo("  Candidates: 8")
+    click.echo("  Workflow: staged")
+    click.echo("  Reason: standard coding task")
+    click.echo("")
+    click.echo("Model plan")
+    click.echo("  Planning: Sonnet 4.6")
+    click.echo("  Work: GLM-5.1")
+    click.echo("  Validator: Sonnet 4.6 (reserved)")
+    click.echo("")
+    click.echo("Dispatch")
+    click.echo("  Applied: yes")
+    click.echo("  Source: demo")
+    click.echo("  Work model: GLM-5.1")
+    click.echo("  Initial candidate: Sonnet 4.6")
+    click.echo("")
+    click.echo("Verification")
+    click.echo("  Name: tests")
+    click.echo("  Safety: safe")
+    click.echo("  Source: demo")
+    click.echo("  Command: python -m pytest")
+    click.echo("")
+    click.echo("Time: 9.5s   Cost: $0.0133")
+    click.echo("Feedback: openshard feedback --rating good")
+
+
+@cli.command("demo-run")
+def demo_run() -> None:
+    """Show a realistic sample run without making provider calls or writing files."""
+    _demo_run()
+
+
 @cli.group(invoke_without_command=True)
 @click.pass_context
 def eval(ctx: click.Context):
