@@ -88,5 +88,53 @@ class TestDemoCommand(unittest.TestCase):
                 )
 
 
+class TestDemoRunCommand(unittest.TestCase):
+
+    def test_demo_run_exits_zero(self):
+        result = CliRunner().invoke(cli, ["demo-run"])
+        self.assertEqual(result.exit_code, 0)
+
+    def test_demo_run_shows_task(self):
+        result = CliRunner().invoke(cli, ["demo-run"])
+        self.assertIn("Task:", result.output)
+
+    def test_demo_run_shows_execution(self):
+        result = CliRunner().invoke(cli, ["demo-run"])
+        self.assertIn("Execution", result.output)
+        self.assertIn("Mode: Run", result.output)
+
+    def test_demo_run_shows_routing(self):
+        result = CliRunner().invoke(cli, ["demo-run"])
+        self.assertIn("Routing", result.output)
+        self.assertIn("Initial candidate:", result.output)
+
+    def test_demo_run_shows_model_plan(self):
+        result = CliRunner().invoke(cli, ["demo-run"])
+        self.assertIn("Model plan", result.output)
+
+    def test_demo_run_shows_dispatch(self):
+        result = CliRunner().invoke(cli, ["demo-run"])
+        self.assertIn("Dispatch", result.output)
+
+    def test_demo_run_shows_verification(self):
+        result = CliRunner().invoke(cli, ["demo-run"])
+        self.assertIn("Verification", result.output)
+
+    def test_demo_run_shows_feedback(self):
+        result = CliRunner().invoke(cli, ["demo-run"])
+        self.assertIn("Feedback", result.output)
+
+    def test_demo_run_does_not_create_runs_jsonl(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            runner.invoke(cli, ["demo-run"])
+            self.assertFalse((Path(".openshard") / "runs.jsonl").exists())
+
+    def test_demo_run_no_forbidden_labels(self):
+        result = CliRunner().invoke(cli, ["demo-run"])
+        for label in ("[routing]", "[profile]", "[verification]"):
+            self.assertNotIn(label, result.output)
+
+
 if __name__ == "__main__":
     unittest.main()
