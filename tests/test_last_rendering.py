@@ -123,7 +123,7 @@ class TestLastProfileDisplay(unittest.TestCase):
         }
         out = _render(entry, detail="more")
         self.assertIn("Execution", out)
-        self.assertIn("Mode: Team Run", out)
+        self.assertIn("Mode: Deep Run", out)
 
     def test_no_crash_on_entry_without_profile_fields(self):
         entry = {"task": "do a thing"}
@@ -153,6 +153,13 @@ class TestLastProfileDisplay(unittest.TestCase):
         }
         out = _render(entry, detail="more")
         self.assertIn("Mode: Ask", out)
+
+    def test_raw_profile_names_not_in_output(self):
+        for profile in ("native_light", "native_deep", "native_swarm"):
+            entry = {"task": "do a thing", "execution_profile": profile}
+            out = _render(entry, detail="more")
+            for leaked in ("native_light", "native_deep", "native_swarm", "Team Run"):
+                self.assertNotIn(leaked, out, f"profile={profile!r} leaked {leaked!r}")
 
 
 class TestLastVerificationDisplay(unittest.TestCase):
