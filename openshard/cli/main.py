@@ -802,6 +802,18 @@ def _render_log_entry(entry: dict, detail: str) -> None:
             receipt = _render_native_receipt(_nm)
             if receipt:
                 click.echo(receipt)
+    elif detail in ("more", "full"):
+        from openshard.cost.baseline import compute_baseline_comparison
+        _pt = entry.get("prompt_tokens") or 0
+        _ct = entry.get("completion_tokens") or 0
+        _cmp = compute_baseline_comparison(_pt, _ct, actual_cost=cost)
+        if _cmp is not None:
+            _pct = _cmp["estimated_saving_percent"]
+            _pct_str = f" ({_pct}%)" if _pct is not None else ""
+            click.echo("\nCost comparison")
+            click.echo(f"  Actual cost: ${_cmp['actual_cost_usd']:.4f}")
+            click.echo(f"  Frontier-only baseline: ${_cmp['frontier_baseline_cost_usd']:.4f}")
+            click.echo(f"  Estimated saving: ${_cmp['estimated_saving_usd']:.4f}{_pct_str}")
 
 
 @cli.command()
@@ -944,6 +956,26 @@ def feedback_stats() -> None:
             click.echo(f"  {rating} — {note}")
 
 
+def _baseline_export_fields(
+    prompt_tokens: int,
+    completion_tokens: int,
+    actual_cost: float | None,
+) -> dict:
+    from openshard.cost.baseline import compute_baseline_comparison
+    cmp = compute_baseline_comparison(prompt_tokens, completion_tokens, actual_cost)
+    if cmp is None:
+        return {
+            "frontier_baseline_cost_usd": None,
+            "estimated_saving_usd": None,
+            "estimated_saving_percent": None,
+        }
+    return {
+        "frontier_baseline_cost_usd": cmp["frontier_baseline_cost_usd"],
+        "estimated_saving_usd": cmp["estimated_saving_usd"],
+        "estimated_saving_percent": cmp["estimated_saving_percent"],
+    }
+
+
 def _export_run_entry(entry: dict, include_notes: bool = False) -> dict:
     stage_runs = entry.get("stage_runs") or []
     is_ro = entry.get("routing_rationale") == "read-only analysis"
@@ -992,6 +1024,11 @@ def _export_run_entry(entry: dict, include_notes: bool = False) -> dict:
         "tier_dispatch_applied":     tdr.get("applied"),
         "tier_dispatch_work_model":  tdr.get("executor_model"),
         "summary":                   entry.get("summary"),
+        **_baseline_export_fields(
+            entry.get("prompt_tokens") or 0,
+            entry.get("completion_tokens") or 0,
+            entry.get("estimated_cost"),
+        ),
     }
     if include_notes:
         row["notes"] = entry.get("notes") or []

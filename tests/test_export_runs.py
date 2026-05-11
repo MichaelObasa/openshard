@@ -253,5 +253,59 @@ class TestExportRunsCommand(unittest.TestCase):
             self.assertIsNone(row["tier_dispatch_work_model"])
 
 
+    def test_baseline_fields_present_when_calculable(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(
+                estimated_cost=0.005,
+                prompt_tokens=100_000,
+                completion_tokens=50_000,
+            )])
+            result = runner.invoke(cli, ["export-runs"])
+            self.assertEqual(result.exit_code, 0)
+            row = _parse_jsonl(result.output)[0]
+            self.assertIsNotNone(row["frontier_baseline_cost_usd"])
+            self.assertGreater(row["frontier_baseline_cost_usd"], 0)
+            self.assertIsNotNone(row["estimated_saving_usd"])
+            self.assertIsNotNone(row["estimated_saving_percent"])
+
+    def test_baseline_fields_null_when_no_tokens(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(estimated_cost=0.005)])
+            result = runner.invoke(cli, ["export-runs"])
+            self.assertEqual(result.exit_code, 0)
+            row = _parse_jsonl(result.output)[0]
+            self.assertIsNone(row["frontier_baseline_cost_usd"])
+            self.assertIsNone(row["estimated_saving_usd"])
+            self.assertIsNone(row["estimated_saving_percent"])
+
+    def test_baseline_fields_null_when_no_cost(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(prompt_tokens=100_000, completion_tokens=50_000)])
+            result = runner.invoke(cli, ["export-runs"])
+            self.assertEqual(result.exit_code, 0)
+            row = _parse_jsonl(result.output)[0]
+            self.assertIsNone(row["frontier_baseline_cost_usd"])
+            self.assertIsNone(row["estimated_saving_usd"])
+            self.assertIsNone(row["estimated_saving_percent"])
+
+    def test_baseline_saving_percent_null_when_actual_cost_zero(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(
+                estimated_cost=0.0,
+                prompt_tokens=100_000,
+                completion_tokens=50_000,
+            )])
+            result = runner.invoke(cli, ["export-runs"])
+            self.assertEqual(result.exit_code, 0)
+            row = _parse_jsonl(result.output)[0]
+            self.assertIsNone(row["estimated_saving_percent"])
+            self.assertIsNotNone(row["frontier_baseline_cost_usd"])
+            self.assertIsNotNone(row["estimated_saving_usd"])
+
+
 if __name__ == "__main__":
     unittest.main()
