@@ -307,5 +307,98 @@ class TestExportRunsCommand(unittest.TestCase):
             self.assertIsNotNone(row["estimated_saving_usd"])
 
 
+class TestExportRunsPreview(unittest.TestCase):
+
+    def test_preview_exits_zero(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(task="a")])
+            result = runner.invoke(cli, ["export-runs", "--preview"])
+            self.assertEqual(result.exit_code, 0)
+
+    def test_preview_shows_export_preview_header(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(task="a")])
+            result = runner.invoke(cli, ["export-runs", "--preview"])
+            self.assertIn("Export preview", result.output)
+
+    def test_preview_respects_limit(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(task="a"), _make_entry(task="b"), _make_entry(task="c")])
+            result = runner.invoke(cli, ["export-runs", "--preview", "--limit", "2"])
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("Runs: 2", result.output)
+            self.assertNotIn("Runs: 3", result.output)
+
+    def test_preview_does_not_start_with_json_brace(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(task="a")])
+            result = runner.invoke(cli, ["export-runs", "--preview"])
+            self.assertNotEqual(result.output.lstrip()[:1], "{")
+
+    def test_preview_shows_column_headers(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(task="a", execution_profile="native_light")])
+            result = runner.invoke(cli, ["export-runs", "--preview"])
+            self.assertIn("Mode", result.output)
+            self.assertIn("Model", result.output)
+            self.assertIn("Cost", result.output)
+            self.assertIn("Feedback", result.output)
+            self.assertIn("Saving", result.output)
+
+    def test_preview_shows_mode_and_feedback_values(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            entry = _make_entry(
+                execution_profile="native_light",
+                feedback={"schema_version": 1, "rating": "good", "note": ""},
+            )
+            _write_runs([entry])
+            result = runner.invoke(cli, ["export-runs", "--preview"])
+            self.assertIn("Run", result.output)
+            self.assertIn("good", result.output)
+
+    def test_preview_does_not_mutate_runs_jsonl(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            log_path = _write_runs([_make_entry(task="unchanged")])
+            before = log_path.read_bytes()
+            runner.invoke(cli, ["export-runs", "--preview"])
+            after = log_path.read_bytes()
+            self.assertEqual(before, after)
+
+    def test_preview_and_output_rejected(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(task="a")])
+            result = runner.invoke(cli, ["export-runs", "--preview", "--output", "out.jsonl"])
+            self.assertNotEqual(result.exit_code, 0)
+            self.assertIn("preview", result.output.lower())
+
+    def test_default_jsonl_output_unchanged_by_preview_addition(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(task="x"), _make_entry(task="y")])
+            result = runner.invoke(cli, ["export-runs"])
+            self.assertEqual(result.exit_code, 0)
+            rows = _parse_jsonl(result.output)
+            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows[0]["task"], "x")
+
+    def test_output_file_jsonl_unchanged_by_preview_addition(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(task="filetask")])
+            result = runner.invoke(cli, ["export-runs", "--output", "check.jsonl"])
+            self.assertEqual(result.exit_code, 0)
+            rows = _parse_jsonl(Path("check.jsonl").read_text(encoding="utf-8"))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["task"], "filetask")
+
+
 if __name__ == "__main__":
     unittest.main()
