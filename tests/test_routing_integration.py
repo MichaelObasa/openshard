@@ -169,10 +169,10 @@ class TestRoutingDisplayConsistency(unittest.TestCase):
         return result
 
     def test_routing_line_shows_scored_model_not_keyword_model(self):
-        """With --more, the [routing] line shows the scored model, not the keyword-routed one.
+        """With --more, the Routing section shows the scored model, not the keyword-routed one.
 
         Keyword routing for 'implement a feature' picks GLM-5.1, but the inventory
-        has fast-model which scoring selects instead.  The display line must agree.
+        has fast-model which scoring selects instead.  The display must agree.
         """
         task = "implement a feature"
         entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
@@ -181,19 +181,19 @@ class TestRoutingDisplayConsistency(unittest.TestCase):
 
         result = self._run([task, "--more"], manager, generator)
 
-        # Find the single early routing summary line (contains " - " rationale separator)
-        routing_lines = [
+        # Find the initial candidate line in the Routing section
+        candidate_lines = [
             ln for ln in result.output.splitlines()
-            if "[routing]" in ln and " - " in ln
+            if "Initial candidate:" in ln
         ]
-        self.assertEqual(len(routing_lines), 1, result.output)
+        self.assertEqual(len(candidate_lines), 1, result.output)
         # _model_label("openrouter/fast-model") → "Fast Model"
-        self.assertIn("Fast Model", routing_lines[0])
+        self.assertIn("Fast Model", candidate_lines[0])
         # Keyword-routed model (GLM-5.1) must NOT appear in this line
-        self.assertNotIn("GLM", routing_lines[0])
+        self.assertNotIn("GLM", candidate_lines[0])
 
     def test_routing_line_uses_fallback_model_when_scoring_finds_no_candidate(self):
-        """When no inventory entry passes the hard filter, the fallback (keyword) model is shown."""
+        """When no inventory entry passes the hard filter, fallback keyword routing is used."""
         task = "add a ui component"  # routes to visual category → needs_vision=True
         # Entry lacks vision support → hard-filtered out → fallback
         entry = _make_entry("openrouter/no-vision", supports_vision=False)
@@ -202,14 +202,10 @@ class TestRoutingDisplayConsistency(unittest.TestCase):
 
         result = self._run([task, "--more"], manager, generator)
 
-        routing_lines = [
-            ln for ln in result.output.splitlines()
-            if "[routing]" in ln and " - " in ln
-        ]
-        self.assertEqual(len(routing_lines), 1, result.output)
-        # Fallback for visual category is kimi-k2.5; the label should NOT say fast-model
-        self.assertNotIn("fast-model", routing_lines[0])
-        self.assertNotIn("no-vision", routing_lines[0])
+        # Fallback is signalled by the candidates line
+        self.assertIn("fallback keyword routing", result.output, result.output)
+        # The hard-filtered entry must not appear as an initial candidate
+        self.assertNotIn("Initial candidate:", result.output, result.output)
 
     def test_default_routing_line_shows_scored_model(self):
         """Default (no --more) routing line shows the scored model, not the keyword-routed one."""
@@ -337,7 +333,7 @@ class TestHistoryScoringDisplay(unittest.TestCase):
 
         result = self._run(["implement a feature", "--more", "--history-scoring"], manager, generator)
 
-        self.assertIn("[routing] history scoring: enabled", result.output, result.output)
+        self.assertIn("History scoring: enabled", result.output, result.output)
 
     def test_history_nonzero_adjustment_shown(self):
         """Non-zero adjustment for selected model shows value and reason in --more output."""
@@ -400,19 +396,19 @@ class TestExecutionProfileDisplay(unittest.TestCase):
 
     def test_more_shows_profile_line(self):
         result = self._run(["implement a feature", "--more"])
-        self.assertIn("[profile]", result.output, result.output)
+        self.assertIn("Execution", result.output, result.output)
 
     def test_security_task_shows_native_deep(self):
         result = self._run(["add login endpoint with jwt auth", "--more"])
-        self.assertIn("native_deep", result.output, result.output)
+        self.assertIn("Careful run", result.output, result.output)
 
     def test_simple_task_shows_native_light(self):
         result = self._run(["fix typo in README", "--more"])
-        self.assertIn("native_light", result.output, result.output)
+        self.assertIn("Standard run", result.output, result.output)
 
     def test_profile_override_native_swarm(self):
         result = self._run(["fix typo in README", "--more", "--profile", "native_swarm"])
-        self.assertIn("native_swarm", result.output, result.output)
+        self.assertIn("Parallel run", result.output, result.output)
         self.assertIn("explicit override", result.output, result.output)
 
     def test_profile_line_absent_without_more(self):
@@ -447,30 +443,30 @@ class TestHistoryScoringProfileSelection(unittest.TestCase):
 
     def test_without_history_scoring_poor_history_does_not_escalate(self):
         result = self._run(["fix typo in README", "--more"], runs=self._POOR_PASS_RUNS)
-        self.assertIn("native_light", result.output, result.output)
-        self.assertNotIn("native_deep", result.output, result.output)
+        self.assertIn("Standard run", result.output, result.output)
+        self.assertNotIn("Careful run", result.output, result.output)
 
     def test_history_scoring_poor_pass_rate_escalates_to_native_deep(self):
         result = self._run(["fix typo in README", "--more", "--history-scoring"], runs=self._POOR_PASS_RUNS)
-        self.assertIn("native_deep", result.output, result.output)
+        self.assertIn("Careful run", result.output, result.output)
 
     def test_history_scoring_high_retry_rate_escalates_to_native_deep(self):
         result = self._run(["fix typo in README", "--more", "--history-scoring"], runs=self._HIGH_RETRY_RUNS)
-        self.assertIn("native_deep", result.output, result.output)
+        self.assertIn("Careful run", result.output, result.output)
 
     def test_profile_override_wins_even_with_poor_history(self):
         result = self._run(
             ["fix typo in README", "--more", "--history-scoring", "--profile", "native_light"],
             runs=self._POOR_PASS_RUNS,
         )
-        self.assertIn("native_light", result.output, result.output)
+        self.assertIn("Standard run", result.output, result.output)
         self.assertIn("explicit override", result.output, result.output)
 
     def test_native_swarm_never_auto_selected_with_history_scoring(self):
         result = self._run(["fix typo in README", "--more", "--history-scoring"], runs=self._POOR_PASS_RUNS)
-        lines = [ln for ln in result.output.splitlines() if "[profile]" in ln]
+        lines = [ln for ln in result.output.splitlines() if "Mode:" in ln]
         for line in lines:
-            self.assertNotIn("native_swarm", line, result.output)
+            self.assertNotIn("Parallel run", line, result.output)
 
 
 class TestVerificationPlanDisplay(unittest.TestCase):
@@ -498,14 +494,14 @@ class TestVerificationPlanDisplay(unittest.TestCase):
             test_command="pytest", risky_paths=[], changed_files=[],
         )
         result = self._run(["fix a bug", "--more"], repo_facts=repo)
-        self.assertIn("[verification]", result.output, result.output)
+        self.assertIn("Verification", result.output, result.output)
         self.assertIn("safe", result.output, result.output)
         self.assertIn("detected", result.output, result.output)
 
     def test_config_command_shown_in_more(self):
         cfg = {"approval_mode": "smart", "verification_command": ["pytest"]}
         result = self._run(["fix a bug", "--more"], config=cfg)
-        self.assertIn("[verification]", result.output, result.output)
+        self.assertIn("Verification", result.output, result.output)
         self.assertIn("config", result.output, result.output)
 
     def test_config_takes_priority_over_detected(self):
@@ -520,7 +516,7 @@ class TestVerificationPlanDisplay(unittest.TestCase):
 
     def test_no_command_shows_not_detected(self):
         result = self._run(["fix a bug", "--more"])
-        self.assertIn("no verification command detected", result.output, result.output)
+        self.assertIn("No verification command detected", result.output, result.output)
 
     def test_not_shown_in_default_detail(self):
         repo = RepoFacts(

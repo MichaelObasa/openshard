@@ -19,6 +19,7 @@ from openshard.cli.run_output import (
     _build_routing_line,
     _exec_message,
     _model_label,
+    _profile_display_label,
     _print_dry_run,
     _print_shrunk,
     _print_summary,
@@ -490,10 +491,11 @@ class RunPipeline:
             cost_threshold=_cost_threshold,
         )
 
-        # Routing line is printed after scoring so the model label reflects the actual selection.
+        # Routing section lines are collected here and printed together after workflow is resolved.
+        _routing_lines: list[str] = []
         if routing_decision is not None:
             if detail != "default":
-                click.echo(f"  [routing] {_model_label(_routed_model)} - {routing_decision.rationale}")
+                _routing_lines.append(f"  Task type: {routing_decision.rationale}")
             hint = _pre_run_cost_hint(routing_decision.model, task)
             if hint:
                 click.echo(f"  Cost estimate: {hint}")
@@ -517,14 +519,17 @@ class RunPipeline:
             if _req.min_context_window:
                 _req_parts.append(f"ctx>={_req.min_context_window // 1_000}k")
             _req_str = ", ".join(_req_parts) if _req_parts else "none"
-            click.echo(f"  [routing] category: {_scored.category}, requirements: {_req_str}")
+            _routing_lines.append(f"  Category: {_scored.category}")
+            if _req_str != "none":
+                _routing_lines.append(f"  Requirements: {_req_str}")
             if _scored.used_fallback:
-                click.echo(f"  [routing] candidates: {_scored.candidate_count} -> fallback (keyword routing)")
+                _routing_lines.append(f"  Candidates: {_scored.candidate_count} (fallback keyword routing)")
             else:
                 _cost_str = f"cost: ${_scored.selected_cost_per_m:.2f}/M" if _scored.selected_cost_per_m is not None else "cost: unknown"
-                click.echo(f"  [routing] candidates: {_scored.candidate_count} -> {_model_label(_scored.selected_model)} ({_cost_str})")
+                _routing_lines.append(f"  Initial candidate: {_model_label(_scored.selected_model)} ({_cost_str})")
+                _routing_lines.append(f"  Candidates: {_scored.candidate_count}")
             if _use_history_scoring:
-                click.echo("  [routing] history scoring: enabled")
+                _routing_lines.append("  History scoring: enabled")
                 _nonzero = [
                     (m, adj)
                     for m, adj in _scored.history_adjustments.items()
@@ -534,9 +539,9 @@ class RunPipeline:
                     _rsn = _hist_reasons.get(_hm, "")
                     _rsn_str = f" ({_rsn})" if _rsn else ""
                     _marker = " <- selected" if _hm == _scored.selected_model else ""
-                    click.echo(f"  [routing] history: {_model_label(_hm)}: {_hadj:+.1f}{_rsn_str}{_marker}")
+                    _routing_lines.append(f"    {_model_label(_hm)}: {_hadj:+.1f}{_rsn_str}{_marker}")
             if _use_eval_scoring:
-                click.echo("  [routing] eval scoring: enabled")
+                _routing_lines.append("  Eval scoring: enabled")
                 _eval_nonzero = [
                     (m, adj)
                     for m, adj in _eval_adjustments.items()
@@ -546,9 +551,9 @@ class RunPipeline:
                     _rsn = _eval_reasons.get(_em, "")
                     _rsn_str = f" ({_rsn})" if _rsn else ""
                     _marker = " <- selected" if _em == _scored.selected_model else ""
-                    click.echo(f"  [routing] eval: {_model_label(_em)}: {_ea:+.1f}{_rsn_str}{_marker}")
+                    _routing_lines.append(f"    {_model_label(_em)}: {_ea:+.1f}{_rsn_str}{_marker}")
                 if not _eval_nonzero:
-                    click.echo("  [routing] eval: no relevant stats (no adjustment)")
+                    _routing_lines.append("    No relevant stats (no adjustment)")
                 _cat_label = routing_decision.category if routing_decision else "?"
                 _cat_nonzero = [
                     (m, adj)
@@ -560,9 +565,9 @@ class RunPipeline:
                         _rsn = _cat_reasons.get(_cm, "")
                         _rsn_str = f" ({_rsn})" if _rsn else ""
                         _marker = " <- selected" if _cm == _scored.selected_model else ""
-                        click.echo(f"  [routing] eval [{_cat_label}]: {_model_label(_cm)}: {_ca:+.1f}{_rsn_str}{_marker}")
+                        _routing_lines.append(f"    [{_cat_label}] {_model_label(_cm)}: {_ca:+.1f}{_rsn_str}{_marker}")
                 else:
-                    click.echo(f"  [routing] eval [{_cat_label}]: no category evidence (global only)")
+                    _routing_lines.append(f"    [{_cat_label}] No category evidence (global only)")
 
         _matched_skills: list[MatchedSkill] = []
         if _repo_facts is not None and routing_decision is not None:
@@ -604,15 +609,31 @@ class RunPipeline:
             else:
                 _wf_display = "direct"
                 _wf_display_reason = "forced by workflow setting"
-            click.echo(f"  [routing] workflow: {_wf_display}")
-            click.echo(f"  [routing] reason: {_wf_display_reason}")
-            click.echo(f"  [profile] {_profile_decision.profile} - {_profile_decision.reason}")
+            _routing_lines.append(f"  Workflow: {_wf_display}")
+            _routing_lines.append(f"  Reason: {_wf_display_reason}")
+            if _routing_lines:
+                click.echo("Routing")
+                for _rl in _routing_lines:
+                    click.echo(_rl)
+            click.echo("")
+            click.echo("Execution")
+            click.echo(f"  Mode: {_profile_display_label(_profile_decision.profile)}")
+            click.echo(f"  Reason: {_profile_decision.reason}")
+            click.echo("")
+            click.echo("Verification")
             if _verification_plan.has_commands:
+                _first_vcmd = True
                 for _vcmd in _verification_plan.commands:
+                    if not _first_vcmd:
+                        click.echo("")
+                    _first_vcmd = False
                     _argv_str = " ".join(_vcmd.argv)
-                    click.echo(f"  [verification] {_vcmd.name} {_vcmd.safety.value} {_vcmd.source.value} {_argv_str}")
+                    click.echo(f"  Name: {_vcmd.name}")
+                    click.echo(f"  Safety: {_vcmd.safety.value}")
+                    click.echo(f"  Source: {_vcmd.source.value}")
+                    click.echo(f"  Command: {_argv_str}")
             else:
-                click.echo("  [verification] no verification command detected")
+                click.echo("  No verification command detected")
 
         if detail != "default" and _matched_skills:
             click.echo("\nSkills")

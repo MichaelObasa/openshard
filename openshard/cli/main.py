@@ -31,6 +31,7 @@ from openshard.cli.run_output import (
     _render_repo_summary as _render_repo_summary,
     _format_model_slug as _format_model_slug,
     _model_label,
+    _profile_display_label,
     _build_routing_line as _build_routing_line,
     _exec_message as _exec_message,
     _build_model_line as _build_model_line,
@@ -702,7 +703,8 @@ def _render_log_entry(entry: dict, detail: str) -> None:
     if detail != "default" and entry.get("execution_profile"):
         _profile = entry["execution_profile"]
         _reason = entry.get("execution_profile_reason", "")
-        click.echo(f"  Profile: {_profile}")
+        click.echo("  Execution")
+        click.echo(f"    Mode: {_profile_display_label(_profile)}")
         if _reason:
             click.echo(f"    Reason: {_reason}")
 
