@@ -240,7 +240,7 @@ class TestEvalScoringCLI(unittest.TestCase):
         finally:
             os.chdir(old)
 
-        self.assertIn("eval scoring: enabled", result.output)
+        self.assertIn("Eval scoring: enabled", result.output)
 
     def test_more_output_without_flag_does_not_show_eval_scoring(self, tmp_path=None):
         import tempfile
@@ -255,7 +255,7 @@ class TestEvalScoringCLI(unittest.TestCase):
         finally:
             os.chdir(old)
 
-        self.assertNotIn("eval scoring", result.output)
+        self.assertNotIn("Eval scoring", result.output)
 
     def _run_without_key(self, args: list[str], tmp: Path) -> object:
         """Invoke CLI from tmp dir with OPENROUTER_API_KEY removed from env."""
@@ -290,7 +290,7 @@ class TestEvalScoringCLI(unittest.TestCase):
         result = self._run_without_key(
             ["run", "--eval-scoring", "--more", "--dry-run", "hello"], tmp
         )
-        self.assertIn("eval scoring: enabled", result.output)
+        self.assertIn("Eval scoring: enabled", result.output)
         self.assertNotIn("OPENROUTER_API_KEY", result.output)
 
     def test_non_dry_run_fails_without_api_key(self):
@@ -316,7 +316,7 @@ class TestEvalScoringCLI(unittest.TestCase):
              patch("openshard.run.pipeline.analyze_repo", return_value=None):
             result = runner.invoke(cli, ["run", "--more", "--dry-run", "hello"])
 
-        self.assertIn("eval scoring: enabled", result.output)
+        self.assertIn("Eval scoring: enabled", result.output)
 
 
 def _cat_stat(
