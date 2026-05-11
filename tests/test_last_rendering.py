@@ -101,7 +101,8 @@ class TestLastProfileDisplay(unittest.TestCase):
             "execution_profile_reason": "security category",
         }
         out = _render(entry, detail="more")
-        self.assertIn("Profile: native_deep", out)
+        self.assertIn("Execution", out)
+        self.assertIn("Mode: Careful run", out)
         self.assertIn("Reason: security category", out)
 
     def test_full_shows_profile_when_present(self):
@@ -111,7 +112,8 @@ class TestLastProfileDisplay(unittest.TestCase):
             "execution_profile_reason": "simple/safe task",
         }
         out = _render(entry, detail="full")
-        self.assertIn("Profile: native_light", out)
+        self.assertIn("Execution", out)
+        self.assertIn("Mode: Standard run", out)
         self.assertIn("Reason: simple/safe task", out)
 
     def test_profile_without_reason(self):
@@ -120,17 +122,18 @@ class TestLastProfileDisplay(unittest.TestCase):
             "execution_profile": "native_swarm",
         }
         out = _render(entry, detail="more")
-        self.assertIn("Profile: native_swarm", out)
+        self.assertIn("Execution", out)
+        self.assertIn("Mode: Parallel run", out)
 
     def test_no_crash_on_entry_without_profile_fields(self):
         entry = {"task": "do a thing"}
         out = _render(entry, detail="more")
-        self.assertNotIn("Profile:", out)
+        self.assertNotIn("Execution", out)
 
     def test_no_crash_on_entry_without_profile_fields_full(self):
         entry = {"task": "do a thing"}
         out = _render(entry, detail="full")
-        self.assertNotIn("Profile:", out)
+        self.assertNotIn("Execution", out)
 
     def test_default_detail_does_not_show_profile(self):
         entry = {
@@ -139,7 +142,7 @@ class TestLastProfileDisplay(unittest.TestCase):
             "execution_profile_reason": "security category",
         }
         out = _render(entry, detail="default")
-        self.assertNotIn("Profile:", out)
+        self.assertNotIn("Execution", out)
 
 
 class TestLastVerificationDisplay(unittest.TestCase):
