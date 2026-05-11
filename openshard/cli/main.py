@@ -1035,12 +1035,39 @@ def _export_run_entry(entry: dict, include_notes: bool = False) -> dict:
     return row
 
 
+def _render_export_preview(rows: list[dict]) -> None:
+    _TW, _MW, _MDW, _CW, _SW = 21, 10, 11, 10, 10
+    click.echo("Export preview")
+    click.echo(f"\nRuns: {len(rows)}\n")
+    click.echo(
+        "Time".ljust(_TW) + "Mode".ljust(_MW) + "Model".ljust(_MDW)
+        + "Cost".ljust(_CW) + "Saving".ljust(_SW) + "Feedback"
+    )
+    for row in rows:
+        ts = (row.get("timestamp") or "").rstrip("Z").replace("T", " ")[:16]
+        mode = row.get("execution_mode_label") or "-"
+        model_raw = row.get("execution_model") or ""
+        model = _model_label(model_raw) if model_raw else "-"
+        cost = row.get("total_cost_usd")
+        cost_s = f"${cost:.4f}" if cost is not None else "-"
+        pct = row.get("estimated_saving_percent")
+        saving_s = f"{pct}%" if pct is not None else "-"
+        feedback = row.get("feedback_rating") or "-"
+        click.echo(
+            ts.ljust(_TW) + mode.ljust(_MW) + model.ljust(_MDW)
+            + cost_s.ljust(_CW) + saving_s.ljust(_SW) + feedback
+        )
+
+
 @cli.command("export-runs")
 @click.option("--output", default=None, help="Write JSONL to this path instead of stdout.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Export most recent N entries.")
 @click.option("--with-notes", is_flag=True, default=False, help="Include run notes in export.")
-def export_runs(output: str | None, limit: int | None, with_notes: bool) -> None:
+@click.option("--preview", is_flag=True, default=False, help="Print a human-readable table instead of JSONL.")
+def export_runs(output: str | None, limit: int | None, with_notes: bool, preview: bool) -> None:
     """Export run history as clean JSONL for eval analysis and review."""
+    if preview and output:
+        raise click.UsageError("--preview and --output cannot be used together; preview is terminal-only.")
     log_path = Path.cwd() / _LOG_PATH
     if not log_path.exists():
         click.echo("No run history found. Run a task first with 'openshard run'.")
@@ -1051,7 +1078,11 @@ def export_runs(output: str | None, limit: int | None, with_notes: bool) -> None
         return
     if limit is not None:
         entries = entries[-limit:]
-    lines = "\n".join(json.dumps(_export_run_entry(e, include_notes=with_notes)) for e in entries)
+    rows = [_export_run_entry(e, include_notes=with_notes) for e in entries]
+    if preview:
+        _render_export_preview(rows)
+        return
+    lines = "\n".join(json.dumps(r) for r in rows)
     if output:
         output_path = Path(output)
         if output_path.parent != Path("."):
