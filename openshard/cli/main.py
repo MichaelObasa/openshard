@@ -1016,7 +1016,10 @@ def export_runs(output: str | None, limit: int | None, with_notes: bool) -> None
         entries = entries[-limit:]
     lines = "\n".join(json.dumps(_export_run_entry(e, include_notes=with_notes)) for e in entries)
     if output:
-        Path(output).write_text(lines + "\n", encoding="utf-8")
+        output_path = Path(output)
+        if output_path.parent != Path("."):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(lines + "\n", encoding="utf-8")
     else:
         click.echo(lines)
 
