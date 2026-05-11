@@ -541,7 +541,7 @@ class RunPipeline:
                     _marker = " <- selected" if _hm == _scored.selected_model else ""
                     _routing_lines.append(f"    {_model_label(_hm)}: {_hadj:+.1f}{_rsn_str}{_marker}")
             if _use_eval_scoring:
-                _routing_lines.append("  Eval scoring: enabled")
+                _routing_lines.append("  eval scoring: enabled")
                 _eval_nonzero = [
                     (m, adj)
                     for m, adj in _eval_adjustments.items()
