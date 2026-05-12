@@ -189,3 +189,62 @@ def test_build_summary_no_verif_runs():
     s = build_workflow_history_summary(runs, "standard")
     assert s is not None
     assert s.verification_pass_rate == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Read-only fast path
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("category", ["standard", "visual", "boilerplate"])
+def test_readonly_non_complex_is_always_direct(category):
+    result = select_workflow(category, _facts(), None, False, readonly=True)
+    assert result.workflow == "direct"
+    assert result.reason == "read-only task — direct analysis"
+
+
+def test_readonly_security_category_is_direct():
+    result = select_workflow("security", _facts(), None, False, readonly=True)
+    assert result.workflow == "direct"
+    assert result.reason == "read-only task — direct analysis"
+
+
+def test_readonly_complex_category_may_use_staged():
+    result = select_workflow("complex", _facts(), None, False, readonly=True)
+    assert result.workflow == "staged"
+    assert result.reason == "category defaults to staged"
+
+
+def test_readonly_complex_can_deescalate():
+    good = _summary(retry_rate=0.05, pass_rate=0.95)
+    result = select_workflow("complex", _facts(), good, False, readonly=True)
+    assert result.workflow == "direct"
+    assert result.reason == "history cleared gates for staged category"
+
+
+def test_readonly_with_risky_paths_still_direct():
+    result = select_workflow("standard", _facts(["auth/login.py"]), None, False, readonly=True)
+    assert result.workflow == "direct"
+    assert result.reason == "read-only task — direct analysis"
+
+
+def test_readonly_with_high_retry_rate_still_direct():
+    result = select_workflow("standard", _facts(), _summary(0.9, 0.2), False, readonly=True)
+    assert result.workflow == "direct"
+    assert result.reason == "read-only task — direct analysis"
+
+
+def test_write_task_with_risky_paths_still_staged():
+    result = select_workflow("standard", _facts(["auth/login.py"]), None, False, readonly=False)
+    assert result.workflow == "staged"
+    assert result.reason == "risky paths detected"
+
+
+def test_write_task_security_still_staged():
+    result = select_workflow("security", _facts(), None, False, readonly=False)
+    assert result.workflow == "staged"
+    assert result.reason == "category defaults to staged"
+
+
+def test_readonly_defaults_to_false():
+    result = select_workflow("security", _facts(), None, False)
+    assert result.workflow == "staged"
