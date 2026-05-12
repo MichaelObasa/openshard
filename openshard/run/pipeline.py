@@ -65,6 +65,7 @@ from openshard.security.paths import resolve_safe_repo_path, UnsafePathError
 from openshard.skills.context import build_skills_context
 from openshard.skills.discovery import discover_skills
 from openshard.skills.matcher import MatchedSkill, match_skills
+from openshard.run.validator_policy import ValidatorPolicyDecision, should_run_validator
 from openshard.verification.executor import run_verification_plan as _run_verification_plan, confirm_or_abort  # noqa: F401
 from openshard.verification.plan import CommandSafety, VerificationPlan, build_verification_plan
 
@@ -651,6 +652,7 @@ class RunPipeline:
         _dispatch_planner_model: str | None = None
         _dispatch_executor_model: str | None = None
         _validator_result: dict | None = None
+        _validator_policy: ValidatorPolicyDecision | None = None
 
         _can_dispatch = (
             self._experimental_tier_dispatch
@@ -841,12 +843,24 @@ class RunPipeline:
             else:
                 usage.estimated_cost = total_stage_cost or None
 
-        # --- Validator stage (experimental tier dispatch, non-dry-run only) ----------
+        # --- Validator policy + stage (experimental tier dispatch only) --------------
+        if _can_dispatch and _tier_dispatch_receipt is not None:
+            _validator_policy = should_run_validator(
+                has_validator_model=_tier_dispatch_receipt.validator_model is not None,
+                dry_run=dry_run,
+                can_dispatch=_can_dispatch,
+                tier_dispatch_applied=_tier_dispatch_receipt.applied,
+                readonly_task=_readonly_task,
+                routing_category=routing_decision.category if routing_decision else "standard",
+                execution_profile=_profile_decision.profile if _profile_decision else "native_light",
+                workflow="staged" if _use_stages else "direct",
+                risky_paths_count=len(_repo_facts.risky_paths) if _repo_facts else 0,
+                verification_attempted=bool(write and verify),
+            )
+
         if (
-            _can_dispatch
-            and not dry_run
-            and _tier_dispatch_receipt is not None
-            and _tier_dispatch_receipt.validator_model is not None
+            _validator_policy is not None
+            and _validator_policy.run
             and exec_result is not None
         ):
             _val_t0 = time.time()
@@ -967,6 +981,10 @@ class RunPipeline:
                 if _dr_extra is None:
                     _dr_extra = {}
                 _dr_extra["validator_result"] = _validator_result
+            if _validator_policy is not None:
+                if _dr_extra is None:
+                    _dr_extra = {}
+                _dr_extra["validator_policy"] = {"run": _validator_policy.run, "reason": _validator_policy.reason}
             try:
                 _log_run(start, task, generator, retry_triggered, final_files,
                          verification_attempted=False, verification_passed=None,
@@ -1164,6 +1182,10 @@ class RunPipeline:
                         if _vf_extra is None:
                             _vf_extra = {}
                         _vf_extra["validator_result"] = _validator_result
+                    if _validator_policy is not None:
+                        if _vf_extra is None:
+                            _vf_extra = {}
+                        _vf_extra["validator_policy"] = {"run": _validator_policy.run, "reason": _validator_policy.reason}
                     _log_run(start, task, generator, retry_triggered, final_files,
                              verification_attempted=True, verification_passed=False,
                              workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
@@ -1303,7 +1325,7 @@ class RunPipeline:
             _print_native_summary(_native_meta, detail=detail)
         if _native_meta is None and _tier_dispatch_receipt is not None and detail != "default":
             from openshard.cli.run_output import _print_tier_dispatch_block
-            _print_tier_dispatch_block(_tier_dispatch_receipt, detail, validator_result=_validator_result)
+            _print_tier_dispatch_block(_tier_dispatch_receipt, detail, validator_result=_validator_result, validator_policy=_validator_policy)
         _extra_metadata: dict | None = None
         if _native_meta is not None:
             _extra_metadata = {
@@ -1502,6 +1524,10 @@ class RunPipeline:
             if _extra_metadata is None:
                 _extra_metadata = {}
             _extra_metadata["validator_result"] = _validator_result
+        if _native_meta is None and _validator_policy is not None:
+            if _extra_metadata is None:
+                _extra_metadata = {}
+            _extra_metadata["validator_policy"] = {"run": _validator_policy.run, "reason": _validator_policy.reason}
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
                      verification_attempted=(write and verify),
