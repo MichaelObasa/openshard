@@ -782,7 +782,8 @@ def _render_log_entry(entry: dict, detail: str) -> None:
         if _tdr and _tdr.get("enabled"):
             from openshard.cli.run_output import _render_tier_dispatch_block
             _init_model = entry.get("routing_selected_model")
-            for line in _render_tier_dispatch_block(_tdr, detail, initial_model=_init_model):
+            _vr = entry.get("validator_result")
+            for line in _render_tier_dispatch_block(_tdr, detail, initial_model=_init_model, validator_result=_vr):
                 click.echo(line)
 
     duration = entry.get("duration_seconds", 0)

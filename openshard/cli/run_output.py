@@ -1165,7 +1165,7 @@ def _print_dry_run(files: list[ChangedFile]) -> None:
         click.echo("")
 
 
-def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None = None) -> list[str]:
+def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None = None, validator_result: dict | None = None) -> list[str]:
     """Render tier dispatch receipt as lines. tdr can be dict or SimpleNamespace."""
     if detail not in ("more", "full"):
         return []
@@ -1194,7 +1194,11 @@ def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None
         lines.append("  Model plan")
         lines.append(f"    Planning:  {_lbl(p_model)}")
         lines.append(f"    Work:      {_lbl(e_model)}")
-        lines.append(f"    Validator: {_lbl(v_model)} (reserved)")
+        if validator_result:
+            _vv = validator_result.get("verdict", "?")
+            lines.append(f"    Validator: {_lbl(v_model)} ({_vv})")
+        else:
+            lines.append(f"    Validator: {_lbl(v_model)} (reserved)")
         lines.append("")
         lines.append("  Dispatch")
         lines.append(f"    Applied: {'yes' if applied else 'no'}")
@@ -1220,7 +1224,14 @@ def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None
         lines.append(f"    Validator: {_lbl(v_model)}")
         lines.append(f"      Tier:  {v_tier}")
         lines.append(f"      Model: {v_model}")
-        lines.append("      Used:  no, reserved for validation")
+        if validator_result:
+            _vv = validator_result.get("verdict", "?")
+            _vsum = validator_result.get("summary", "")
+            lines.append(f"      Verdict: {_vv}")
+            if _vsum:
+                lines.append(f"      Summary: {_vsum}")
+        else:
+            lines.append("      Used:  no, reserved for validation")
         lines.append("")
         lines.append("  Dispatch")
         lines.append(f"    Applied: {'yes' if applied else 'no'}")
@@ -1237,6 +1248,6 @@ def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None
     return lines
 
 
-def _print_tier_dispatch_block(tdr: Any, detail: str) -> None:
-    for line in _render_tier_dispatch_block(tdr, detail):
+def _print_tier_dispatch_block(tdr: Any, detail: str, validator_result: dict | None = None) -> None:
+    for line in _render_tier_dispatch_block(tdr, detail, validator_result=validator_result):
         click.echo(line)

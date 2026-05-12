@@ -38,7 +38,7 @@ from openshard.execution.generator import (
 from openshard.execution.opencode_executor import OpenCodeExecutor
 from openshard.native.context import NativeVerificationLoop, render_verification_failure_context
 from openshard.native.executor import NativeAgentExecutor
-from openshard.execution.stages import StageRun, split_task, route_stage, run_planning_stage
+from openshard.execution.stages import Stage, StageRun, split_task, route_stage, run_planning_stage, run_validator_stage
 from openshard.history.adjustments import (
     compute_history_adjustments,
     compute_history_adjustment_reasons,
@@ -650,6 +650,7 @@ class RunPipeline:
         _tier_dispatch_receipt = None
         _dispatch_planner_model: str | None = None
         _dispatch_executor_model: str | None = None
+        _validator_result: dict | None = None
 
         _can_dispatch = (
             self._experimental_tier_dispatch
@@ -840,6 +841,43 @@ class RunPipeline:
             else:
                 usage.estimated_cost = total_stage_cost or None
 
+        # --- Validator stage (experimental tier dispatch, non-dry-run only) ----------
+        if (
+            _can_dispatch
+            and not dry_run
+            and _tier_dispatch_receipt is not None
+            and _tier_dispatch_receipt.validator_model is not None
+            and exec_result is not None
+        ):
+            _val_t0 = time.time()
+            spinner.start("Validating - reviewing implementation result")
+            try:
+                _val_dict, _val_usage = run_validator_stage(
+                    generator.client,
+                    task=task,
+                    result_summary=exec_result.summary,
+                    notes=exec_result.notes or [],
+                    model=_tier_dispatch_receipt.validator_model,
+                )
+                _validator_result = _val_dict
+                stage_runs.append(StageRun(
+                    stage=Stage(stage_type="validation", description="Review implementation result"),
+                    model=_tier_dispatch_receipt.validator_model,
+                    duration=time.time() - _val_t0,
+                    cost=_val_usage.estimated_cost if _val_usage else None,
+                    summary=f"verdict: {_val_dict.get('verdict', '?')}",
+                ))
+            except Exception as _val_exc:
+                _validator_result = {
+                    "verdict": "error",
+                    "summary": str(_val_exc)[:200],
+                    "model": _tier_dispatch_receipt.validator_model,
+                }
+                if detail == "full":
+                    click.echo(f"  [validator] warning: {_val_exc}")
+            finally:
+                spinner.stop()
+
         # Safety net: discard generated file changes for read-only tasks even if the
         # model ignored the read-only instruction injected into the context.
         # For dry-run, exec_result.files is already [] so this block never fires.
@@ -875,6 +913,18 @@ class RunPipeline:
                 _sr_cost = f"${sr.cost:.4f}" if sr.cost is not None else "-"
                 _stage_label = "Analysis" if (_readonly_task and sr.stage.stage_type == "implementation") else sr.stage.stage_type.capitalize()
                 click.echo(f"  {_stage_label} ({_model_label(sr.model)}): {sr.duration:.1f}s, {_sr_cost}")
+
+        # Validator verdict (--more / --full, shown when validator ran this run)
+        if detail != "default" and _validator_result is not None:
+            _vv = _validator_result.get("verdict", "?")
+            click.echo(f"\nValidator: {_vv}")
+            if detail == "full":
+                _vsum = _validator_result.get("summary", "")
+                if _vsum:
+                    click.echo(f"  Summary: {_vsum}")
+                _vmod = _validator_result.get("model")
+                if _vmod:
+                    click.echo(f"  Model:   {_model_label(_vmod)}")
 
         if exec_result.files:
             _fc = sum(1 for f in exec_result.files if f.change_type == "create")
@@ -913,6 +963,10 @@ class RunPipeline:
             _dr_extra: dict | None = None
             if _tier_dispatch_receipt is not None:
                 _dr_extra = {"tier_dispatch_receipt": asdict(_tier_dispatch_receipt)}
+            if _validator_result is not None:
+                if _dr_extra is None:
+                    _dr_extra = {}
+                _dr_extra["validator_result"] = _validator_result
             try:
                 _log_run(start, task, generator, retry_triggered, final_files,
                          verification_attempted=False, verification_passed=None,
@@ -1106,6 +1160,10 @@ class RunPipeline:
                     if _tier_dispatch_receipt is not None:
                         from dataclasses import asdict as _asdict
                         _vf_extra = {"tier_dispatch_receipt": _asdict(_tier_dispatch_receipt)}
+                    if _validator_result is not None:
+                        if _vf_extra is None:
+                            _vf_extra = {}
+                        _vf_extra["validator_result"] = _validator_result
                     _log_run(start, task, generator, retry_triggered, final_files,
                              verification_attempted=True, verification_passed=False,
                              workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
@@ -1245,7 +1303,7 @@ class RunPipeline:
             _print_native_summary(_native_meta, detail=detail)
         if _native_meta is None and _tier_dispatch_receipt is not None and detail != "default":
             from openshard.cli.run_output import _print_tier_dispatch_block
-            _print_tier_dispatch_block(_tier_dispatch_receipt, detail)
+            _print_tier_dispatch_block(_tier_dispatch_receipt, detail, validator_result=_validator_result)
         _extra_metadata: dict | None = None
         if _native_meta is not None:
             _extra_metadata = {
@@ -1440,6 +1498,10 @@ class RunPipeline:
         if _native_meta is None and _tier_dispatch_receipt is not None:
             from dataclasses import asdict as _asdict
             _extra_metadata = {"tier_dispatch_receipt": _asdict(_tier_dispatch_receipt)}
+        if _native_meta is None and _validator_result is not None:
+            if _extra_metadata is None:
+                _extra_metadata = {}
+            _extra_metadata["validator_result"] = _validator_result
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
                      verification_attempted=(write and verify),
