@@ -784,7 +784,11 @@ def _render_log_entry(entry: dict, detail: str) -> None:
             from openshard.cli.run_output import _render_tier_dispatch_block
             _init_model = entry.get("routing_selected_model")
             _vr = entry.get("validator_result")
-            for line in _render_tier_dispatch_block(_tdr, detail, initial_model=_init_model, validator_result=_vr, validator_policy=_vpol):
+            _is_direct_ask = _is_ro and not any(
+                sr.get("stage_type") == "planning"
+                for sr in (entry.get("stage_runs") or [])
+            )
+            for line in _render_tier_dispatch_block(_tdr, detail, initial_model=_init_model, validator_result=_vr, validator_policy=_vpol, is_ask=_is_direct_ask):
                 click.echo(line)
         elif _vpol and not _vpol.get("run"):
             click.echo(f"\nValidator: skipped — {_vpol.get('reason', '')}")
@@ -807,26 +811,31 @@ def _render_log_entry(entry: dict, detail: str) -> None:
             if receipt:
                 click.echo(receipt)
     elif detail in ("more", "full"):
-        from openshard.cost.baseline import compute_baseline_comparison
+        from openshard.cost.baseline import (
+            compute_baseline_comparison,
+            format_cost_difference,
+            format_full_comparison_lines,
+        )
         _pt = entry.get("prompt_tokens") or 0
         _ct = entry.get("completion_tokens") or 0
         _cmp = compute_baseline_comparison(_pt, _ct, actual_cost=cost)
         if _cmp is not None:
-            _saving = _cmp["estimated_saving_usd"]
-            _pct = _cmp["estimated_saving_percent"]
-            if _saving > 0:
-                _diff_str = f"${_saving:.4f} cheaper"
-                _pct_str = f" ({_pct}%)" if _pct is not None else ""
-            elif _saving < 0:
-                _diff_str = f"${abs(_saving):.4f} more expensive"
-                _pct_str = f" ({abs(_pct)}%)" if _pct is not None else ""
-            else:
-                _diff_str = f"${_saving:.4f} equal"
-                _pct_str = ""
+            _frontier_cost = _cmp["frontier_baseline_cost_usd"]
             click.echo("\nCost comparison")
-            click.echo(f"  Actual cost: ${_cmp['actual_cost_usd']:.4f}")
-            click.echo(f"  Frontier-only baseline: ${_cmp['frontier_baseline_cost_usd']:.4f}")
-            click.echo(f"  Difference: {_diff_str}{_pct_str}")
+            click.echo(f"  OpenShard: ${_cmp['actual_cost_usd']:.4f}")
+            if detail == "more":
+                click.echo(f"  Sonnet 4.6-only estimate: ${_frontier_cost:.4f}")
+                _diff = format_cost_difference(_cmp["actual_cost_usd"], _frontier_cost)
+                click.echo(f"  Difference: {_diff}")
+            else:  # full
+                _rows = format_full_comparison_lines(_pt, _ct, _cmp["actual_cost_usd"])
+                if _rows:
+                    click.echo("")
+                    click.echo("  Compared with")
+                    for _row in _rows:
+                        click.echo(_row)
+                click.echo("")
+                click.echo("  Method: same-token API price estimate. Real single-model cost may differ.")
 
 
 @cli.command()

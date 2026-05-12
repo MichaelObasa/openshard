@@ -3,7 +3,14 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from openshard.cost.baseline import BASELINE_MODELS, compute_baseline_comparison, format_baseline_line
+from openshard.cost.baseline import (
+    BASELINE_MODELS,
+    FULL_COMPARISON_MODELS,
+    compute_baseline_comparison,
+    format_baseline_line,
+    format_cost_difference,
+    format_full_comparison_lines,
+)
 
 
 class TestFormatBaselineLine(unittest.TestCase):
@@ -183,3 +190,95 @@ class TestComputeBaselineComparison(unittest.TestCase):
     def test_returns_none_when_model_unresolvable(self):
         with patch("openshard.cost.baseline.compute_cost", return_value=None):
             self.assertIsNone(compute_baseline_comparison(1_000, 500, 0.01))
+
+
+class TestFormatCostDifference(unittest.TestCase):
+
+    def test_cheaper_contains_cheaper(self):
+        self.assertIn("cheaper", format_cost_difference(1.0, 9.0))
+
+    def test_cheaper_contains_pct(self):
+        self.assertIn("%", format_cost_difference(1.0, 9.0))
+
+    def test_cheaper_contains_x_lower(self):
+        self.assertIn("lower cost", format_cost_difference(1.0, 9.0))
+
+    def test_more_expensive_contains_phrase(self):
+        self.assertIn("more expensive", format_cost_difference(9.0, 1.0))
+
+    def test_more_expensive_contains_x_higher(self):
+        self.assertIn("higher cost", format_cost_difference(9.0, 1.0))
+
+    def test_equal_returns_equal(self):
+        self.assertEqual("equal", format_cost_difference(5.0, 5.0))
+
+    def test_zero_actual_with_positive_baseline(self):
+        result = format_cost_difference(0.0, 5.0)
+        self.assertIn("cheaper", result)
+        self.assertIn("100%", result)
+        self.assertNotIn("x lower", result)
+
+    def test_baseline_zero_returns_equal(self):
+        self.assertEqual("equal", format_cost_difference(5.0, 0.0))
+
+    def test_x_10x_uses_integer_format(self):
+        # 0.1 vs 100.0 → x = 1000, should be "1000x" not "1000.0x"
+        result = format_cost_difference(0.1, 100.0)
+        self.assertIn("1000x", result)
+        self.assertNotIn("1000.0x", result)
+
+    def test_pct_uses_baseline_as_denominator_cheaper(self):
+        # saving=1.0, baseline=2.0, pct = round(1/2*100) = 50
+        result = format_cost_difference(1.0, 2.0)
+        self.assertIn("50%", result)
+
+    def test_pct_uses_baseline_as_denominator_more_expensive(self):
+        # excess=1.0, baseline=1.0, pct = round(1/1*100) = 100
+        result = format_cost_difference(2.0, 1.0)
+        self.assertIn("100%", result)
+
+
+class TestFullComparisonModels(unittest.TestCase):
+
+    def test_full_comparison_models_includes_sonnet46(self):
+        ids = [m for _, m in FULL_COMPARISON_MODELS]
+        self.assertTrue(any("claude-sonnet-4.6" in m for m in ids))
+
+    def test_full_comparison_models_includes_gpt55(self):
+        ids = [m for _, m in FULL_COMPARISON_MODELS]
+        self.assertTrue(any("gpt-5.5" in m for m in ids))
+
+    def test_full_comparison_models_includes_opus47(self):
+        ids = [m for _, m in FULL_COMPARISON_MODELS]
+        self.assertTrue(any("claude-opus-4.7" in m for m in ids))
+
+
+class TestFormatFullComparisonLines(unittest.TestCase):
+
+    def test_returns_list_of_strings(self):
+        result = format_full_comparison_lines(500_000, 500_000, 1.0)
+        self.assertIsInstance(result, list)
+        for row in result:
+            self.assertIsInstance(row, str)
+
+    def test_sonnet46_row_present(self):
+        result = format_full_comparison_lines(500_000, 500_000, 1.0)
+        self.assertTrue(any("Sonnet 4.6" in row for row in result))
+
+    def test_each_row_contains_dollar(self):
+        result = format_full_comparison_lines(500_000, 500_000, 1.0)
+        self.assertGreater(len(result), 0)
+        for row in result:
+            self.assertIn("$", row)
+
+    def test_skips_unpriced_model(self):
+        def fake_compute(model_id, pt, ct):
+            if "gpt" in model_id:
+                return None
+            from openshard.providers.openrouter import compute_cost as real
+            return real(model_id, pt, ct)
+
+        with patch("openshard.cost.baseline.compute_cost", side_effect=fake_compute):
+            result = format_full_comparison_lines(500_000, 500_000, 1.0)
+        self.assertFalse(any("GPT-5.5" in row for row in result))
+        self.assertTrue(any("Sonnet 4.6" in row for row in result))

@@ -48,6 +48,59 @@ def format_baseline_line(
 
 FRONTIER_BASELINE_MODEL = "anthropic/claude-sonnet-4.6"
 
+FULL_COMPARISON_MODELS: list[tuple[str, str]] = [
+    ("Sonnet 4.6", "anthropic/claude-sonnet-4.6"),
+    ("GPT-5.5",    "openai/gpt-5.5"),
+    ("Opus 4.7",   "anthropic/claude-opus-4.7"),
+]
+
+
+def format_cost_difference(actual: float, baseline: float) -> str:
+    """Full directional phrase for a cost comparison.
+
+    Returns one of:
+      '$0.0071 cheaper (68%, 3.2x lower cost)'
+      '$0.0006 more expensive (7%, 1.1x higher cost)'
+      '$X.XXXX cheaper (100%)'   when actual==0 and baseline>0, no x-multiple
+      'equal'
+    """
+    if baseline <= 0 or actual == baseline:
+        return "equal"
+    if actual <= 0:
+        return f"${baseline:.4f} cheaper (100%)"
+    saving = baseline - actual
+    if saving > 0:
+        pct = round(saving / baseline * 100)
+        x = baseline / actual
+        x_str = f"{round(x)}x" if x >= 10 else f"{x:.1f}x"
+        return f"${saving:.4f} cheaper ({pct}%, {x_str} lower cost)"
+    else:
+        excess = -saving
+        pct = round(excess / baseline * 100)
+        x = actual / baseline
+        x_str = f"{round(x)}x" if x >= 10 else f"{x:.1f}x"
+        return f"${excess:.4f} more expensive ({pct}%, {x_str} higher cost)"
+
+
+def format_full_comparison_lines(
+    prompt_tokens: int,
+    completion_tokens: int,
+    actual_cost: float,
+) -> list[str]:
+    """Return one formatted line per priceable model in FULL_COMPARISON_MODELS.
+
+    Each line: '    {label}-only:  ${bc:.4f}  {format_cost_difference(actual_cost, bc)}'
+    Models where compute_cost returns None are silently skipped.
+    """
+    lines: list[str] = []
+    for label, model_id in FULL_COMPARISON_MODELS:
+        bc = compute_cost(model_id, prompt_tokens, completion_tokens)
+        if bc is None:
+            continue
+        diff = format_cost_difference(actual_cost, bc)
+        lines.append(f"    {label}-only:  ${bc:.4f}  {diff}")
+    return lines
+
 
 def compute_baseline_comparison(
     prompt_tokens: int,

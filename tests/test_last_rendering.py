@@ -3141,16 +3141,16 @@ class TestLastCostComparisonBlock(unittest.TestCase):
     def test_more_shows_cost_comparison(self):
         out = _render(self._ENTRY_WITH_COST, detail="more")
         self.assertIn("Cost comparison", out)
-        self.assertIn("Actual cost:", out)
-        self.assertIn("Frontier-only baseline:", out)
+        self.assertIn("OpenShard:", out)
+        self.assertIn("Sonnet 4.6-only estimate:", out)
         self.assertIn("Difference:", out)
 
     def test_full_shows_cost_comparison(self):
         out = _render(self._ENTRY_WITH_COST, detail="full")
         self.assertIn("Cost comparison", out)
-        self.assertIn("Actual cost:", out)
-        self.assertIn("Frontier-only baseline:", out)
-        self.assertIn("Difference:", out)
+        self.assertIn("OpenShard:", out)
+        self.assertIn("Compared with", out)
+        self.assertNotIn("Frontier-only baseline:", out)
 
     def test_cheaper_case(self):
         out = _render(self._ENTRY_WITH_COST, detail="more")
@@ -3196,7 +3196,136 @@ class TestLastCostComparisonBlock(unittest.TestCase):
         out = _render(entry, detail="more")
         self.assertIn("Cost comparison", out)
         diff_line = [ln for ln in out.splitlines() if "Difference:" in ln][0]
-        self.assertNotIn("(", diff_line)
+        # actual=0, baseline>0 → cheaper (100%), no x-multiple
+        self.assertIn("cheaper", diff_line)
+        self.assertIn("100%", diff_line)
+        self.assertNotIn("x lower", diff_line)
+
+
+_TDR_ENABLED = {
+    "enabled": True,
+    "applied": True,
+    "planner_model": "anthropic/claude-sonnet-4.6",
+    "planner_tier": "frontier-reasoning-model",
+    "executor_model": "z-ai/glm-5.1",
+    "executor_tier": "worker",
+    "validator_model": "anthropic/claude-sonnet-4.6",
+    "validator_tier": "independent-validator-model",
+    "tier_source": "category_fallback",
+    "fallback_used": False,
+    "fallback_reason": "",
+    "warnings": [],
+}
+
+
+class TestTierDispatchModelPlanAskMode(unittest.TestCase):
+
+    def _ask_entry(self, **overrides):
+        return {
+            "task": "what does main.py do?",
+            "routing_rationale": "read-only analysis",
+            "stage_runs": [],
+            "tier_dispatch_receipt": _TDR_ENABLED,
+            "validator_policy": {"run": False, "reason": "read-only task"},
+            **overrides,
+        }
+
+    def test_ask_more_no_planning_label(self):
+        out = _render(self._ask_entry(), detail="more")
+        self.assertNotIn("Planning:", out)
+
+    def test_ask_full_no_planning_label(self):
+        out = _render(self._ask_entry(), detail="full")
+        self.assertNotIn("Planning:", out)
+
+    def test_ask_more_shows_ask_label(self):
+        out = _render(self._ask_entry(), detail="more")
+        self.assertIn("Ask:", out)
+
+    def test_ask_full_shows_ask_label(self):
+        out = _render(self._ask_entry(), detail="full")
+        self.assertIn("Ask:", out)
+
+    def test_ask_validator_skipped_shown(self):
+        out = _render(self._ask_entry(), detail="more")
+        self.assertIn("skipped", out.lower())
+        self.assertIn("read-only", out.lower())
+
+    def test_staged_write_shows_planning_and_work(self):
+        entry = {
+            "task": "fix the bug",
+            "stage_runs": [],
+            "tier_dispatch_receipt": _TDR_ENABLED,
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("Planning:", out)
+        self.assertIn("Work:", out)
+
+    def test_complex_readonly_staged_shows_planning(self):
+        entry = self._ask_entry(
+            stage_runs=[{
+                "stage_type": "planning",
+                "model": "anthropic/claude-sonnet-4.6",
+                "duration": 1.0,
+                "cost": 0.001,
+                "summary": "planned",
+            }],
+        )
+        out = _render(entry, detail="more")
+        # planning actually ran, so is_direct_ask=False → staged rendering
+        self.assertIn("Planning:", out)
+
+
+class TestCostComparisonNewFormat(unittest.TestCase):
+
+    _ENTRY = {
+        "task": "do a thing",
+        "estimated_cost": 1.0,
+        "prompt_tokens": 500_000,
+        "completion_tokens": 500_000,
+    }
+
+    # Sonnet 4.6 at 1k/1k = $0.018; actual $0.018 → equal
+    _ENTRY_EQUAL = {
+        "task": "equal run",
+        "estimated_cost": 0.018,
+        "prompt_tokens": 1_000,
+        "completion_tokens": 1_000,
+    }
+
+    def test_more_shows_openshard_label(self):
+        out = _render(self._ENTRY, detail="more")
+        self.assertIn("OpenShard:", out)
+
+    def test_more_shows_sonnet46_only_estimate(self):
+        out = _render(self._ENTRY, detail="more")
+        self.assertIn("Sonnet 4.6-only estimate:", out)
+
+    def test_more_no_frontier_only_baseline(self):
+        out = _render(self._ENTRY, detail="more")
+        self.assertNotIn("Frontier-only baseline", out)
+
+    def test_more_difference_has_x_multiple(self):
+        out = _render(self._ENTRY, detail="more")
+        self.assertIn("x lower cost", out)
+
+    def test_full_shows_compared_with(self):
+        out = _render(self._ENTRY, detail="full")
+        self.assertIn("Compared with", out)
+
+    def test_full_shows_sonnet46_row(self):
+        out = _render(self._ENTRY, detail="full")
+        self.assertIn("Sonnet 4.6-only", out)
+
+    def test_full_shows_method_note(self):
+        out = _render(self._ENTRY, detail="full")
+        self.assertIn("Method:", out)
+
+    def test_more_equal_case_no_pct(self):
+        out = _render(self._ENTRY_EQUAL, detail="more")
+        diff_line = [ln for ln in out.splitlines() if "Difference:" in ln][0]
+        self.assertIn("equal", diff_line)
+        self.assertNotIn("%", diff_line)
 
 
 if __name__ == "__main__":
