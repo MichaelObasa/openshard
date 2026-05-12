@@ -405,3 +405,62 @@ class TestReadonlyFastPath(unittest.TestCase):
         stage_runs = log_mock.call_args.kwargs.get("stage_runs") or []
         stage_types = [sr.stage.stage_type for sr in stage_runs]
         self.assertNotIn("planning", stage_types)
+
+    def test_direct_ask_execution_reason_clear(self):
+        """Execution Reason: line uses 'read-only task — direct analysis' for Ask mode."""
+        result, _ = _invoke("what does main.py do?", extra_args=("--more",))
+        self.assertEqual(result.exit_code, 0, result.output)
+        reason_line = next(
+            (ln for ln in result.output.splitlines() if "  Reason:" in ln), None
+        )
+        self.assertIsNotNone(reason_line, f"No Reason: line in output:\n{result.output}")
+        self.assertIn("read-only task", reason_line)
+        self.assertIn("direct analysis", reason_line)
+
+    def test_write_task_execution_reason_not_overridden(self):
+        """Staged write tasks keep the profile reason, not the read-only override."""
+        result, _ = _invoke("implement auth token refresh", extra_args=("--more",))
+        reason_line = next(
+            (ln for ln in result.output.splitlines() if "  Reason:" in ln), None
+        )
+        if reason_line:
+            self.assertNotIn("read-only task", reason_line)
+
+    def test_direct_ask_model_line_uses_executor_model(self):
+        """With tier dispatch, Model: line reflects executor model, not routing candidate."""
+        with patch("openshard.native.dispatch.resolve_tier_for_category",
+                   return_value=("z-ai/glm-5.1", "executor-tier", False, "")), \
+             patch("openshard.native.dispatch.resolve_tier",
+                   return_value=("z-ai/glm-5.1", False, "")):
+            result, _ = self._run_with_tier_dispatch(
+                "what does main.py do?",
+                extra_args=["--more", "--experimental-tier-dispatch"],
+            )
+        self.assertEqual(result.exit_code, 0, result.output)
+        model_lines = [ln for ln in result.output.splitlines() if ln.startswith("Model:")]
+        self.assertTrue(model_lines, f"No Model: line found\n{result.output}")
+        # routing candidate is "openrouter/test-model" (from _make_manager_mock_with_entry)
+        # executor model is "z-ai/glm-5.1" — Model: line must show the executor, not routing
+        self.assertNotIn("test-model", model_lines[0])
+
+    def test_direct_ask_model_line_consistent_with_ask_plan(self):
+        """Model: line and Model plan Ask: line show the same model for direct Ask."""
+        with patch("openshard.native.dispatch.resolve_tier_for_category",
+                   return_value=("z-ai/glm-5.1", "executor-tier", False, "")), \
+             patch("openshard.native.dispatch.resolve_tier",
+                   return_value=("z-ai/glm-5.1", False, "")):
+            result, _ = self._run_with_tier_dispatch(
+                "what does main.py do?",
+                extra_args=["--more", "--experimental-tier-dispatch"],
+            )
+        self.assertEqual(result.exit_code, 0, result.output)
+        lines = result.output.splitlines()
+        model_lines = [ln.strip() for ln in lines if ln.startswith("Model:")]
+        ask_lines = [ln.strip() for ln in lines if ln.strip().startswith("Ask:")]
+        if model_lines and ask_lines:
+            # Both should reference the same model label
+            ask_model = ask_lines[0].split("Ask:", 1)[-1].strip()
+            self.assertTrue(
+                any(ask_model in ln for ln in model_lines),
+                f"Model: {model_lines!r} does not match Ask: model {ask_model!r}",
+            )
