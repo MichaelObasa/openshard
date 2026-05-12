@@ -1165,7 +1165,15 @@ def _print_dry_run(files: list[ChangedFile]) -> None:
         click.echo("")
 
 
-def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None = None, validator_result: dict | None = None, validator_policy: dict | None = None) -> list[str]:
+def _validator_policy_field(policy: Any, field: str, default: Any = None) -> Any:
+    if policy is None:
+        return default
+    if isinstance(policy, dict):
+        return policy.get(field, default)
+    return getattr(policy, field, default)
+
+
+def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None = None, validator_result: dict | None = None, validator_policy: Any = None) -> list[str]:
     """Render tier dispatch receipt as lines. tdr can be dict or SimpleNamespace."""
     if detail not in ("more", "full"):
         return []
@@ -1187,8 +1195,8 @@ def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None
     def _lbl(m: str) -> str:
         return _model_label(m) if m and m != "-" else "-"
 
-    _policy_skipped = validator_policy and not validator_policy.get("run")
-    _skip_reason = validator_policy.get("reason", "skipped") if _policy_skipped else ""
+    _policy_skipped = validator_policy and not _validator_policy_field(validator_policy, "run")
+    _skip_reason = _validator_policy_field(validator_policy, "reason", "skipped") if _policy_skipped else ""
 
     source_label = source.replace("_", " ")
     lines: list[str] = []
@@ -1255,6 +1263,6 @@ def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None
     return lines
 
 
-def _print_tier_dispatch_block(tdr: Any, detail: str, validator_result: dict | None = None, validator_policy: dict | None = None) -> None:
+def _print_tier_dispatch_block(tdr: Any, detail: str, validator_result: dict | None = None, validator_policy: Any = None) -> None:
     for line in _render_tier_dispatch_block(tdr, detail, validator_result=validator_result, validator_policy=validator_policy):
         click.echo(line)
