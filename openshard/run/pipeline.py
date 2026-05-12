@@ -443,6 +443,8 @@ class RunPipeline:
         except Exception:
             pass
 
+        _readonly_task = is_readonly_task(task)
+
         _verification_plan = build_verification_plan(_cfg, _repo_facts)
 
         if (
@@ -462,6 +464,7 @@ class RunPipeline:
                 repo_facts=_repo_facts,
                 history_summary=_workflow_history_summary,
                 verify_enabled=verify,
+                readonly=_readonly_task,
             )
             _wf_choice = _wf_decision.workflow
             _wf_reason = _wf_decision.reason
@@ -587,7 +590,6 @@ class RunPipeline:
             if _explicit_ctx:
                 _skills_ctx = f"{_skills_ctx}\n\n{_explicit_ctx}" if _skills_ctx else _explicit_ctx
 
-        _readonly_task = is_readonly_task(task)
         if _readonly_task and not dry_run:
             _ro_instruction = (
                 "\n\n[IMPORTANT] This is a read-only analysis/explanation task. "

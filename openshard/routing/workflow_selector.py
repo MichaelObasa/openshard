@@ -52,6 +52,7 @@ def select_workflow(
     repo_facts: RepoFacts | None,
     history_summary: WorkflowHistorySummary | None,
     verify_enabled: bool,  # noqa: ARG001 — reserved for future compound rules
+    readonly: bool = False,
 ) -> WorkflowDecision:
     """Choose between direct and staged workflow based on task signals.
 
@@ -62,6 +63,9 @@ def select_workflow(
     has_history = (
         history_summary is not None and history_summary.sample_count >= MIN_CATEGORY_RUNS
     )
+
+    if readonly and category != "complex":
+        return WorkflowDecision("direct", "read-only task — direct analysis")
 
     if category in _STAGED_BY_DEFAULT:
         # De-escalate only when all three gates pass (intentionally conservative)

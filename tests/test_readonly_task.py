@@ -8,6 +8,8 @@ from click.testing import CliRunner
 from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
 from openshard.execution.generator import ChangedFile
+from openshard.providers.base import ModelInfo
+from openshard.providers.manager import InventoryEntry
 from openshard.routing.engine import is_readonly_task
 
 _DEFAULT_CONFIG = {"approval_mode": "smart"}
@@ -307,3 +309,99 @@ class TestReadonlyOutputLabels(unittest.TestCase):
             extra_args=("--dry-run",),
         )
         self.assertEqual(result.exit_code, 0, result.output)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for fast-path tests (tier dispatch needs a real model entry)
+# ---------------------------------------------------------------------------
+
+def _make_entry(model_id: str) -> InventoryEntry:
+    return InventoryEntry(
+        provider="openrouter",
+        model=ModelInfo(
+            id=model_id, name=model_id, pricing={"prompt": "0.0000005"},
+            context_window=None, max_output_tokens=None,
+            supports_vision=False, supports_tools=False,
+        ),
+    )
+
+
+_ENTRY = _make_entry("openrouter/test-model")
+
+
+def _make_manager_mock_with_entry():
+    m = MagicMock()
+    inv = MagicMock()
+    inv.models = [_ENTRY]
+    m.get_inventory.return_value = inv
+    m.providers = {"openrouter": MagicMock()}
+    return m
+
+
+# ---------------------------------------------------------------------------
+# Workflow fast path: read-only tasks default to direct (no stage_runs)
+# ---------------------------------------------------------------------------
+
+class TestReadonlyFastPath(unittest.TestCase):
+
+    def _run_with_tier_dispatch(self, task: str, extra_args: list[str] | None = None):
+        gen_mock = _make_generator_mock()
+        log_mock = MagicMock()
+        args = ["run"] + (extra_args or []) + [task]
+        with patch("openshard.run.pipeline.ExecutionGenerator", return_value=gen_mock), \
+             patch("openshard.run.pipeline.NativeAgentExecutor", return_value=MagicMock()), \
+             patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock_with_entry()), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=_SAFE_REPO), \
+             patch("openshard.run.pipeline.build_verification_plan", return_value=_empty_plan()), \
+             patch("openshard.run.pipeline._log_run", log_mock), \
+             patch("openshard.run.pipeline._build_explicit_file_context", return_value=""):
+            cli_result = CliRunner().invoke(cli, args)
+        return cli_result, log_mock
+
+    def test_simple_readonly_no_planning_stage(self):
+        """Standard category read-only task must not print a Planning stage."""
+        result, _ = _invoke("explain the pipeline execution flow")
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertNotIn("Planning", result.output)
+
+    def test_readonly_security_category_no_planning_stage(self):
+        """Security category read-only task must still skip Planning (readonly wins)."""
+        result, _ = _invoke("explain the auth token flow")
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertNotIn("Planning", result.output)
+
+    def test_readonly_mode_ask_label_unchanged(self):
+        """Mode: Ask must still appear for read-only tasks after fast-path change."""
+        result, _ = _invoke("what does openshard/cli/main.py do?", extra_args=("--more",))
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("Mode: Ask", result.output)
+
+    def test_write_task_workflow_unaffected(self):
+        """Write tasks are not affected by the read-only fast path."""
+        _, gen_mock = _invoke("implement auth token refresh")
+        gen_mock.generate.assert_called_once()
+
+    def test_readonly_validator_policy_shown_as_skipped(self):
+        """With --full --experimental-tier-dispatch, validator shows skipped with
+        'read-only task' reason — proves policy is evaluated, not merely absent."""
+        result, _ = self._run_with_tier_dispatch(
+            "explain the auth token flow",
+            extra_args=["--full", "--experimental-tier-dispatch"],
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("Validator", result.output)
+        self.assertIn("skipped", result.output.lower())
+        self.assertIn("read-only", result.output.lower())
+
+    def test_simple_readonly_no_planning_stage_runs_logged(self):
+        """Logged stage_runs must contain no planning entry for simple read-only tasks.
+        Uses real select_workflow so the fast path is exercised end-to-end."""
+        _, log_mock = self._run_with_tier_dispatch(
+            "explain the pipeline execution flow",
+            extra_args=["--experimental-tier-dispatch"],
+        )
+        log_mock.assert_called_once()
+        stage_runs = log_mock.call_args.kwargs.get("stage_runs") or []
+        stage_types = [sr.stage.stage_type for sr in stage_runs]
+        self.assertNotIn("planning", stage_types)
