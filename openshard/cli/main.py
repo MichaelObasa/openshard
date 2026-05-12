@@ -809,12 +809,21 @@ def _render_log_entry(entry: dict, detail: str) -> None:
         _ct = entry.get("completion_tokens") or 0
         _cmp = compute_baseline_comparison(_pt, _ct, actual_cost=cost)
         if _cmp is not None:
+            _saving = _cmp["estimated_saving_usd"]
             _pct = _cmp["estimated_saving_percent"]
-            _pct_str = f" ({_pct}%)" if _pct is not None else ""
+            if _saving > 0:
+                _diff_str = f"${_saving:.4f} cheaper"
+                _pct_str = f" ({_pct}%)" if _pct is not None else ""
+            elif _saving < 0:
+                _diff_str = f"${abs(_saving):.4f} more expensive"
+                _pct_str = f" ({abs(_pct)}%)" if _pct is not None else ""
+            else:
+                _diff_str = f"${_saving:.4f} equal"
+                _pct_str = ""
             click.echo("\nCost comparison")
             click.echo(f"  Actual cost: ${_cmp['actual_cost_usd']:.4f}")
             click.echo(f"  Frontier-only baseline: ${_cmp['frontier_baseline_cost_usd']:.4f}")
-            click.echo(f"  Estimated saving: ${_cmp['estimated_saving_usd']:.4f}{_pct_str}")
+            click.echo(f"  Difference: {_diff_str}{_pct_str}")
 
 
 @cli.command()
