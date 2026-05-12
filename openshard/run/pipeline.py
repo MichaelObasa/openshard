@@ -621,7 +621,8 @@ class RunPipeline:
             click.echo("")
             click.echo("Execution")
             click.echo(f"  Mode: {_profile_display_label(_profile_decision.profile, is_readonly=_readonly_task)}")
-            click.echo(f"  Reason: {_profile_decision.reason}")
+            _exec_reason = "read-only task — direct analysis" if _readonly_task else _profile_decision.reason
+            click.echo(f"  Reason: {_exec_reason}")
             click.echo("")
             click.echo("Verification")
             if _verification_plan.has_commands:
@@ -918,7 +919,7 @@ class RunPipeline:
         click.echo("\nDone")
         click.echo(exec_result.summary)
 
-        _model_line = _build_model_line(routing_decision, stage_runs, model=_routed_model)
+        _model_line = _build_model_line(routing_decision, stage_runs, model=_dispatch_executor_model or _routed_model)
         if _model_line:
             click.echo(f"\n{_model_line}")
 
