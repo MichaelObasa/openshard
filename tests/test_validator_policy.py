@@ -8,6 +8,7 @@ from click.testing import CliRunner
 
 from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli, _render_log_entry
+from openshard.cli.run_output import _render_tier_dispatch_block
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry
 from openshard.routing.engine import MODEL_MAIN, MODEL_STRONG
@@ -356,6 +357,60 @@ class TestValidatorPolicyRendering(unittest.TestCase):
         out = _render(entry, "more")
         self.assertIn("pass", out)
         self.assertNotIn("skipped", out)
+
+
+class TestRenderTierDispatchPolicyTypes(unittest.TestCase):
+    """Regression: _render_tier_dispatch_block must not crash when validator_policy
+    is a ValidatorPolicyDecision dataclass (live output path) instead of a dict
+    (stored history path). Both must render identically."""
+
+    _TDR = _tdr_base()
+
+    def _lines_more(self, policy) -> list[str]:
+        return _render_tier_dispatch_block(self._TDR, "more", validator_policy=policy)
+
+    def _lines_full(self, policy) -> list[str]:
+        return _render_tier_dispatch_block(self._TDR, "full", validator_policy=policy)
+
+    def test_dict_policy_more_shows_skipped(self):
+        lines = self._lines_more({"run": False, "reason": "read-only task"})
+        combined = "\n".join(lines)
+        self.assertIn("skipped", combined)
+        self.assertIn("read-only task", combined)
+
+    def test_dataclass_policy_more_shows_skipped(self):
+        lines = self._lines_more(ValidatorPolicyDecision(run=False, reason="read-only task"))
+        combined = "\n".join(lines)
+        self.assertIn("skipped", combined)
+        self.assertIn("read-only task", combined)
+
+    def test_dict_policy_full_shows_skipped(self):
+        lines = self._lines_full({"run": False, "reason": "read-only task"})
+        combined = "\n".join(lines)
+        self.assertIn("Skipped", combined)
+        self.assertIn("read-only task", combined)
+
+    def test_dataclass_policy_full_shows_skipped(self):
+        lines = self._lines_full(ValidatorPolicyDecision(run=False, reason="read-only task"))
+        combined = "\n".join(lines)
+        self.assertIn("Skipped", combined)
+        self.assertIn("read-only task", combined)
+
+    def test_dict_and_dataclass_more_output_identical(self):
+        dict_lines = self._lines_more({"run": False, "reason": "read-only task"})
+        dc_lines = self._lines_more(ValidatorPolicyDecision(run=False, reason="read-only task"))
+        self.assertEqual(dict_lines, dc_lines)
+
+    def test_dict_and_dataclass_full_output_identical(self):
+        dict_lines = self._lines_full({"run": False, "reason": "read-only task"})
+        dc_lines = self._lines_full(ValidatorPolicyDecision(run=False, reason="read-only task"))
+        self.assertEqual(dict_lines, dc_lines)
+
+    def test_dataclass_run_true_shows_reserved(self):
+        lines = self._lines_more(ValidatorPolicyDecision(run=True, reason="staged write task"))
+        combined = "\n".join(lines)
+        self.assertIn("reserved", combined)
+        self.assertNotIn("skipped", combined)
 
 
 if __name__ == "__main__":
