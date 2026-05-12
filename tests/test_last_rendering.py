@@ -3113,6 +3113,7 @@ class TestLastStagesDispatchModels(unittest.TestCase):
 
 class TestLastCostComparisonBlock(unittest.TestCase):
 
+    # actual $0.005 < Sonnet 4.6 baseline for 100k/50k ≈ $1.05 → cheaper
     _ENTRY_WITH_COST = {
         "task": "do a thing",
         "estimated_cost": 0.005,
@@ -3120,19 +3121,56 @@ class TestLastCostComparisonBlock(unittest.TestCase):
         "completion_tokens": 50_000,
     }
 
+    # Sonnet 4.6 baseline for 1k/1k: (1000*3 + 1000*15)/1_000_000 = $0.018
+    # actual $0.05 > $0.018 baseline → more expensive
+    _ENTRY_MORE_EXPENSIVE = {
+        "task": "expensive run",
+        "estimated_cost": 0.05,
+        "prompt_tokens": 1_000,
+        "completion_tokens": 1_000,
+    }
+
+    # actual == baseline for 1k/1k = $0.018 → equal
+    _ENTRY_EQUAL = {
+        "task": "equal run",
+        "estimated_cost": 0.018,
+        "prompt_tokens": 1_000,
+        "completion_tokens": 1_000,
+    }
+
     def test_more_shows_cost_comparison(self):
         out = _render(self._ENTRY_WITH_COST, detail="more")
         self.assertIn("Cost comparison", out)
         self.assertIn("Actual cost:", out)
         self.assertIn("Frontier-only baseline:", out)
-        self.assertIn("Estimated saving:", out)
+        self.assertIn("Difference:", out)
 
     def test_full_shows_cost_comparison(self):
         out = _render(self._ENTRY_WITH_COST, detail="full")
         self.assertIn("Cost comparison", out)
         self.assertIn("Actual cost:", out)
         self.assertIn("Frontier-only baseline:", out)
-        self.assertIn("Estimated saving:", out)
+        self.assertIn("Difference:", out)
+
+    def test_cheaper_case(self):
+        out = _render(self._ENTRY_WITH_COST, detail="more")
+        diff_line = [ln for ln in out.splitlines() if "Difference:" in ln][0]
+        self.assertIn("cheaper", diff_line)
+        self.assertNotIn("more expensive", diff_line)
+        self.assertNotIn("equal", diff_line)
+
+    def test_more_expensive_case(self):
+        out = _render(self._ENTRY_MORE_EXPENSIVE, detail="more")
+        diff_line = [ln for ln in out.splitlines() if "Difference:" in ln][0]
+        self.assertIn("more expensive", diff_line)
+        self.assertNotIn("cheaper", diff_line)
+        self.assertNotIn("-", diff_line)
+
+    def test_equal_case(self):
+        out = _render(self._ENTRY_EQUAL, detail="more")
+        diff_line = [ln for ln in out.splitlines() if "Difference:" in ln][0]
+        self.assertIn("equal", diff_line)
+        self.assertNotIn("(", diff_line)
 
     def test_default_does_not_show_cost_comparison(self):
         out = _render(self._ENTRY_WITH_COST, detail="default")
@@ -3157,8 +3195,8 @@ class TestLastCostComparisonBlock(unittest.TestCase):
         }
         out = _render(entry, detail="more")
         self.assertIn("Cost comparison", out)
-        saving_line = [ln for ln in out.splitlines() if "Estimated saving:" in ln][0]
-        self.assertNotIn("(", saving_line)
+        diff_line = [ln for ln in out.splitlines() if "Difference:" in ln][0]
+        self.assertNotIn("(", diff_line)
 
 
 if __name__ == "__main__":
