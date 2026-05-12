@@ -1173,7 +1173,7 @@ def _validator_policy_field(policy: Any, field: str, default: Any = None) -> Any
     return getattr(policy, field, default)
 
 
-def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None = None, validator_result: dict | None = None, validator_policy: Any = None) -> list[str]:
+def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None = None, validator_result: dict | None = None, validator_policy: Any = None, is_ask: bool = False) -> list[str]:
     """Render tier dispatch receipt as lines. tdr can be dict or SimpleNamespace."""
     if detail not in ("more", "full"):
         return []
@@ -1200,6 +1200,35 @@ def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None
 
     source_label = source.replace("_", " ")
     lines: list[str] = []
+
+    if is_ask:
+        # Direct Ask mode: single-pass, no planning stage ran.
+        lines.append("  Model plan")
+        if detail == "more":
+            lines.append(f"    Ask: {_lbl(e_model)}")
+            if validator_result:
+                _vv = validator_result.get("verdict", "?")
+                lines.append(f"    Validator: {_lbl(v_model)} ({_vv})")
+            elif _policy_skipped:
+                lines.append(f"    Validator: skipped — {_skip_reason}")
+            else:
+                lines.append(f"    Validator: {_lbl(v_model)} (reserved)")
+        else:  # full
+            lines.append(f"    Ask: {_lbl(e_model)}")
+            lines.append(f"      Model: {e_model}")
+            lines.append("")
+            lines.append("    Validator:")
+            if validator_result:
+                _vv = validator_result.get("verdict", "?")
+                _vsum = validator_result.get("summary", "")
+                lines.append(f"      Verdict: {_vv}")
+                if _vsum:
+                    lines.append(f"      Summary: {_vsum}")
+            elif _policy_skipped:
+                lines.append(f"      Skipped: {_skip_reason}")
+            else:
+                lines.append("      Used: no, reserved for validation")
+        return lines
 
     if detail == "more":
         lines.append("  Model plan")
@@ -1263,6 +1292,6 @@ def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None
     return lines
 
 
-def _print_tier_dispatch_block(tdr: Any, detail: str, validator_result: dict | None = None, validator_policy: Any = None) -> None:
-    for line in _render_tier_dispatch_block(tdr, detail, validator_result=validator_result, validator_policy=validator_policy):
+def _print_tier_dispatch_block(tdr: Any, detail: str, validator_result: dict | None = None, validator_policy: Any = None, is_ask: bool = False) -> None:
+    for line in _render_tier_dispatch_block(tdr, detail, validator_result=validator_result, validator_policy=validator_policy, is_ask=is_ask):
         click.echo(line)

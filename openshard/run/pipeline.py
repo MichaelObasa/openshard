@@ -1327,7 +1327,8 @@ class RunPipeline:
             _print_native_summary(_native_meta, detail=detail)
         if _native_meta is None and _tier_dispatch_receipt is not None and detail != "default":
             from openshard.cli.run_output import _print_tier_dispatch_block
-            _print_tier_dispatch_block(_tier_dispatch_receipt, detail, validator_result=_validator_result, validator_policy=_validator_policy)
+            _is_direct_ask = _readonly_task and not _use_stages
+            _print_tier_dispatch_block(_tier_dispatch_receipt, detail, validator_result=_validator_result, validator_policy=_validator_policy, is_ask=_is_direct_ask)
         _extra_metadata: dict | None = None
         if _native_meta is not None:
             _extra_metadata = {
