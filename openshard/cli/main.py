@@ -779,12 +779,15 @@ def _render_log_entry(entry: dict, detail: str) -> None:
     # Tier dispatch for non-native runs (native gets it inside _render_native_inspection)
     if detail != "default" and entry.get("workflow") != "native":
         _tdr = entry.get("tier_dispatch_receipt")
+        _vpol = entry.get("validator_policy")
         if _tdr and _tdr.get("enabled"):
             from openshard.cli.run_output import _render_tier_dispatch_block
             _init_model = entry.get("routing_selected_model")
             _vr = entry.get("validator_result")
-            for line in _render_tier_dispatch_block(_tdr, detail, initial_model=_init_model, validator_result=_vr):
+            for line in _render_tier_dispatch_block(_tdr, detail, initial_model=_init_model, validator_result=_vr, validator_policy=_vpol):
                 click.echo(line)
+        elif _vpol and not _vpol.get("run"):
+            click.echo(f"\nValidator: skipped — {_vpol.get('reason', '')}")
 
     duration = entry.get("duration_seconds", 0)
     cost = entry.get("estimated_cost")
