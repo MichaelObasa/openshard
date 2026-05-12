@@ -17,6 +17,15 @@ Write at most 5 bullet points.
 Focus on: which files to create or modify, the key logic, and important edge cases.\
 """
 
+VALIDATOR_SYSTEM = """\
+You are a code review validator. Review the implementation result summary and notes.
+Decide whether the work satisfied the task.
+Plain text only — no markdown, no code, no headers.
+Respond with exactly two lines:
+verdict: pass|warn|fail
+summary: one short sentence explaining your verdict.\
+"""
+
 # ---------------------------------------------------------------------------
 # Data types
 # ---------------------------------------------------------------------------
@@ -122,3 +131,40 @@ def run_planning_stage(
         system=PLANNING_SYSTEM,
     )
     return response.content, response.usage
+
+
+def _parse_verdict(text: str) -> dict:
+    """Parse validator model output into ``{"verdict": ..., "summary": ...}``."""
+    verdict = "pass"
+    summary = text.strip()[:300]
+    for line in text.splitlines():
+        stripped = line.strip()
+        low = stripped.lower()
+        if low.startswith("verdict:"):
+            v = low.split(":", 1)[1].strip()
+            if v in ("pass", "warn", "fail"):
+                verdict = v
+        elif low.startswith("summary:"):
+            summary = stripped.split(":", 1)[1].strip()[:300]
+    return {"verdict": verdict, "summary": summary}
+
+
+def run_validator_stage(
+    client,
+    task: str,
+    result_summary: str,
+    notes: list | None = None,
+    model: str = MODEL_STRONG,
+) -> tuple[dict, object]:
+    """Call the validator model to review the work result.
+
+    Returns ``(validator_result_dict, usage)`` where verdict is one of
+    ``"pass"`` | ``"warn"`` | ``"fail"``.
+    """
+    notes_text = "\n".join((notes or [])[:3])
+    prompt = f"Task: {task}\n\nResult summary: {result_summary}"
+    if notes_text:
+        prompt += f"\n\nNotes:\n{notes_text}"
+    response = client.execute(model=model, prompt=prompt, system=VALIDATOR_SYSTEM)
+    parsed = _parse_verdict(response.content)
+    return {**parsed, "model": model}, response.usage

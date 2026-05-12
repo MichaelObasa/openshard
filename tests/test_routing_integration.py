@@ -582,15 +582,17 @@ class TestTierDispatchRouting(unittest.TestCase):
         self.assertEqual(plan_mock.call_args.kwargs["model"], MODEL_STRONG)
 
     def test_flag_on_stage_runs_logged_with_dispatch_models(self):
-        """With dispatch flag, _log_run is called with stage_runs reflecting dispatch models."""
+        """With dispatch flag, _log_run gets planning + implementation + validation stage_runs."""
         _, _, log_mock = self._run_staged(["--experimental-tier-dispatch"])
         log_mock.assert_called_once()
         stage_runs = log_mock.call_args.kwargs.get("stage_runs", [])
-        self.assertEqual(len(stage_runs), 2)
+        self.assertEqual(len(stage_runs), 3)
         plan_run = next(sr for sr in stage_runs if sr.stage.stage_type == "planning")
         impl_run = next(sr for sr in stage_runs if sr.stage.stage_type == "implementation")
+        val_run = next(sr for sr in stage_runs if sr.stage.stage_type == "validation")
         self.assertEqual(plan_run.model, MODEL_STRONG)
         self.assertEqual(impl_run.model, MODEL_MAIN)
+        self.assertEqual(val_run.model, MODEL_STRONG)
 
     def test_unresolved_executor_falls_back_to_routed(self):
         """When dispatch executor resolves to None (unknown category), falls back to routed model."""
