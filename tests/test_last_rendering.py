@@ -3476,5 +3476,103 @@ class TestToolSearchEventsRendering(unittest.TestCase):
         self.assertIn("read-search strategy=default", joined)
 
 
+class TestFormFactorRendering(unittest.TestCase):
+
+    def _ff_entry(
+        self,
+        public_mode: str = "run",
+        internal_form_factor: str = "staged",
+        reason: str = "staged planning selected",
+        confidence: str = "high",
+        risk_level: str = "low",
+        context_quality: str | None = None,
+        warnings: list | None = None,
+    ) -> dict:
+        return {
+            "task": "add a feature",
+            "form_factor": {
+                "public_mode": public_mode,
+                "internal_form_factor": internal_form_factor,
+                "reason": reason,
+                "confidence": confidence,
+                "risk_level": risk_level,
+                "read_only": False,
+                "write_requested": True,
+                "verification_available": True,
+                "context_quality": context_quality,
+                "warnings": warnings or [],
+            },
+        }
+
+    def test_default_detail_does_not_show_form_factor(self):
+        out = _render(self._ff_entry(), detail="default")
+        self.assertNotIn("Form factor", out)
+        self.assertNotIn("public_mode", out)
+
+    def test_last_more_shows_compact_form_factor_line(self):
+        out = _render(self._ff_entry(), detail="more")
+        self.assertIn("Form factor:", out)
+        self.assertIn("Run", out)
+        self.assertIn("staged", out)
+        self.assertIn("high", out)
+
+    def test_last_more_compact_line_is_single_line(self):
+        out = _render(self._ff_entry(), detail="more")
+        form_factor_lines = [ln for ln in out.splitlines() if "Form factor" in ln]
+        self.assertEqual(len(form_factor_lines), 1)
+
+    def test_last_full_shows_expanded_form_factor_block(self):
+        out = _render(self._ff_entry(), detail="full")
+        self.assertIn("Public mode:", out)
+        self.assertIn("Internal:", out)
+        self.assertIn("Reason:", out)
+        self.assertIn("Confidence:", out)
+        self.assertIn("Risk:", out)
+
+    def test_last_full_shows_public_mode_label(self):
+        out = _render(self._ff_entry(public_mode="deep-run"), detail="full")
+        self.assertIn("Deep Run", out)
+
+    def test_last_full_osn_run_label(self):
+        out = _render(self._ff_entry(public_mode="osn-run"), detail="full")
+        self.assertIn("OSN Run", out)
+
+    def test_last_full_ask_label(self):
+        out = _render(self._ff_entry(public_mode="ask"), detail="full")
+        self.assertIn("Ask", out)
+
+    def test_last_full_shows_reason(self):
+        out = _render(self._ff_entry(reason="riskier task may need controlled native loop"), detail="full")
+        self.assertIn("riskier task may need controlled native loop", out)
+
+    def test_last_full_shows_warnings(self):
+        out = _render(
+            self._ff_entry(warnings=["write touches 2 risky path(s)"]),
+            detail="full",
+        )
+        self.assertIn("Warning:", out)
+        self.assertIn("write touches 2 risky path(s)", out)
+
+    def test_last_full_no_warning_line_when_empty(self):
+        out = _render(self._ff_entry(warnings=[]), detail="full")
+        self.assertNotIn("Warning:", out)
+
+    def test_last_full_context_quality_shown_when_present(self):
+        out = _render(self._ff_entry(context_quality="weak"), detail="full")
+        self.assertIn("Context:", out)
+        self.assertIn("weak", out)
+
+    def test_last_full_context_quality_absent_when_none(self):
+        out = _render(self._ff_entry(context_quality=None), detail="full")
+        self.assertNotIn("Context:", out)
+
+    def test_old_entry_without_form_factor_renders_cleanly(self):
+        entry_without_ff = {"task": "an old task", "routing_model": "openrouter/model"}
+        for detail in ("default", "more", "full"):
+            out = _render(entry_without_ff, detail=detail)
+            self.assertNotIn("Form factor", out)
+            self.assertNotIn("public_mode", out)
+
+
 if __name__ == "__main__":
     unittest.main()

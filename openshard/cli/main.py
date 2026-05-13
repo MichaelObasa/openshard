@@ -43,6 +43,7 @@ from openshard.cli.run_output import (
     _native_meta_from_entry,
     _render_native_receipt,
     _RATIONALE_SHORT,
+    _PUBLIC_MODE_LABEL,
 )
 from openshard.evals.registry import load_eval_tasks
 from openshard.evals.runner import append_eval_result, run_eval_task
@@ -710,6 +711,26 @@ def _render_log_entry(entry: dict, detail: str) -> None:
         click.echo(f"    Mode: {_profile_display_label(_profile, is_readonly=_is_ro)}")
         if _reason:
             click.echo(f"    Reason: {_reason}")
+
+    # Form factor (--more: compact; --full: expanded)
+    if detail != "default" and "form_factor" in entry:
+        _ff = entry["form_factor"]
+        _ff_pub = _PUBLIC_MODE_LABEL.get(_ff["public_mode"], _ff["public_mode"].title())
+        if detail == "more":
+            click.echo(
+                f"  Form factor: {_ff_pub} / {_ff['internal_form_factor']} ({_ff['confidence']})"
+            )
+        else:
+            click.echo("\n  Form factor")
+            click.echo(f"    Public mode:  {_ff_pub}")
+            click.echo(f"    Internal:     {_ff['internal_form_factor']}")
+            click.echo(f"    Reason:       {_ff['reason']}")
+            click.echo(f"    Confidence:   {_ff['confidence']}")
+            click.echo(f"    Risk:         {_ff['risk_level']}")
+            if _ff.get("context_quality"):
+                click.echo(f"    Context:      {_ff['context_quality']}")
+            for _w in _ff.get("warnings", []):
+                click.echo(f"    Warning:      {_w}")
 
     # Verification plan (--more / --full)
     if detail != "default" and "verification_plan" in entry:
