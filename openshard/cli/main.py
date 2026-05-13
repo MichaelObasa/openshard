@@ -747,8 +747,16 @@ def _render_log_entry(entry: dict, detail: str) -> None:
     _feedback = entry.get("feedback")
     if detail != "default" and _feedback:
         click.echo("\nDeveloper feedback")
-        click.echo(f"  Rating: {_feedback.get('rating', '')}")
+        _action = _feedback.get("action")
+        _reason = _feedback.get("correction_reason")
+        _rating = _feedback.get("rating") or ""
         _fb_note = _feedback.get("note", "")
+        if _action:
+            click.echo(f"  Action: {_action}")
+        if _reason:
+            click.echo(f"  Reason: {_reason}")
+        if _rating:
+            click.echo(f"  Rating: {_rating}")
         if _fb_note:
             click.echo(f"  Note: {_fb_note}")
 
@@ -878,16 +886,40 @@ def _load_run_entries(log_path: Path) -> list[dict]:
     return entries
 
 
+_ALLOWED_FEEDBACK_ACTIONS = [
+    "accepted", "rejected", "edited", "retried", "partially-accepted", "unknown",
+]
+_ALLOWED_CORRECTION_REASONS = [
+    "wrong-file", "wrong-scope", "failed-tests", "bad-style", "missed-requirement",
+    "too-expensive", "too-slow", "unsafe-command", "unclear-output",
+    "hallucinated", "manual-edit", "other",
+]
+
+
 @cli.command()
 @click.option(
     "--rating",
     type=click.Choice(["good", "bad", "mixed"], case_sensitive=False),
-    required=True,
+    default=None,
     help="Your rating for the most recent run.",
 )
+@click.option(
+    "--action",
+    type=click.Choice(_ALLOWED_FEEDBACK_ACTIONS, case_sensitive=False),
+    default=None,
+    help="What you did with the run output.",
+)
+@click.option(
+    "--reason",
+    type=click.Choice(_ALLOWED_CORRECTION_REASONS, case_sensitive=False),
+    default=None,
+    help="Why you corrected or rejected the run.",
+)
 @click.option("--note", default="", help="Optional free-text note about this run.")
-def feedback(rating: str, note: str) -> None:
+def feedback(rating: str | None, action: str | None, reason: str | None, note: str) -> None:
     """Attach developer feedback to the most recent run."""
+    if not rating and not action and not reason and not note:
+        raise click.ClickException("Provide at least one of --rating, --action, --reason, or --note.")
     log_path = Path.cwd() / _LOG_PATH
     if not log_path.exists():
         click.echo("No run history found. Run a task first with 'openshard run'.")
@@ -904,16 +936,26 @@ def feedback(rating: str, note: str) -> None:
     if not entries:
         click.echo("No runs recorded yet.")
         return
-    entries[-1]["feedback"] = {
+    fb: dict = {
         "schema_version": 1,
-        "rating": rating.lower(),
+        "rating": rating.lower() if rating else None,
         "note": note,
         "created_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if action is not None:
+        fb["action"] = action.lower()
+    if reason is not None:
+        fb["correction_reason"] = reason.lower()
+    entries[-1]["feedback"] = fb
     with log_path.open("w", encoding="utf-8") as fh:
         for entry in entries:
             fh.write(json.dumps(entry) + "\n")
-    click.echo(f"Feedback recorded: {rating.lower()}")
+    _labels = []
+    if action:
+        _labels.append(action.lower())
+    if rating:
+        _labels.append(rating.lower())
+    click.echo(f"Feedback recorded: {', '.join(_labels) if _labels else 'note'}")
 
 
 @cli.command("feedback-stats")
@@ -1042,6 +1084,8 @@ def _export_run_entry(entry: dict, include_notes: bool = False) -> dict:
         "files_deleted":             entry.get("files_deleted"),
         "feedback_rating":           feedback.get("rating"),
         "feedback_note":             feedback.get("note"),
+        "feedback_action":           feedback.get("action"),
+        "correction_reason":         feedback.get("correction_reason"),
         "tier_dispatch_enabled":     tdr.get("enabled"),
         "tier_dispatch_applied":     tdr.get("applied"),
         "tier_dispatch_work_model":  tdr.get("executor_model"),

@@ -157,5 +157,82 @@ class TestFeedbackCommand(unittest.TestCase):
             self.assertEqual(entries[-1]["feedback"]["rating"], "good")
 
 
+class TestFeedbackCorrectionFields(unittest.TestCase):
+
+    def test_accepted_action_stored(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            log_path = _write_runs([_make_entry()])
+            result = runner.invoke(cli, ["feedback", "--action", "accepted"])
+            self.assertEqual(result.exit_code, 0)
+            entries = _read_entries(log_path)
+            self.assertEqual(entries[-1]["feedback"]["action"], "accepted")
+            self.assertNotIn("correction_reason", entries[-1]["feedback"])
+
+    def test_edited_with_wrong_file_reason_stored(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            log_path = _write_runs([_make_entry()])
+            result = runner.invoke(cli, ["feedback", "--action", "edited", "--reason", "wrong-file"])
+            self.assertEqual(result.exit_code, 0)
+            entries = _read_entries(log_path)
+            fb = entries[-1]["feedback"]
+            self.assertEqual(fb["action"], "edited")
+            self.assertEqual(fb["correction_reason"], "wrong-file")
+
+    def test_retried_with_note_stored(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            log_path = _write_runs([_make_entry()])
+            result = runner.invoke(
+                cli,
+                ["feedback", "--action", "retried", "--reason", "failed-tests", "--note", "missed fixture"],
+            )
+            self.assertEqual(result.exit_code, 0)
+            entries = _read_entries(log_path)
+            fb = entries[-1]["feedback"]
+            self.assertEqual(fb["action"], "retried")
+            self.assertEqual(fb["correction_reason"], "failed-tests")
+            self.assertEqual(fb["note"], "missed fixture")
+
+    def test_invalid_action_rejected(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry()])
+            result = runner.invoke(cli, ["feedback", "--action", "bogus"])
+            self.assertNotEqual(result.exit_code, 0)
+
+    def test_invalid_reason_rejected(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry()])
+            result = runner.invoke(cli, ["feedback", "--reason", "bogus"])
+            self.assertNotEqual(result.exit_code, 0)
+
+    def test_no_args_fails_with_clear_error(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry()])
+            result = runner.invoke(cli, ["feedback"])
+            self.assertNotEqual(result.exit_code, 0)
+            self.assertIn("Provide at least one of", result.output)
+
+    def test_action_stored_lowercase(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            log_path = _write_runs([_make_entry()])
+            runner.invoke(cli, ["feedback", "--action", "EDITED"])
+            entries = _read_entries(log_path)
+            self.assertEqual(entries[-1]["feedback"]["action"], "edited")
+
+    def test_old_entry_without_new_fields_renders_cleanly(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(feedback={"schema_version": 1, "rating": "good", "note": "", "created_at": "2025-01-01T00:00:00Z"})])
+            result = runner.invoke(cli, ["last", "--more"])
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("Rating: good", result.output)
+
+
 if __name__ == "__main__":
     unittest.main()

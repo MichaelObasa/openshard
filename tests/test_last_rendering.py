@@ -3328,5 +3328,73 @@ class TestCostComparisonNewFormat(unittest.TestCase):
         self.assertNotIn("%", diff_line)
 
 
+class TestLastCorrectionFieldsRendering(unittest.TestCase):
+
+    def test_more_shows_action_and_reason_when_present(self):
+        entry = {
+            "task": "do a thing",
+            "feedback": {
+                "schema_version": 1,
+                "rating": "bad",
+                "note": "",
+                "action": "edited",
+                "correction_reason": "wrong-file",
+                "created_at": "2025-01-01T00:00:00Z",
+            },
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("Action: edited", out)
+        self.assertIn("Reason: wrong-file", out)
+
+    def test_full_shows_action_reason_and_note_when_present(self):
+        entry = {
+            "task": "do a thing",
+            "feedback": {
+                "schema_version": 1,
+                "rating": None,
+                "note": "missed the fixture",
+                "action": "retried",
+                "correction_reason": "failed-tests",
+                "created_at": "2025-01-01T00:00:00Z",
+            },
+        }
+        out = _render(entry, detail="full")
+        self.assertIn("Action: retried", out)
+        self.assertIn("Reason: failed-tests", out)
+        self.assertIn("Note: missed the fixture", out)
+
+    def test_default_hides_feedback_block(self):
+        entry = {
+            "task": "do a thing",
+            "feedback": {
+                "schema_version": 1,
+                "rating": "bad",
+                "note": "nope",
+                "action": "rejected",
+                "correction_reason": "missed-requirement",
+                "created_at": "2025-01-01T00:00:00Z",
+            },
+        }
+        out = _render(entry, detail="default")
+        self.assertNotIn("Action:", out)
+        self.assertNotIn("Reason:", out)
+        self.assertNotIn("Developer feedback", out)
+
+    def test_more_shows_rating_from_old_entry(self):
+        entry = {
+            "task": "do a thing",
+            "feedback": {
+                "schema_version": 1,
+                "rating": "good",
+                "note": "",
+                "created_at": "2025-01-01T00:00:00Z",
+            },
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("Rating: good", out)
+        self.assertNotIn("Action:", out)
+        self.assertNotIn("Reason:", out)
+
+
 if __name__ == "__main__":
     unittest.main()
