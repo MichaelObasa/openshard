@@ -49,10 +49,15 @@ from openshard.evals.registry import load_eval_tasks
 from openshard.evals.runner import append_eval_result, run_eval_task
 
 
-@click.group()
+@click.group(invoke_without_command=True)
 @click.version_option()
-def cli():
+@click.pass_context
+def cli(ctx: click.Context):
     """OpenShard - intelligent task routing and execution."""
+    if ctx.invoked_subcommand is None:
+        from openshard.cli.ui.home import render_home
+
+        render_home()
 
 
 @cli.command()
