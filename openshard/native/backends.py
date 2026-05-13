@@ -14,6 +14,31 @@ class NativeBackendResult:
 
 
 @dataclass
+class BackendExecutionResult:
+    """Typed contract for what a DeepAgents/LangGraph backend must return to OpenShard.
+
+    Backends return evidence. OpenShard decides what to do with it.
+    raw_content_stored must remain False — adapters must never store raw transcripts
+    or raw file contents. See docs/deepagents-langgraph-boundary.md.
+    """
+
+    backend_name: str = ""
+    backend_version: str | None = None
+    mode: str = ""
+    steps: list[str] = field(default_factory=list)
+    subagents_used: int = 0
+    tools_used: list[str] = field(default_factory=list)
+    proposed_files: list[str] = field(default_factory=list)
+    verification_suggestion: str = ""
+    cost: float | None = None
+    duration: float | None = None
+    tokens: int | None = None
+    warnings: list[str] = field(default_factory=list)
+    blocked_actions: list[str] = field(default_factory=list)
+    raw_content_stored: bool = False
+
+
+@dataclass
 class DeepAgentsAdapterMeta:
     available: bool = False
     version: str | None = None
