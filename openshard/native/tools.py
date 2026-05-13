@@ -32,6 +32,24 @@ class NativeToolResult:
     metadata: dict = field(default_factory=dict)
 
 
+@dataclass
+class NativeToolSearchEvent:
+    """Compact provenance record for a single safe read/search/observation tool call.
+
+    Never stores raw output, snippets, diffs, stdout, stderr, or model output.
+    """
+    tool_name: str
+    selected_reason: str = ""
+    query: str = ""
+    result_count: int = 0
+    result_quality: str = "unknown"  # unknown | empty | weak | useful
+    retry_count: int = 0
+    fallback_tool: str | None = None
+    context_injected: bool = False
+    changed_plan: bool = False
+    warnings: list[str] = field(default_factory=list)
+
+
 _BUILTIN_TOOLS: list[NativeTool] = [
     NativeTool(
         name="list_files",

@@ -459,5 +459,102 @@ class TestStageRunsDispatchLogging(unittest.TestCase):
         self.assertNotIn("stage_runs", entry)
 
 
+class TestToolSearchEventsHistory(unittest.TestCase):
+    """tool_search_events serialization in run history."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._tmpdir = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _call(self, **kwargs):
+        defaults = dict(
+            start=time.time(),
+            task="test task",
+            generator=_make_generator(),
+            retry_triggered=False,
+            files=[],
+            verification_attempted=False,
+            verification_passed=None,
+            workspace=None,
+        )
+        defaults.update(kwargs)
+        with patch("openshard.cli.main.Path.cwd", return_value=self._tmpdir):
+            _log_run(**defaults)
+
+    def _read_entry(self) -> dict:
+        log_path = self._tmpdir / ".openshard" / "runs.jsonl"
+        lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        return json.loads(lines[-1])
+
+    def _make_event_dict(self, **overrides) -> dict:
+        base = {
+            "tool_name": "search_repo",
+            "selected_reason": "observe search trigger",
+            "query": "auth",
+            "result_count": 3,
+            "result_quality": "useful",
+            "retry_count": 0,
+            "fallback_tool": None,
+            "context_injected": True,
+            "changed_plan": False,
+            "warnings": [],
+        }
+        base.update(overrides)
+        return base
+
+    def test_tool_search_events_written_to_history(self):
+        events = [self._make_event_dict()]
+        self._call(extra_metadata={"tool_search_events": events})
+        entry = self._read_entry()
+        self.assertIn("tool_search_events", entry)
+        self.assertEqual(len(entry["tool_search_events"]), 1)
+
+    def test_event_fields_preserved_in_history(self):
+        events = [self._make_event_dict(result_count=5, result_quality="weak")]
+        self._call(extra_metadata={"tool_search_events": events})
+        entry = self._read_entry()
+        ev = entry["tool_search_events"][0]
+        self.assertEqual(ev["tool_name"], "search_repo")
+        self.assertEqual(ev["result_count"], 5)
+        self.assertEqual(ev["result_quality"], "weak")
+        self.assertIn("context_injected", ev)
+
+    def test_empty_events_list_stored_as_empty_list(self):
+        self._call(extra_metadata={"tool_search_events": []})
+        entry = self._read_entry()
+        self.assertIn("tool_search_events", entry)
+        self.assertEqual(entry["tool_search_events"], [])
+
+    def test_old_entry_without_events_key_is_valid(self):
+        # Simulate an old run entry that has no tool_search_events
+        self._call()
+        entry = self._read_entry()
+        # Old entries simply don't have the key — no error expected on read
+        events = entry.get("tool_search_events", [])
+        self.assertIsInstance(events, list)
+
+    def test_no_raw_content_in_stored_event(self):
+        events = [self._make_event_dict()]
+        self._call(extra_metadata={"tool_search_events": events})
+        entry = self._read_entry()
+        ev = entry["tool_search_events"][0]
+        for forbidden in ("output", "snippets", "diff", "stdout", "stderr"):
+            self.assertNotIn(forbidden, ev)
+
+    def test_multiple_events_stored_in_order(self):
+        events = [
+            self._make_event_dict(tool_name="list_files", result_quality="useful"),
+            self._make_event_dict(tool_name="get_git_diff", result_quality="empty", result_count=0),
+            self._make_event_dict(tool_name="search_repo", result_quality="weak"),
+        ]
+        self._call(extra_metadata={"tool_search_events": events})
+        entry = self._read_entry()
+        names = [e["tool_name"] for e in entry["tool_search_events"]]
+        self.assertEqual(names, ["list_files", "get_git_diff", "search_repo"])
+
+
 if __name__ == "__main__":
     unittest.main()

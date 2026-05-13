@@ -85,7 +85,7 @@ from openshard.native.backends import DeepAgentsAdapterMeta, build_deepagents_ad
 from openshard.native.loop import NativeLoopTrace
 from openshard.native.skills import match_builtin_skills, selected_skill_names
 from openshard.native.tool_runner import NativeToolRunner
-from openshard.native.tools import NativeToolCall, NativeToolResult
+from openshard.native.tools import NativeToolCall, NativeToolResult, NativeToolSearchEvent
 
 
 @dataclass
@@ -98,6 +98,7 @@ class NativeRunMeta:
     context_state: CompactRunState | None = None
     context_warnings: list[str] = field(default_factory=list)
     tool_trace: list[dict] = field(default_factory=list)
+    tool_search_events: list[NativeToolSearchEvent] = field(default_factory=list)
     repo_context_summary: NativeRepoContextSummary | None = None
     observation: NativeObservation | None = None
     evidence: NativeEvidence | None = None
@@ -167,6 +168,26 @@ _LOOP_ALLOWED_TOOLS: frozenset[str] = frozenset({
 _MAX_OSN_LOOP_STEPS: int = 5
 _MAX_OSN_QUEUE_CAP: int = 10
 _MAX_OSN_CONSECUTIVE_EMPTY: int = 2
+
+
+def _infer_result_count(tool_name: str, result: NativeToolResult) -> int:
+    if not result.ok:
+        return 0
+    if tool_name == "search_repo":
+        return result.metadata.get("matches", 0)
+    if tool_name == "list_files":
+        return len([ln for ln in result.output.splitlines() if ln.strip()])
+    if tool_name in ("get_git_diff", "read_file"):
+        return 1 if result.output.strip() else 0
+    return 0
+
+
+def _infer_result_quality(result_count: int, context_injected: bool) -> str:
+    if result_count == 0:
+        return "empty"
+    if context_injected:
+        return "useful"
+    return "weak"
 
 
 def _parse_search_result_line(line: str) -> tuple[str, int] | None:
@@ -487,6 +508,29 @@ class NativeAgentExecutor:
             self.native_meta.native_loop_steps.append(step)
         self.native_meta.native_loop_trace.record(step, summary=summary, metadata=metadata or {})
 
+    def _record_tool_search_event(
+        self,
+        tool_name: str,
+        result: NativeToolResult,
+        selected_reason: str = "",
+        query: str = "",
+        context_injected: bool = False,
+        warnings: list[str] | None = None,
+    ) -> NativeToolSearchEvent:
+        count = _infer_result_count(tool_name, result)
+        quality = _infer_result_quality(count, context_injected)
+        event = NativeToolSearchEvent(
+            tool_name=tool_name,
+            selected_reason=selected_reason,
+            query=query,
+            result_count=count,
+            result_quality=quality,
+            context_injected=context_injected,
+            warnings=list(warnings or []),
+        )
+        self.native_meta.tool_search_events.append(event)
+        return event
+
     def run_tool(self, call: NativeToolCall) -> NativeToolResult:
         if self._runner is None:
             result = NativeToolResult(
@@ -516,6 +560,12 @@ class NativeAgentExecutor:
         call = NativeToolCall(tool_name="list_files", args={"subdir": "."})
         result = self._runner.run(call)
         self.native_meta.tool_trace.append(self._runner.trace_entry(call, result))
+        self._record_tool_search_event(
+            "list_files", result,
+            selected_reason="preflight scan",
+            query=".",
+            context_injected=result.ok,
+        )
 
         if result.ok:
             if self.native_meta.context_budget is None:
@@ -533,6 +583,11 @@ class NativeAgentExecutor:
         diff_call = NativeToolCall(tool_name="get_git_diff", args={})
         diff_result = self._runner.run(diff_call)
         self.native_meta.tool_trace.append(self._runner.trace_entry(diff_call, diff_result))
+        self._record_tool_search_event(
+            "get_git_diff", diff_result,
+            selected_reason="observe dirty diff",
+            context_injected=diff_result.ok and bool(diff_result.output.strip()),
+        )
         observation.observed_tools.append("get_git_diff")
         if diff_result.ok and diff_result.output.strip():
             observation.dirty_diff_present = True
@@ -546,6 +601,12 @@ class NativeAgentExecutor:
                 search_call = NativeToolCall(tool_name="search_repo", args={"query": query})
                 search_result = self._runner.run(search_call)
                 self.native_meta.tool_trace.append(self._runner.trace_entry(search_call, search_result))
+                self._record_tool_search_event(
+                    "search_repo", search_result,
+                    selected_reason="observe search trigger",
+                    query=query,
+                    context_injected=search_result.ok and search_result.metadata.get("matches", 0) > 0,
+                )
                 observation.observed_tools.append("search_repo")
                 if search_result.ok:
                     observation.search_matches_count = search_result.metadata.get("matches", 0)
@@ -648,6 +709,12 @@ class NativeAgentExecutor:
             search_call = NativeToolCall(tool_name="search_repo", args={"query": query})
             search_result = self._runner.run(search_call)
             self.native_meta.tool_trace.append(self._runner.trace_entry(search_call, search_result))
+            self._record_tool_search_event(
+                "search_repo", search_result,
+                selected_reason=f"read-search strategy={strategy}",
+                query=query,
+                context_injected=search_result.ok and bool(search_result.output.strip()),
+            )
 
             if search_result.ok:
                 raw_lines = [ln for ln in search_result.output.splitlines() if ln.strip()]
@@ -829,6 +896,12 @@ class NativeAgentExecutor:
 
             output_chars = len(result.output) if result.ok else 0
             is_empty = result.ok and not result.output.strip()
+            self._record_tool_search_event(
+                tool_name, result,
+                selected_reason=reason,
+                query=str(raw_target),
+                context_injected=result.ok and not is_empty,
+            )
 
             if is_empty:
                 consecutive_empty += 1

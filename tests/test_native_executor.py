@@ -63,6 +63,8 @@ from openshard.native.executor import (
     _extract_explicit_file_paths,
     _extract_search_query,
     _extract_snippet_lines,
+    _infer_result_count,
+    _infer_result_quality,
     _parse_search_result_line,
 )
 from openshard.native.repo_context import NativeRepoContextSummary
@@ -6314,3 +6316,143 @@ class TestPipelineExplicitFileContextInjection(unittest.TestCase):
             runner = CliRunner()
             runner.invoke(cli, ["run", "--workflow", "native", "what does foo/bar.py do?"])
         ctx_mock.assert_not_called()
+
+
+class TestInferResultHelpers(unittest.TestCase):
+    """Unit tests for _infer_result_count and _infer_result_quality."""
+
+    def _ok(self, tool_name, output="", metadata=None):
+        from openshard.native.tools import NativeToolResult
+        return NativeToolResult(tool_name=tool_name, ok=True, output=output, metadata=metadata or {})
+
+    def _fail(self, tool_name):
+        from openshard.native.tools import NativeToolResult
+        return NativeToolResult(tool_name=tool_name, ok=False)
+
+    def test_search_repo_uses_matches_metadata(self):
+        result = self._ok("search_repo", output="file.py:1:x", metadata={"matches": 3})
+        self.assertEqual(_infer_result_count("search_repo", result), 3)
+
+    def test_search_repo_zero_matches(self):
+        result = self._ok("search_repo", output="", metadata={"matches": 0})
+        self.assertEqual(_infer_result_count("search_repo", result), 0)
+
+    def test_list_files_counts_nonempty_lines(self):
+        result = self._ok("list_files", output="a.py\nb.py\n\nc.py\n")
+        self.assertEqual(_infer_result_count("list_files", result), 3)
+
+    def test_list_files_empty_output(self):
+        result = self._ok("list_files", output="")
+        self.assertEqual(_infer_result_count("list_files", result), 0)
+
+    def test_get_git_diff_nonempty_returns_one(self):
+        result = self._ok("get_git_diff", output="diff --git a/x.py b/x.py\n+x = 1")
+        self.assertEqual(_infer_result_count("get_git_diff", result), 1)
+
+    def test_get_git_diff_empty_returns_zero(self):
+        result = self._ok("get_git_diff", output="   ")
+        self.assertEqual(_infer_result_count("get_git_diff", result), 0)
+
+    def test_failed_result_returns_zero(self):
+        result = self._fail("search_repo")
+        self.assertEqual(_infer_result_count("search_repo", result), 0)
+
+    def test_quality_empty_when_count_zero(self):
+        self.assertEqual(_infer_result_quality(0, False), "empty")
+        self.assertEqual(_infer_result_quality(0, True), "empty")
+
+    def test_quality_useful_when_injected(self):
+        self.assertEqual(_infer_result_quality(5, True), "useful")
+
+    def test_quality_weak_when_not_injected(self):
+        self.assertEqual(_infer_result_quality(3, False), "weak")
+
+
+class TestNativeToolSearchEventRecording(unittest.TestCase):
+    """NativeAgentExecutor records NativeToolSearchEvent at call sites."""
+
+    def _make_executor_with_repo(self, tmp_path: Path):
+        fake_gen = _make_generator_mock()
+        with patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
+            executor = NativeAgentExecutor(provider=MagicMock(), repo_root=tmp_path)
+        return executor
+
+    def test_preflight_records_list_files_event(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor = self._make_executor_with_repo(root)
+            executor._run_preflight()
+        events = executor.native_meta.tool_search_events
+        self.assertTrue(any(e.tool_name == "list_files" for e in events))
+
+    def test_preflight_event_selected_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor = self._make_executor_with_repo(root)
+            executor._run_preflight()
+        ev = next(e for e in executor.native_meta.tool_search_events if e.tool_name == "list_files")
+        self.assertEqual(ev.selected_reason, "preflight scan")
+
+    def test_observe_phase_records_git_diff_event(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("fix the bug")
+        events = executor.native_meta.tool_search_events
+        self.assertTrue(any(e.tool_name == "get_git_diff" for e in events))
+
+    def test_empty_search_result_quality_is_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+            executor = self._make_executor_with_repo(root)
+            executor._run_observe_phase("find something")
+        search_events = [e for e in executor.native_meta.tool_search_events if e.tool_name == "search_repo"]
+        for ev in search_events:
+            if ev.result_count == 0:
+                self.assertEqual(ev.result_quality, "empty")
+
+    def test_event_no_raw_content_stored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor = self._make_executor_with_repo(root)
+            executor._run_preflight()
+        from dataclasses import asdict
+        for ev in executor.native_meta.tool_search_events:
+            d = asdict(ev)
+            for forbidden in ("output", "snippets", "diff", "stdout", "stderr"):
+                self.assertNotIn(forbidden, d)
+
+    def test_record_tool_search_event_useful_quality(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor = self._make_executor_with_repo(root)
+        from openshard.native.tools import NativeToolResult
+        result = NativeToolResult(tool_name="search_repo", ok=True, output="main.py:1:x", metadata={"matches": 1})
+        ev = executor._record_tool_search_event(
+            "search_repo", result,
+            selected_reason="test",
+            query="x",
+            context_injected=True,
+        )
+        self.assertEqual(ev.result_quality, "useful")
+        self.assertEqual(ev.result_count, 1)
+
+    def test_record_tool_search_event_weak_quality(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+        from openshard.native.tools import NativeToolResult
+        result = NativeToolResult(tool_name="search_repo", ok=True, output="main.py:1:x", metadata={"matches": 2})
+        ev = executor._record_tool_search_event(
+            "search_repo", result,
+            selected_reason="test",
+            query="x",
+            context_injected=False,
+        )
+        self.assertEqual(ev.result_quality, "weak")

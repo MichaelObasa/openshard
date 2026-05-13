@@ -3396,5 +3396,85 @@ class TestLastCorrectionFieldsRendering(unittest.TestCase):
         self.assertNotIn("Reason:", out)
 
 
+class TestToolSearchEventsRendering(unittest.TestCase):
+    """Rendering of tool/search provenance events in openshard last."""
+
+    def _native_entry(self, events):
+        return {
+            "task": "do a thing",
+            "workflow": "native",
+            "executor": "native",
+            "tool_search_events": events,
+        }
+
+    def test_full_shows_event_count_line(self):
+        events = [
+            {"tool_name": "search_repo", "result_quality": "useful", "result_count": 3,
+             "selected_reason": "observe search trigger", "query": "auth", "context_injected": True,
+             "retry_count": 0, "fallback_tool": None, "changed_plan": False, "warnings": []},
+        ]
+        out = _render(self._native_entry(events), detail="full")
+        self.assertIn("tool/search events: 1", out)
+
+    def test_full_shows_per_event_detail(self):
+        events = [
+            {"tool_name": "search_repo", "result_quality": "useful", "result_count": 3,
+             "selected_reason": "observe search trigger", "query": "auth", "context_injected": True,
+             "retry_count": 0, "fallback_tool": None, "changed_plan": False, "warnings": []},
+        ]
+        out = _render(self._native_entry(events), detail="full")
+        self.assertIn("search_repo", out)
+        self.assertIn("useful", out)
+        self.assertIn("3 results", out)
+        self.assertIn("observe search trigger", out)
+        self.assertIn("injected", out)
+
+    def test_more_shows_count_only(self):
+        events = [
+            {"tool_name": "list_files", "result_quality": "useful", "result_count": 10,
+             "selected_reason": "preflight scan", "query": ".", "context_injected": True,
+             "retry_count": 0, "fallback_tool": None, "changed_plan": False, "warnings": []},
+            {"tool_name": "get_git_diff", "result_quality": "empty", "result_count": 0,
+             "selected_reason": "observe dirty diff", "query": "", "context_injected": False,
+             "retry_count": 0, "fallback_tool": None, "changed_plan": False, "warnings": []},
+        ]
+        out = _render(self._native_entry(events), detail="more")
+        self.assertIn("tool/search events: 2", out)
+        self.assertNotIn("preflight scan", out)
+        self.assertNotIn("observe dirty diff", out)
+
+    def test_empty_events_list_shows_nothing(self):
+        out = _render(self._native_entry([]), detail="full")
+        self.assertNotIn("tool/search events", out)
+
+    def test_missing_events_key_renders_cleanly(self):
+        entry = {"task": "old run", "workflow": "native", "executor": "native"}
+        out = _render(entry, detail="full")
+        self.assertNotIn("tool/search events", out)
+
+    def test_dict_backed_events_render_same_as_object_backed(self):
+        """Regression: dict events (from saved JSONL) render correctly via _loop_event_value."""
+        from openshard.cli.run_output import _render_native_demo_block, _native_meta_from_entry
+        events_as_dicts = [
+            {"tool_name": "search_repo", "result_quality": "weak", "result_count": 2,
+             "selected_reason": "read-search strategy=default", "query": "main",
+             "context_injected": False, "retry_count": 0, "fallback_tool": None,
+             "changed_plan": False, "warnings": []},
+        ]
+        # Simulate the loaded-from-JSONL path via _native_meta_from_entry
+        entry = {
+            "workflow": "native",
+            "executor": "native",
+            "tool_search_events": events_as_dicts,
+        }
+        native_meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(native_meta, detail="full")
+        joined = "\n".join(lines)
+        self.assertIn("search_repo", joined)
+        self.assertIn("weak", joined)
+        self.assertIn("2 results", joined)
+        self.assertIn("read-search strategy=default", joined)
+
+
 if __name__ == "__main__":
     unittest.main()
