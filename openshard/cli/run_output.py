@@ -680,6 +680,23 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
             lines.append(f"  file context: {_fc_files} files, {_fc_chars} chars{_fc_trunc}")
             has_content = True
 
+    tool_search_events = getattr(native_meta, "tool_search_events", None) or []
+    if tool_search_events:
+        count = len(tool_search_events)
+        lines.append(f"  tool/search events: {count}")
+        if detail == "full":
+            for ev in tool_search_events:
+                _tn = _loop_event_value(ev, "tool_name", "?")
+                _rq = _loop_event_value(ev, "result_quality", "unknown")
+                _rc = _loop_event_value(ev, "result_count", 0)
+                _sr = _loop_event_value(ev, "selected_reason", "") or ""
+                _q = _loop_event_value(ev, "query", "") or ""
+                _ci = _loop_event_value(ev, "context_injected", False)
+                _q_part = f'  query="{_q}"' if _q else ""
+                _ci_part = ", injected" if _ci else ""
+                lines.append(f"    {_tn}  {_rq}  {_rc} results  {_sr}{_q_part}{_ci_part}")
+        has_content = True
+
     _cqs_w = getattr(getattr(native_meta, "context_quality_score", None), "warnings", []) or []
     _cp_w = getattr(getattr(native_meta, "context_packet", None), "warnings", []) or []
     _fc_w = getattr(getattr(native_meta, "file_context", None), "warnings", []) or []
@@ -1139,6 +1156,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "routing_preview": entry.get("routing_preview"),
         "routing_receipt": entry.get("routing_receipt"),
         "tier_dispatch_receipt": entry.get("tier_dispatch_receipt"),
+        "tool_search_events": entry.get("tool_search_events", []),
     })
 
 

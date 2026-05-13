@@ -3,11 +3,12 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import unittest
+from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from openshard.native.tool_runner import NativeToolRunner
-from openshard.native.tools import NativeToolCall
+from openshard.native.tools import NativeToolCall, NativeToolSearchEvent
 
 
 def _run_git(root: Path, *args: str) -> None:
@@ -345,6 +346,61 @@ class TestNativeToolRunnerRunVerification(unittest.TestCase):
             with p1, p2, p3:
                 result = runner.run(NativeToolCall("run_verification", {}, approved=True))
         self.assertTrue(result.ok)
+
+
+class TestNativeToolSearchEvent(unittest.TestCase):
+    """NativeToolSearchEvent serialization and field contracts."""
+
+    def test_serializes_cleanly(self):
+        event = NativeToolSearchEvent(tool_name="search_repo")
+        d = asdict(event)
+        self.assertIsInstance(d, dict)
+        self.assertEqual(d["tool_name"], "search_repo")
+
+    def test_default_values(self):
+        event = NativeToolSearchEvent(tool_name="list_files")
+        self.assertEqual(event.selected_reason, "")
+        self.assertEqual(event.query, "")
+        self.assertEqual(event.result_count, 0)
+        self.assertEqual(event.result_quality, "unknown")
+        self.assertEqual(event.retry_count, 0)
+        self.assertIsNone(event.fallback_tool)
+        self.assertFalse(event.context_injected)
+        self.assertFalse(event.changed_plan)
+        self.assertEqual(event.warnings, [])
+
+    def test_no_raw_content_keys_in_serialized_dict(self):
+        event = NativeToolSearchEvent(tool_name="get_git_diff")
+        d = asdict(event)
+        forbidden = {"output", "snippets", "diff", "stdout", "stderr"}
+        for key in forbidden:
+            self.assertNotIn(key, d, f"Raw content key '{key}' must not appear in serialized event")
+
+    def test_result_quality_values_are_from_allowed_set(self):
+        allowed = {"unknown", "empty", "weak", "useful"}
+        for quality in allowed:
+            event = NativeToolSearchEvent(tool_name="search_repo", result_quality=quality)
+            self.assertIn(asdict(event)["result_quality"], allowed)
+
+    def test_full_fields_round_trip(self):
+        event = NativeToolSearchEvent(
+            tool_name="search_repo",
+            selected_reason="observe search trigger",
+            query="auth token",
+            result_count=5,
+            result_quality="useful",
+            retry_count=0,
+            fallback_tool=None,
+            context_injected=True,
+            changed_plan=False,
+            warnings=["truncated"],
+        )
+        d = asdict(event)
+        self.assertEqual(d["tool_name"], "search_repo")
+        self.assertEqual(d["result_count"], 5)
+        self.assertEqual(d["result_quality"], "useful")
+        self.assertTrue(d["context_injected"])
+        self.assertEqual(d["warnings"], ["truncated"])
 
 
 if __name__ == "__main__":

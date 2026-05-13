@@ -1341,6 +1341,10 @@ class RunPipeline:
                 "context_state": asdict(_native_meta.context_state) if _native_meta.context_state is not None else None,
                 "context_warnings": _native_meta.context_warnings,
                 "tool_trace": _native_meta.tool_trace,
+                "tool_search_events": [
+                    asdict(e) if not isinstance(e, dict) else e
+                    for e in _native_meta.tool_search_events
+                ],
                 "repo_context_summary": asdict(_native_meta.repo_context_summary) if _native_meta.repo_context_summary is not None else None,
                 "observation": asdict(_native_meta.observation) if _native_meta.observation is not None else None,
                 "evidence": asdict(_native_meta.evidence) if _native_meta.evidence is not None else None,
