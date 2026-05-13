@@ -679,6 +679,36 @@ def build_osn_loop_meta(
     )
 
 
+@dataclass
+class NativeOSNLoopStep:
+    step_index: int = 0
+    step_name: str = ""  # preflight|observe|gather_context|plan_update|generate_patch|budget_check|approval|safe_write|verify|retry_once|final_receipt
+    status: str = "pending"  # pending|running|skipped|passed|failed|blocked
+    tool_name: str = ""
+    reason: str = ""
+    result_summary: str = ""  # max 120 chars — no raw content ever
+    context_injected: bool = False
+    approval_required: bool = False
+    verification_status: str = ""
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class NativeOSNLoopSummary:
+    enabled: bool = False
+    mode: str = ""  # "experimental"
+    max_steps: int = 11
+    steps_taken: int = 0
+    completed: bool = False
+    stopped_reason: str = ""
+    verification_status: str = ""
+    retry_used: bool = False
+    approval_required: bool = False
+    approval_granted: bool = False
+    warnings: list[str] = field(default_factory=list)
+    steps: list[NativeOSNLoopStep] = field(default_factory=list)
+
+
 def render_osn_loop_context(meta: OSNLoopMeta | None) -> str:
     """Bounded prompt-safe OSN loop context block.
 

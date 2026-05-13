@@ -3574,5 +3574,135 @@ class TestFormFactorRendering(unittest.TestCase):
             self.assertNotIn("public_mode", out)
 
 
+class TestLastOSNLoopSummaryRendering(unittest.TestCase):
+    """Tests for pipeline-level OSN loop summary rendering.
+
+    Distinct from tool-level osn_loop rendering (which renders "osn loop: N/M steps...").
+    """
+
+    def _entry_with_osn_summary(
+        self,
+        steps_taken: int = 5,
+        verification_status: str = "passed",
+        completed: bool = True,
+        stopped_reason: str = "completed",
+        steps: list | None = None,
+    ) -> dict:
+        return {
+            "workflow": "native",
+            "executor": "native",
+            "osn_loop_summary": {
+                "enabled": True,
+                "mode": "experimental",
+                "max_steps": 11,
+                "steps_taken": steps_taken,
+                "completed": completed,
+                "stopped_reason": stopped_reason,
+                "verification_status": verification_status,
+                "retry_used": False,
+                "approval_required": False,
+                "approval_granted": False,
+                "warnings": [],
+                "steps": steps or [],
+            },
+        }
+
+    def _detail_steps(self) -> list:
+        return [
+            {
+                "step_index": 0, "step_name": "preflight", "status": "passed",
+                "result_summary": "repo_map_ok=True", "tool_name": "", "reason": "",
+                "context_injected": False, "approval_required": False,
+                "verification_status": "", "warnings": [],
+            },
+            {
+                "step_index": 1, "step_name": "observe", "status": "passed",
+                "result_summary": "dirty=False", "tool_name": "", "reason": "",
+                "context_injected": True, "approval_required": False,
+                "verification_status": "", "warnings": [],
+            },
+            {
+                "step_index": 2, "step_name": "verify", "status": "passed",
+                "result_summary": "", "tool_name": "", "reason": "",
+                "context_injected": False, "approval_required": False,
+                "verification_status": "passed", "warnings": [],
+            },
+        ]
+
+    def test_more_shows_compact_summary(self):
+        out = _render(self._entry_with_osn_summary(), detail="more")
+        self.assertIn("OSN loop summary:", out)
+        self.assertIn("experimental", out)
+        self.assertIn("5 steps", out)
+        self.assertIn("passed", out)
+
+    def test_more_uses_correct_label_not_tool_level_label(self):
+        # Tool-level line is "  osn loop: ..." (lowercase), summary line is "  OSN loop summary: ..."
+        out = _render(self._entry_with_osn_summary(), detail="more")
+        self.assertIn("OSN loop summary:", out)
+
+    def test_full_shows_pipeline_header(self):
+        out = _render(
+            self._entry_with_osn_summary(steps=self._detail_steps()),
+            detail="full",
+        )
+        self.assertIn("OSN loop (pipeline):", out)
+
+    def test_full_shows_per_step_entries(self):
+        out = _render(
+            self._entry_with_osn_summary(steps=self._detail_steps()),
+            detail="full",
+        )
+        self.assertIn("preflight", out)
+        self.assertIn("observe", out)
+        self.assertIn("verify", out)
+        self.assertIn("passed", out)
+
+    def test_full_shows_verify_step_with_verification_suffix(self):
+        out = _render(
+            self._entry_with_osn_summary(steps=self._detail_steps()),
+            detail="full",
+        )
+        self.assertIn("verify=passed", out)
+
+    def test_old_entry_without_osn_summary_renders_cleanly(self):
+        entry = {"workflow": "native", "executor": "native"}
+        out = _render(entry, detail="more")
+        self.assertNotIn("OSN loop summary:", out)
+
+    def test_default_detail_does_not_show_osn_summary(self):
+        out = _render(self._entry_with_osn_summary(), detail="default")
+        self.assertNotIn("OSN loop summary:", out)
+
+    def test_existing_osn_loop_tool_steps_still_render(self):
+        entry = {
+            "workflow": "native",
+            "executor": "native",
+            "osn_loop": {
+                "enabled": True, "steps_run": 2, "max_steps": 5,
+                "terminated_reason": "complete", "paths_surfaced": [],
+                "steps": [], "warnings": [], "steps_queued": 2,
+                "consecutive_empty": 0, "truncated": False,
+            },
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("osn loop:", out)
+
+    def test_osn_summary_not_shown_when_enabled_false(self):
+        entry = {
+            "workflow": "native",
+            "executor": "native",
+            "osn_loop_summary": {
+                "enabled": False, "mode": "", "max_steps": 11,
+                "steps_taken": 0, "completed": False, "stopped_reason": "",
+                "verification_status": "", "retry_used": False,
+                "approval_required": False, "approval_granted": False,
+                "warnings": [], "steps": [],
+            },
+        }
+        out = _render(entry, detail="more")
+        self.assertNotIn("OSN loop summary:", out)
+
+
 if __name__ == "__main__":
     unittest.main()
