@@ -52,6 +52,7 @@ from openshard.providers.base import ProviderAuthError, ProviderError, ProviderR
 from openshard.providers.manager import ProviderManager
 from openshard.providers.openrouter import MODEL_PRICING, compute_cost
 from openshard.routing.engine import ESCALATION_CHAIN, MODEL_STRONG, RoutingDecision, route, is_readonly_task
+from openshard.routing.form_factor_policy import ExecutionFormFactorDecision, select_form_factor
 from openshard.routing.profiles import (
     ProfileDecision,
     ProfileHistorySummary,
@@ -142,6 +143,7 @@ class RunResult:
     result_summary: str = ""
     result_notes: list = field(default_factory=list)
     native_meta: Any = None
+    form_factor_decision: Any = None
 
 
 class RunPipeline:
@@ -501,6 +503,20 @@ class RunPipeline:
             task=task,
             override=profile,
             history_summary=_profile_history_summary,
+        )
+
+        _form_factor_decision: ExecutionFormFactorDecision = select_form_factor(
+            category=routing_decision.category if routing_decision else "standard",
+            readonly=_readonly_task,
+            workflow="staged" if _use_stages else "direct",
+            profile_name=_profile_decision.profile,
+            repo_facts=_repo_facts,
+            write_requested=write,
+            verification_available=bool(
+                _verification_plan is not None and _verification_plan.has_commands
+            ),
+            native_loop=self._native_loop,
+            experimental_deepagents_run=self._experimental_deepagents_run,
         )
 
         _cfg_approval = _cfg.get("approval_mode", "smart").strip().lower()
@@ -1034,6 +1050,7 @@ class RunPipeline:
                          matched_skills=_matched_skills,
                          profile_decision=_profile_decision,
                          verification_plan=_verification_plan,
+                         form_factor_decision=_form_factor_decision,
                          extra_metadata=_dr_extra)
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
@@ -1049,6 +1066,7 @@ class RunPipeline:
             result_obj.matched_skills = _matched_skills
             result_obj.profile_decision = _profile_decision
             result_obj.verification_plan = _verification_plan
+            result_obj.form_factor_decision = _form_factor_decision
             result_obj.result_summary = exec_result.summary
             result_obj.result_notes = exec_result.notes or []
             return result_obj
@@ -1234,6 +1252,7 @@ class RunPipeline:
                              matched_skills=_matched_skills,
                              profile_decision=_profile_decision,
                              verification_plan=_verification_plan,
+                             form_factor_decision=_form_factor_decision,
                              extra_metadata=_vf_extra)
                 except Exception as exc:
                     click.echo(f"  [log] warning: {exc}")
@@ -1251,6 +1270,7 @@ class RunPipeline:
                 result_obj.matched_skills = _matched_skills
                 result_obj.profile_decision = _profile_decision
                 result_obj.verification_plan = _verification_plan
+                result_obj.form_factor_decision = _form_factor_decision
                 result_obj.verification_attempted = True
                 result_obj.verification_passed = False
                 result_obj.workspace = workspace
@@ -1583,6 +1603,7 @@ class RunPipeline:
                      matched_skills=_matched_skills,
                      profile_decision=_profile_decision,
                      verification_plan=_verification_plan,
+                     form_factor_decision=_form_factor_decision,
                      extra_metadata=_extra_metadata)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
@@ -1612,6 +1633,7 @@ class RunPipeline:
         result_obj.matched_skills = _matched_skills
         result_obj.profile_decision = _profile_decision
         result_obj.verification_plan = _verification_plan
+        result_obj.form_factor_decision = _form_factor_decision
         result_obj.verification_attempted = (write and verify)
         result_obj.verification_passed = verification_passed
         result_obj.workspace = workspace
@@ -1707,6 +1729,7 @@ def _log_run(
     matched_skills: list[MatchedSkill] | None = None,
     profile_decision: ProfileDecision | None = None,
     verification_plan: VerificationPlan | None = None,
+    form_factor_decision: ExecutionFormFactorDecision | None = None,
     extra_metadata: dict | None = None,
 ) -> None:
     entry: dict = {
@@ -1787,6 +1810,20 @@ def _log_run(
     if profile_decision is not None:
         entry["execution_profile"] = profile_decision.profile
         entry["execution_profile_reason"] = profile_decision.reason
+
+    if form_factor_decision is not None:
+        entry["form_factor"] = {
+            "public_mode":            form_factor_decision.public_mode,
+            "internal_form_factor":   form_factor_decision.internal_form_factor,
+            "reason":                 form_factor_decision.reason,
+            "confidence":             form_factor_decision.confidence,
+            "risk_level":             form_factor_decision.risk_level,
+            "read_only":              form_factor_decision.read_only,
+            "write_requested":        form_factor_decision.write_requested,
+            "verification_available": form_factor_decision.verification_available,
+            "context_quality":        form_factor_decision.context_quality,
+            "warnings":               form_factor_decision.warnings,
+        }
 
     if verification_plan is not None and verification_plan.has_commands:
         entry["verification_plan"] = _serialize_verification_plan(verification_plan)

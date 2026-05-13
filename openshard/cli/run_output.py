@@ -152,6 +152,13 @@ _PROFILE_LABEL: dict[str, str] = {
     "native": "OSN Run",
 }
 
+_PUBLIC_MODE_LABEL: dict[str, str] = {
+    "ask":      "Ask",
+    "run":      "Run",
+    "deep-run": "Deep Run",
+    "osn-run":  "OSN Run",
+}
+
 
 def _format_model_slug(raw: str) -> str:
     """Format an unknown model ID into a readable label.

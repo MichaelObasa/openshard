@@ -556,5 +556,78 @@ class TestToolSearchEventsHistory(unittest.TestCase):
         self.assertEqual(names, ["list_files", "get_git_diff", "search_repo"])
 
 
+class TestFormFactorHistory(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._tmpdir = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _call(self, **kwargs):
+        defaults = dict(
+            start=time.time(),
+            task="test task",
+            generator=_make_generator(),
+            retry_triggered=False,
+            files=[],
+            verification_attempted=False,
+            verification_passed=None,
+            workspace=None,
+        )
+        defaults.update(kwargs)
+        with patch("openshard.cli.main.Path.cwd", return_value=self._tmpdir):
+            _log_run(**defaults)
+
+    def _read_entry(self) -> dict:
+        log_path = self._tmpdir / ".openshard" / "runs.jsonl"
+        lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        return json.loads(lines[-1])
+
+    def _make_ff_decision(self):
+        from openshard.routing.form_factor_policy import ExecutionFormFactorDecision
+        return ExecutionFormFactorDecision(
+            public_mode="run",
+            internal_form_factor="staged",
+            reason="staged planning selected",
+            confidence="high",
+            risk_level="low",
+            read_only=False,
+            write_requested=True,
+            verification_available=True,
+            context_quality=None,
+            warnings=[],
+        )
+
+    def test_form_factor_stored_in_history(self):
+        ff = self._make_ff_decision()
+        self._call(form_factor_decision=ff)
+        entry = self._read_entry()
+        self.assertIn("form_factor", entry)
+        ff_stored = entry["form_factor"]
+        self.assertEqual(ff_stored["public_mode"], "run")
+        self.assertEqual(ff_stored["internal_form_factor"], "staged")
+        self.assertEqual(ff_stored["reason"], "staged planning selected")
+        self.assertEqual(ff_stored["confidence"], "high")
+        self.assertEqual(ff_stored["risk_level"], "low")
+        self.assertIs(ff_stored["read_only"], False)
+        self.assertIs(ff_stored["write_requested"], True)
+        self.assertIs(ff_stored["verification_available"], True)
+        self.assertIsNone(ff_stored["context_quality"])
+        self.assertEqual(ff_stored["warnings"], [])
+
+    def test_form_factor_absent_when_none(self):
+        self._call(form_factor_decision=None)
+        entry = self._read_entry()
+        self.assertNotIn("form_factor", entry)
+
+    def test_old_entries_without_form_factor_are_valid(self):
+        self._call()
+        entry = self._read_entry()
+        ff = entry.get("form_factor", None)
+        self.assertIsNone(ff)
+
+
 if __name__ == "__main__":
     unittest.main()
