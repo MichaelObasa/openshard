@@ -178,5 +178,99 @@ class TestFeedbackStats(unittest.TestCase):
             self.assertEqual(result.exit_code, 0)
 
 
+def _make_feedback_full(rating: str = "bad", action: str | None = None,
+                        reason: str | None = None, note: str = "") -> dict:
+    fb: dict = {
+        "schema_version": 1,
+        "rating": rating,
+        "note": note,
+        "created_at": "2025-01-01T00:00:00Z",
+    }
+    if action is not None:
+        fb["action"] = action
+    if reason is not None:
+        fb["correction_reason"] = reason
+    return fb
+
+
+class TestFeedbackStatsActionBreakdown(unittest.TestCase):
+
+    def test_action_counts_accepted_rejected_edited_retried(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([
+                _make_entry(feedback=_make_feedback_full("good", action="accepted")),
+                _make_entry(feedback=_make_feedback_full("bad", action="rejected")),
+                _make_entry(feedback=_make_feedback_full("bad", action="edited")),
+                _make_entry(feedback=_make_feedback_full("bad", action="retried")),
+            ])
+            result = runner.invoke(cli, ["feedback-stats"])
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("By action", result.output)
+            self.assertIn("accepted: 1", result.output)
+            self.assertIn("rejected: 1", result.output)
+            self.assertIn("edited: 1", result.output)
+            self.assertIn("retried: 1", result.output)
+
+    def test_action_section_absent_when_no_actions_recorded(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(feedback=_make_feedback("good"))])
+            result = runner.invoke(cli, ["feedback-stats"])
+            self.assertNotIn("By action", result.output)
+
+    def test_correction_reason_counts_shown(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([
+                _make_entry(feedback=_make_feedback_full("bad", action="rejected", reason="wrong-file")),
+                _make_entry(feedback=_make_feedback_full("bad", action="rejected", reason="wrong-file")),
+                _make_entry(feedback=_make_feedback_full("bad", action="edited", reason="failed-tests")),
+            ])
+            result = runner.invoke(cli, ["feedback-stats"])
+            self.assertIn("Correction reasons", result.output)
+            self.assertIn("wrong-file: 2", result.output)
+            self.assertIn("failed-tests: 1", result.output)
+
+    def test_correction_reasons_section_absent_when_none_recorded(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(feedback=_make_feedback("good"))])
+            result = runner.invoke(cli, ["feedback-stats"])
+            self.assertNotIn("Correction reasons", result.output)
+
+    def test_groups_by_task_category_when_present(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([
+                _make_entry(
+                    routing_category="standard",
+                    feedback=_make_feedback_full("good"),
+                ),
+                _make_entry(
+                    routing_category="standard",
+                    feedback=_make_feedback_full("bad"),
+                ),
+                _make_entry(
+                    routing_category="security",
+                    feedback=_make_feedback_full("good"),
+                ),
+            ])
+            result = runner.invoke(cli, ["feedback-stats"])
+            self.assertIn("By category", result.output)
+            lines = result.output.splitlines()
+            standard_line = next((ln for ln in lines if "standard" in ln), None)
+            self.assertIsNotNone(standard_line)
+            self.assertIn("good=1", standard_line)
+            self.assertIn("bad=1", standard_line)
+
+    def test_category_section_absent_when_no_routing_category(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(feedback=_make_feedback("good"))])
+            result = runner.invoke(cli, ["feedback-stats"])
+            self.assertNotIn("By category", result.output)
+
+
 if __name__ == "__main__":
     unittest.main()

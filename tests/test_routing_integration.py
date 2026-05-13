@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import unittest
 from unittest.mock import ANY, MagicMock, patch
@@ -613,3 +613,74 @@ class TestTierDispatchRouting(unittest.TestCase):
             runner.invoke(cli, ["run", "implement a feature", "--experimental-tier-dispatch"])
         generator.generate.assert_called_once()
         self.assertEqual(generator.generate.call_args.kwargs["model"], _DISPATCH_ROUTED)
+
+
+class TestFeedbackScoringDisplay(unittest.TestCase):
+    """Verify feedback-scoring lines appear in --more output only when the flag is set."""
+
+    def _run(self, args, manager_mock, generator_mock, adjustments=None, reasons=None):
+        adjustments = adjustments or {}
+        reasons = reasons or {}
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager_mock), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator_mock), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.run.pipeline._log_run"), \
+             patch("openshard.run.pipeline.load_runs", return_value=[]), \
+             patch(
+                 "openshard.run.pipeline.compute_feedback_adjustments",
+                 return_value=adjustments,
+             ), \
+             patch(
+                 "openshard.run.pipeline.compute_feedback_adjustment_reasons",
+                 return_value=reasons,
+             ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run"] + args)
+        return result
+
+    def test_feedback_scoring_enabled_line_shown(self):
+        """[routing] Feedback scoring: enabled appears in --more output when flag is set."""
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
+        manager = _make_manager_mock([entry], ["openrouter"])
+        generator = _make_generator_mock()
+        result = self._run(
+            ["implement a feature", "--more", "--feedback-scoring"],
+            manager, generator,
+        )
+        self.assertIn("Feedback scoring: enabled", result.output, result.output)
+
+    def test_feedback_nonzero_adjustment_shown_with_reason(self):
+        """Non-zero adjustment for a candidate model shows value and reason in --more output."""
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
+        manager = _make_manager_mock([entry], ["openrouter"])
+        generator = _make_generator_mock()
+        adjustments = {"openrouter/fast-model": -0.25}
+        reasons = {"openrouter/fast-model": "feedback: 3 rejected"}
+        result = self._run(
+            ["implement a feature", "--more", "--feedback-scoring"],
+            manager, generator,
+            adjustments=adjustments, reasons=reasons,
+        )
+        self.assertIn("-0.2", result.output, result.output)
+        self.assertIn("feedback: 3 rejected", result.output, result.output)
+
+    def test_no_adjustment_shows_no_relevant_feedback_line(self):
+        """When no candidates have nonzero adjustments, the no-adjustment message is shown."""
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
+        manager = _make_manager_mock([entry], ["openrouter"])
+        generator = _make_generator_mock()
+        result = self._run(
+            ["implement a feature", "--more", "--feedback-scoring"],
+            manager, generator,
+            adjustments={}, reasons={},
+        )
+        self.assertIn("No relevant feedback (no adjustment)", result.output, result.output)
+
+    def test_feedback_scoring_hidden_without_flag(self):
+        """Feedback scoring lines must NOT appear when --feedback-scoring is absent."""
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
+        manager = _make_manager_mock([entry], ["openrouter"])
+        generator = _make_generator_mock()
+        result = self._run(["implement a feature", "--more"], manager, generator)
+        self.assertNotIn("Feedback scoring", result.output, result.output)

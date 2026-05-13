@@ -43,6 +43,10 @@ from openshard.history.adjustments import (
     compute_history_adjustments,
     compute_history_adjustment_reasons,
 )
+from openshard.history.feedback_scoring import (
+    compute_feedback_adjustments,
+    compute_feedback_adjustment_reasons,
+)
 from openshard.history.metrics import load_runs
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
 from openshard.providers.manager import ProviderManager
@@ -159,6 +163,7 @@ class RunPipeline:
         provider: str | None,
         history_scoring: bool,
         eval_scoring: bool,
+        feedback_scoring: bool,
         detail: str,
         native_backend: str | None = None,
         experimental_deepagents_run: bool = False,
@@ -179,6 +184,7 @@ class RunPipeline:
         self._provider = provider
         self._history_scoring = history_scoring
         self._eval_scoring = eval_scoring
+        self._feedback_scoring = feedback_scoring
         self._detail = detail
         self._native_backend = native_backend or "builtin"
         self._experimental_deepagents_run = experimental_deepagents_run
@@ -201,6 +207,7 @@ class RunPipeline:
         provider = self._provider
         history_scoring = self._history_scoring
         eval_scoring = self._eval_scoring
+        feedback_scoring = self._feedback_scoring
 
         start = time.time()
         result_obj.start = start
@@ -216,6 +223,7 @@ class RunPipeline:
             _cfg_executor_legacy = _cfg.get("executor", "direct").strip().lower()
             _use_history_scoring = history_scoring or bool(_cfg.get("history_scoring", False))
             _use_eval_scoring = eval_scoring or bool(_cfg.get("eval_scoring", False))
+            _use_feedback_scoring = feedback_scoring or bool(_cfg.get("feedback_scoring", False))
             _policy_executor, _policy_reason = _suggest_executor(task)
 
             # --workflow > --executor (deprecated) > config.workflow > config.executor > auto
@@ -409,8 +417,17 @@ class RunPipeline:
                                 )
                         except Exception:
                             pass
+                _feedback_adjustments: dict[str, float] = {}
+                _feedback_reasons: dict[str, str] = {}
+                if _use_feedback_scoring:
+                    try:
+                        _fb_runs = load_runs()
+                        _feedback_adjustments = compute_feedback_adjustments(_fb_runs)
+                        _feedback_reasons = compute_feedback_adjustment_reasons(_fb_runs)
+                    except Exception:
+                        pass
                 _merged_adjustments: dict[str, float] | None = None
-                if _hist_adjustments is not None or _eval_adjustments or _cat_adjustments:
+                if _hist_adjustments is not None or _eval_adjustments or _cat_adjustments or _feedback_adjustments:
                     _merged_adjustments = dict(_hist_adjustments or {})
                     _all_eval_models = set(_eval_adjustments) | set(_cat_adjustments)
                     for _em in _all_eval_models:
@@ -419,6 +436,11 @@ class RunPipeline:
                         _combined = max(_ADJ_MIN, min(_ADJ_MAX, _combined))
                         if _combined != 0.0:
                             _merged_adjustments[_em] = _merged_adjustments.get(_em, 0.0) + _combined
+                    _merged_clamp_min, _merged_clamp_max = -2.0, 1.0
+                    for _fm, _fval in _feedback_adjustments.items():
+                        _merged_adjustments[_fm] = max(
+                            _merged_clamp_min, min(_merged_clamp_max, _merged_adjustments.get(_fm, 0.0) + _fval)
+                        )
                 _scored = select_with_info(_entries, _reqs, routing_decision.category, history_adjustments=_merged_adjustments)
                 if (
                     _scored.selected_model is not None
@@ -572,6 +594,20 @@ class RunPipeline:
                         _routing_lines.append(f"    [{_cat_label}] {_model_label(_cm)}: {_ca:+.1f}{_rsn_str}{_marker}")
                 else:
                     _routing_lines.append(f"    [{_cat_label}] No category evidence (global only)")
+            if _use_feedback_scoring:
+                _routing_lines.append("  Feedback scoring: enabled")
+                _fb_nonzero = [
+                    (m, adj)
+                    for m, adj in _feedback_adjustments.items()
+                    if m in set(_scored.candidates) and adj != 0.0
+                ]
+                for _fm, _fa in _fb_nonzero:
+                    _rsn = _feedback_reasons.get(_fm, "")
+                    _rsn_str = f" ({_rsn})" if _rsn else ""
+                    _marker = " <- selected" if _fm == _scored.selected_model else ""
+                    _routing_lines.append(f"    {_model_label(_fm)}: {_fa:+.1f}{_rsn_str}{_marker}")
+                if not _fb_nonzero:
+                    _routing_lines.append("    No relevant feedback (no adjustment)")
 
         _matched_skills: list[MatchedSkill] = []
         if _repo_facts is not None and routing_decision is not None:

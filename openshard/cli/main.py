@@ -157,6 +157,7 @@ def plan(task: str):
 )
 @click.option("--history-scoring", "history_scoring", is_flag=True, default=False, help="Apply run-history bonuses/penalties to model scoring (opt-in).")
 @click.option("--eval-scoring", "eval_scoring", is_flag=True, default=False, help="Apply eval-run bonuses/penalties to model scoring (opt-in).")
+@click.option("--feedback-scoring", "feedback_scoring", is_flag=True, default=False, help="Apply developer-feedback bonuses/penalties to model scoring (opt-in).")
 @click.option(
     "--model-policy",
     "model_policy",
@@ -164,7 +165,7 @@ def plan(task: str):
     default=None,
     help="Model selection policy mode (metadata-only v1): auto, cheapest-safe, frontier-heavy, open-source-only, local-only, custom.",
 )
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, native_backend: str | None, experimental_deepagents_run: bool, experimental_tier_dispatch: bool, native_loop: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool, model_policy: str | None):
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, native_backend: str | None, experimental_deepagents_run: bool, experimental_tier_dispatch: bool, native_loop: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool, feedback_scoring: bool, model_policy: str | None):
     """Execute TASK and return a structured result."""
     if native_loop is not None and workflow != "native":
         raise click.UsageError("--native-loop experimental requires --workflow native")
@@ -187,6 +188,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         provider=provider,
         history_scoring=history_scoring,
         eval_scoring=eval_scoring,
+        feedback_scoring=feedback_scoring,
         detail=detail,
         native_backend=native_backend,
         experimental_deepagents_run=experimental_deepagents_run,
@@ -985,8 +987,15 @@ def feedback_stats() -> None:
 
     counts = {"good": 0, "mixed": 0, "bad": 0}
     by_model: dict[str, dict[str, int]] = {}
+    action_counts: dict[str, int] = {
+        "accepted": 0, "rejected": 0, "edited": 0,
+        "retried": 0, "partially-accepted": 0, "unknown": 0,
+    }
+    reason_counts: dict[str, int] = {}
+    by_category: dict[str, dict[str, int]] = {}
     for entry in feedback_entries:
-        rating = entry["feedback"].get("rating", "")
+        fb = entry["feedback"]
+        rating = fb.get("rating", "")
         if rating in counts:
             counts[rating] += 1
         raw_model = entry.get("execution_model") or entry.get("model") or "unknown"
@@ -994,6 +1003,17 @@ def feedback_stats() -> None:
         bucket = by_model.setdefault(label, {"good": 0, "mixed": 0, "bad": 0})
         if rating in bucket:
             bucket[rating] += 1
+        action = fb.get("action")
+        if action in action_counts:
+            action_counts[action] += 1
+        reason = fb.get("correction_reason")
+        if reason:
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        category = entry.get("routing_category")
+        if category:
+            cat_bucket = by_category.setdefault(category, {"good": 0, "mixed": 0, "bad": 0})
+            if rating in cat_bucket:
+                cat_bucket[rating] += 1
 
     percent = round(feedback_count / total * 100)
 
@@ -1007,6 +1027,22 @@ def feedback_stats() -> None:
     click.echo("\nBy model")
     for lbl, bucket in by_model.items():
         click.echo(f"  {lbl}: good={bucket['good']} mixed={bucket['mixed']} bad={bucket['bad']}")
+
+    shown_actions = [(a, c) for a, c in action_counts.items() if c > 0]
+    if shown_actions:
+        click.echo("\nBy action")
+        for action, count in shown_actions:
+            click.echo(f"  {action}: {count}")
+
+    if reason_counts:
+        click.echo("\nCorrection reasons")
+        for reason, count in sorted(reason_counts.items(), key=lambda x: -x[1]):
+            click.echo(f"  {reason}: {count}")
+
+    if by_category:
+        click.echo("\nBy category")
+        for cat, cat_bucket in by_category.items():
+            click.echo(f"  {cat}: good={cat_bucket['good']} mixed={cat_bucket['mixed']} bad={cat_bucket['bad']}")
 
     notes = [
         (e["feedback"].get("rating", ""), e["feedback"].get("note", ""))
