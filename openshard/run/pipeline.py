@@ -1108,6 +1108,8 @@ class RunPipeline:
                 if effective_executor == "native":
                     if hasattr(generator, "record_loop_step"):
                         generator.record_loop_step("write")
+                    if hasattr(generator, "record_osn_loop_step"):
+                        generator.record_osn_loop_step("safe_write", "passed")
                     generator.review_diff()
             # OpenCode: workspace already created and populated before generate().
 
@@ -1129,6 +1131,9 @@ class RunPipeline:
                 _loop_meta.output_chars = len(_loop_output)
                 _loop_meta.truncated = len(_loop_output) > 1200
                 _loop_meta.passed = _loop_code == 0
+                if hasattr(generator, "record_osn_loop_step"):
+                    _vst_first = "passed" if _loop_meta.passed else "failed"
+                    generator.record_osn_loop_step("verify", _vst_first, verification_status=_vst_first)
                 if _loop_code != 0:
                     _failure_ctx = render_verification_failure_context(
                         _loop_output, exit_code=_loop_code
@@ -1157,6 +1162,8 @@ class RunPipeline:
                     finally:
                         spinner.stop()
                     _loop_meta.retried = True
+                    if hasattr(generator, "record_osn_loop_step"):
+                        generator.record_osn_loop_step("retry_once", "running")
                     exec_result = _retry_result
                     final_files = _retry_result.files
                     _write_files(_retry_result.files, workspace)
@@ -1524,6 +1531,11 @@ class RunPipeline:
                     if _native_meta is not None and _native_meta.osn_loop is not None
                     else None
                 ),
+                "osn_loop_summary": (
+                    asdict(_native_meta.osn_loop_summary)
+                    if _native_meta is not None and _native_meta.osn_loop_summary is not None
+                    else None
+                ),
                 "deepagents_adapter": (
                     asdict(_native_meta.deepagents_adapter)
                     if _native_meta is not None and _native_meta.deepagents_adapter is not None
@@ -1592,6 +1604,20 @@ class RunPipeline:
             if _extra_metadata is None:
                 _extra_metadata = {}
             _extra_metadata["validator_policy"] = {"run": _validator_policy.run, "reason": _validator_policy.reason}
+        # Finalise OSN loop summary before serialising to run history
+        if effective_executor == "native" and hasattr(generator, "complete_osn_loop"):
+            _vloop = getattr(generator.native_meta, "verification_loop", None)
+            _approval_rcpt = getattr(generator.native_meta, "approval_receipt", None)
+            generator.record_osn_loop_step("final_receipt", "passed")
+            generator.complete_osn_loop(
+                stopped_reason="completed",
+                verification_status=(
+                    "passed" if (_vloop and _vloop.passed)
+                    else ("failed" if (_vloop and _vloop.attempted) else "")
+                ),
+                retry_used=bool(_vloop and _vloop.retried),
+                approval_granted=bool(_approval_rcpt and _approval_rcpt.granted),
+            )
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
                      verification_attempted=(write and verify),

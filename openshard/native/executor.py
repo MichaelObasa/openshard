@@ -44,6 +44,7 @@ from openshard.native.context import (
     NativeRoutingReceipt,
     NativeTierDispatchReceipt,
     NativeValidationContract,
+    NativeOSNLoopSummary,
     OSNLoopMeta,
     OSNLoopStep,
     build_initial_context_budget,
@@ -142,6 +143,7 @@ class NativeRunMeta:
     routing_preview: NativeRoutingPreview | None = None
     routing_receipt: NativeRoutingReceipt | None = None
     tier_dispatch_receipt: NativeTierDispatchReceipt | None = None
+    osn_loop_summary: NativeOSNLoopSummary | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -492,6 +494,10 @@ class NativeAgentExecutor:
         self._experimental_deepagents_run = experimental_deepagents_run
         self._deepagents_model = deepagents_model  # None in production; injectable for tests
         self._native_loop = native_loop
+        from openshard.native.osn_loop_recorder import OsnLoopRecorder, should_enable_osn_recorder
+        self._osn_recorder: OsnLoopRecorder | None = (
+            OsnLoopRecorder() if should_enable_osn_recorder(native_loop) else None
+        )
         if backend_name == "deepagents" and not _available:
             self.native_meta.native_backend_notes = [
                 "Install deepagents to enable this experimental backend."
@@ -507,6 +513,15 @@ class NativeAgentExecutor:
         if step not in self.native_meta.native_loop_steps:
             self.native_meta.native_loop_steps.append(step)
         self.native_meta.native_loop_trace.record(step, summary=summary, metadata=metadata or {})
+
+    def record_osn_loop_step(self, step_name: str, status: str, **kwargs) -> None:
+        if self._osn_recorder is not None:
+            self._osn_recorder.record_step(step_name, status, **kwargs)
+
+    def complete_osn_loop(self, **kwargs) -> None:
+        if self._osn_recorder is not None:
+            self._osn_recorder.complete(**kwargs)
+            self.native_meta.osn_loop_summary = self._osn_recorder.summary
 
     def _record_tool_search_event(
         self,
@@ -1166,6 +1181,10 @@ class NativeAgentExecutor:
                 "action": gate.action,
             },
         )
+        self.record_osn_loop_step(
+            "budget_check", "passed",
+            result_summary=f"action={gate.action}",
+        )
         return gate
 
     def build_budget_gate_approval_request(self) -> NativeApprovalRequest:
@@ -1202,6 +1221,12 @@ class NativeAgentExecutor:
                 "granted": receipt.granted,
                 "action": receipt.action,
             },
+        )
+        self.record_osn_loop_step(
+            "approval",
+            "passed" if granted else "blocked",
+            approval_required=True,
+            result_summary=f"granted={granted}",
         )
         return receipt
 
@@ -1284,15 +1309,30 @@ class NativeAgentExecutor:
         skills_context: str = "",
     ) -> ExecutionResult:
         self._run_preflight()
+        self.record_osn_loop_step(
+            "preflight", "passed",
+            result_summary=f"repo_map_ok={self.native_meta.repo_context_summary is not None}",
+        )
         if self._backend.name == "deepagents":
             self._run_deepagents_adapter_phase()
         if self._experimental_deepagents_run:
             self._run_backend_proof_phase(task)
         self._run_observe_phase(task, repo_facts=repo_facts)
+        _obs = self.native_meta.observation
+        self.record_osn_loop_step(
+            "observe", "passed",
+            result_summary=f"dirty={_obs.dirty_diff_present if _obs else False}",
+            context_injected=_obs is not None,
+        )
         self._run_read_search_loop(task)
         if self._native_loop == "experimental":
             self._run_experimental_loop(task)
         self._run_file_context_phase()
+        self.record_osn_loop_step(
+            "gather_context", "passed",
+            result_summary=f"findings={len(self.native_meta.read_search_findings)}",
+            context_injected=True,
+        )
         matches = match_builtin_skills(task, repo_facts=repo_facts)
         self.native_meta.selected_skills = selected_skill_names(matches)
         self.build_context_packet(task)
@@ -1307,6 +1347,11 @@ class NativeAgentExecutor:
             selected_skills=self.native_meta.selected_skills,
         )
         self.record_loop_step("plan")
+        _plan = self.native_meta.plan
+        self.record_osn_loop_step(
+            "plan_update", "passed",
+            result_summary=f"intent={(_plan.intent or '')[:60]} risk={_plan.risk if _plan else ''}",
+        )
 
         self.native_meta.verification_plan = build_native_verification_plan(
             task=task,
@@ -1437,4 +1482,8 @@ class NativeAgentExecutor:
             task, model=model, repo_facts=repo_facts, skills_context=combined_context
         )
         self.record_loop_step("generation")
+        self.record_osn_loop_step(
+            "generate_patch", "passed",
+            result_summary=f"files={len(result.files)}",
+        )
         return result

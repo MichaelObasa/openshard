@@ -534,6 +534,14 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
         )
         has_content = True
 
+    osn_loop_summary = getattr(native_meta, "osn_loop_summary", None)
+    if osn_loop_summary is not None and getattr(osn_loop_summary, "enabled", False):
+        _n = getattr(osn_loop_summary, "steps_taken", 0)
+        _vst = getattr(osn_loop_summary, "verification_status", "") or "no verification"
+        _mode = getattr(osn_loop_summary, "mode", "experimental")
+        lines.append(f"  OSN loop summary: {_mode}, {_n} steps, {_vst}")
+        has_content = True
+
     cp = getattr(native_meta, "context_packet", None)
     if cp is not None:
         _cp_sources = len(getattr(cp, "sources", []) or [])
@@ -765,6 +773,36 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                     s_skip = _loop_event_value(s, "skipped", False)
                     s_status = "skip" if s_skip else ("ok" if s_ok else "fail")
                     lines.append(f"    [{s_idx}] {s_tool}({s_label!r}) {s_status} chars={s_chars}")
+                has_content = True
+
+    if detail == "full":
+        osn_summary_full = getattr(native_meta, "osn_loop_summary", None)
+        if osn_summary_full is not None and getattr(osn_summary_full, "enabled", False):
+            _summary_steps = getattr(osn_summary_full, "steps", []) or []
+            if _summary_steps:
+                lines.append("  OSN loop (pipeline):")
+                lines.append(f"    Mode: {getattr(osn_summary_full, 'mode', 'experimental')}")
+                lines.append(f"    Steps: {getattr(osn_summary_full, 'steps_taken', 0)}")
+                _completed = getattr(osn_summary_full, "completed", False)
+                lines.append(f"    Completed: {'yes' if _completed else 'no'}")
+                _stopped = getattr(osn_summary_full, "stopped_reason", "")
+                if _stopped:
+                    lines.append(f"    Stopped: {_stopped}")
+                for s in _summary_steps:
+                    s_idx = _loop_event_value(s, "step_index", 0)
+                    s_name = _loop_event_value(s, "step_name", "?")
+                    s_status = _loop_event_value(s, "status", "?")
+                    s_summary = _loop_event_value(s, "result_summary", "")
+                    s_approval = _loop_event_value(s, "approval_required", False)
+                    s_vst = _loop_event_value(s, "verification_status", "")
+                    suffix_parts = []
+                    if s_approval:
+                        suffix_parts.append("approval=required")
+                    if s_vst:
+                        suffix_parts.append(f"verify={s_vst}")
+                    suffix = (" " + " ".join(suffix_parts)) if suffix_parts else ""
+                    detail_str = (f" {s_summary}") if s_summary else ""
+                    lines.append(f"    {s_idx + 1}. {s_name}: {s_status}{detail_str}{suffix}")
                 has_content = True
 
     if detail == "full":
@@ -1152,6 +1190,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "context_usage_summary": entry.get("context_usage_summary"),
         "failure_memory": entry.get("failure_memory"),
         "osn_loop": entry.get("osn_loop"),
+        "osn_loop_summary": entry.get("osn_loop_summary"),
         "deepagents_adapter": entry.get("deepagents_adapter"),
         "validation_contract": entry.get("validation_contract"),
         "context_provenance": entry.get("context_provenance"),
