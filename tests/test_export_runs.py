@@ -400,5 +400,45 @@ class TestExportRunsPreview(unittest.TestCase):
             self.assertEqual(rows[0]["task"], "filetask")
 
 
+class TestExportRunsCorrectionFields(unittest.TestCase):
+
+    def test_feedback_action_exported(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(feedback={"schema_version": 1, "rating": "bad", "note": "", "action": "edited", "created_at": "2025-01-01T00:00:00Z"})])
+            result = runner.invoke(cli, ["export-runs"])
+            self.assertEqual(result.exit_code, 0)
+            row = _parse_jsonl(result.output)[0]
+            self.assertEqual(row["feedback_action"], "edited")
+
+    def test_correction_reason_exported(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(feedback={"schema_version": 1, "rating": None, "note": "", "action": "retried", "correction_reason": "wrong-file", "created_at": "2025-01-01T00:00:00Z"})])
+            result = runner.invoke(cli, ["export-runs"])
+            self.assertEqual(result.exit_code, 0)
+            row = _parse_jsonl(result.output)[0]
+            self.assertEqual(row["correction_reason"], "wrong-file")
+
+    def test_old_entry_without_action_exports_null(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(feedback={"schema_version": 1, "rating": "good", "note": "", "created_at": "2025-01-01T00:00:00Z"})])
+            result = runner.invoke(cli, ["export-runs"])
+            self.assertEqual(result.exit_code, 0)
+            row = _parse_jsonl(result.output)[0]
+            self.assertIsNone(row["feedback_action"])
+            self.assertIsNone(row["correction_reason"])
+
+    def test_preview_stays_compact(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([_make_entry(feedback={"schema_version": 1, "rating": "good", "note": "", "action": "edited", "correction_reason": "wrong-file", "created_at": "2025-01-01T00:00:00Z"})])
+            result = runner.invoke(cli, ["export-runs", "--preview"])
+            self.assertEqual(result.exit_code, 0)
+            self.assertNotIn("feedback_action", result.output)
+            self.assertNotIn("correction_reason", result.output)
+
+
 if __name__ == "__main__":
     unittest.main()
