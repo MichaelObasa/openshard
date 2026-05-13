@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import io
 import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from click.testing import CliRunner
+from rich.console import Console
 
 from openshard.cli.main import cli
 
@@ -114,6 +116,58 @@ class TestHomeScreen(unittest.TestCase):
             result = runner.invoke(cli, [])
             self.assertEqual(result.exit_code, 0)
             self.assertIn("good receipt", result.output)
+
+
+    def test_recent_receipts_capped_at_three(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([
+                {"task": "task one", "workflow": "Run", "verification_attempted": False},
+                {"task": "task two", "workflow": "Run", "verification_attempted": False},
+                {"task": "task three", "workflow": "Run", "verification_attempted": False},
+                {"task": "task four", "workflow": "Run", "verification_attempted": False},
+                {"task": "task five", "workflow": "Run", "verification_attempted": False},
+            ])
+            result = runner.invoke(cli, [])
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("task five", result.output)
+            self.assertIn("task four", result.output)
+            self.assertIn("task three", result.output)
+            self.assertNotIn("task two", result.output)
+            self.assertNotIn("task one", result.output)
+
+    def test_git_failure_does_not_crash(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch("openshard.cli.ui.home.subprocess.run", side_effect=OSError("no git")):
+                result = runner.invoke(cli, [])
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("Git unavailable", result.output)
+
+    def test_small_width_does_not_crash(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch("openshard.cli.ui.home.make_console") as mock_make:
+                mock_make.side_effect = lambda: Console(
+                    file=io.StringIO(), width=40, force_terminal=False, color_system=None
+                )
+                result = runner.invoke(cli, [])
+            self.assertEqual(result.exit_code, 0)
+
+    def test_no_fake_free_mode_shown(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, [])
+            self.assertEqual(result.exit_code, 0)
+            self.assertNotIn("free mode", result.output.lower())
+
+    def test_unconfigured_shows_not_configured(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch("openshard.cli.ui.home.load_config", return_value={}):
+                result = runner.invoke(cli, [])
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("Not configured", result.output)
 
 
 if __name__ == "__main__":
