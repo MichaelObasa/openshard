@@ -1,11 +1,11 @@
 # OpenShard
 
 <p align="center">
-  <strong>The neutral control layer for AI coding workflows.</strong>
+  <strong>The control layer for AI coding agents.</strong>
 </p>
 
 <p align="center">
-  Route tasks across models and agents. Gate risky actions. Verify the result. Keep an execution record.
+  Route work across models and agents. Gate risky actions. Verify results. Keep an execution record.
 </p>
 
 <p align="center">
@@ -17,11 +17,11 @@
 
 ---
 
-OpenShard is a CLI-first developer tool that sits above model APIs and coding workflows. It inspects a repo, routes the task to the right model or workflow, applies approval gates, can run verification, and records what happened.
+OpenShard is a CLI-first developer tool that sits above model APIs and coding agents. It inspects a repo, classifies the task, routes work across models or workflows, applies approval gates, runs verification where appropriate, compares cost, and records what happened.
 
 Most coding tools make you choose the model, decide when to approve writes, remember what happened, and manually compare whether a cheaper or stronger model would have done better. OpenShard turns that into an explicit control layer:
 
-- **Route** tasks by risk, complexity, repo context, model capability, and cost.
+- **Route** work by risk, complexity, repo context, model capability, and cost.
 - **Gate** high-cost, risky-path, unsafe-command, and stack-mismatch actions.
 - **Verify** generated changes when verification is enabled, using detected or configured test commands.
 - **Record** model choice, cost, duration, changed files, verification status, retries, profiles, and matched skills.
@@ -130,6 +130,14 @@ openshard profiles stats         # per-profile cost, retry, and pass-rate metric
 openshard skills stats           # per-skill usage and performance metrics
 ```
 
+Demo and History:
+
+```bash
+openshard demo-run               # show a deterministic demo run without provider calls
+openshard export-runs            # export local run history as JSONL
+openshard export-runs --preview  # preview exported run history
+```
+
 Eval harness:
 
 ```bash
@@ -147,7 +155,7 @@ Important `run` flags:
 - `--verify` runs verification after writing and enables retry on verification failure.
 - `--dry-run` previews generated changes without writing.
 - `--plan` shows an execution plan and prompts before running.
-- `--workflow [auto|direct|staged|opencode]` chooses the execution workflow.
+- `--workflow [auto|direct|staged|native|opencode]` chooses the execution workflow.
 - `--approval [auto|smart|ask]` controls approval gates.
 - `--provider [openrouter|anthropic|openai]` overrides the API provider.
 - `--history-scoring` applies local run-history bonuses or penalties to model scoring.
@@ -164,13 +172,13 @@ OpenShard separates routing decisions from execution shape.
 
 | Workflow | Status | Notes |
 |---|---:|---|
-| `auto` | available | Selects a workflow from task category, repo risk, verification setting, and optional history signals. |
-| `direct` | available | Uses a single model call through the configured provider. |
-| `staged` | available | Uses a planning stage followed by an implementation stage through direct execution. |
+| `auto` | available | Selects a workflow from task category, repo risk, verification setting, and routing signals. |
+| `direct` | available | Uses a single provider/model call for simple work and Ask-style tasks. |
+| `staged` | available | Uses planning followed by implementation. |
+| `native` | active | OpenShard-owned execution path with repo context, approval gates, verification, run receipts, and native metadata. |
 | `opencode` | experimental | Delegates execution to the local OpenCode CLI. Requires `opencode` on PATH. |
-| `native` | reserved | Future OpenShard Native direction; not shipped as a workflow. |
-| `claude-code` | reserved | Defined in CLI choices but currently unavailable. |
-| `codex` | reserved | Defined in CLI choices but currently unavailable. |
+| `claude-code` | experimental/reserved | Planned external executor mode for Claude Code workflows. |
+| `codex` | experimental/reserved | Planned external executor mode for Codex workflows. |
 
 Execution profiles add another signal for how much effort to spend:
 
@@ -289,13 +297,13 @@ You can also set `verification_command` in config when auto-detection is not eno
 
 ## Where It Fits
 
-OpenShard sits above model APIs and coding workflows:
+OpenShard sits above model APIs and coding agents:
 
 | Layer | Examples |
 |---|---|
 | Models | OpenAI, Anthropic, and models exposed through OpenRouter |
 | Access | OpenRouter or direct provider keys |
-| Execution | Direct provider calls today; experimental OpenCode delegation |
+| Execution | Direct provider calls, OpenShard Native, and experimental OpenCode delegation |
 | Control | OpenShard routing, gates, verification, history, evals, and metrics |
 
 Use OpenShard when you want a local, inspectable CLI for model choice, approval policy, verification, and run records across real repo work.
@@ -308,12 +316,14 @@ It is less useful if you only need occasional one-off chat edits, do not care wh
 
 High-level areas under active exploration:
 
-- more task-aware routing from eval and run-history evidence,
-- expanded eval suites and cost-per-pass reporting,
-- native execution improvements,
+- correction reason capture and accept/reject/edit/retry signals,
+- tool/search provenance for better context engineering,
+- feedback-informed routing,
+- real repo demo packs and stronger public benchmarks,
+- deeper native OSN loop behind explicit safety flags,
 - deeper integrations with OpenCode, Claude Code, and Codex,
-- team policies and hosted dashboards,
-- longer-term agent control layer with orchestration, permissions, audit trails, and observability.
+- team policies, hosted run history, and dashboards,
+- longer-term agent control plane with orchestration, permissions, audit trails, and observability.
 
 ---
 
