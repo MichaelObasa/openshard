@@ -8,3 +8,8 @@ WARN_STYLE = "yellow"
 ERROR_STYLE = "red"
 VALUE_STYLE = "white"
 
+BRAND_STYLE  = "bold medium_purple"
+ACCENT_STYLE = "medium_purple"
+BORDER_STYLE = "medium_purple"
+TIP_STYLE    = "dim cyan"
+
