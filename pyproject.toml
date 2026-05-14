@@ -6,6 +6,11 @@ build-backend = "setuptools.build_meta"
 name = "openshard"
 version = "0.1.0"
 description = "Intelligent task routing and execution across model tiers"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Michael Obasa", email = "michaelobasa2@gmail.com"},
+]
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1",
@@ -21,6 +26,11 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.4",
 ]
+
+[project.urls]
+Homepage = "https://github.com/MichaelObasa/openshard"
+Repository = "https://github.com/MichaelObasa/openshard"
+"Bug Tracker" = "https://github.com/MichaelObasa/openshard/issues"
 
 [project.scripts]
 openshard = "openshard.cli.main:cli"

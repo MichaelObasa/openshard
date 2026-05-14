@@ -50,7 +50,7 @@ from openshard.evals.runner import append_eval_result, run_eval_task
 
 
 @click.group(invoke_without_command=True)
-@click.version_option()
+@click.version_option(package_name="openshard")
 @click.pass_context
 def cli(ctx: click.Context):
     """OpenShard - intelligent task routing and execution."""

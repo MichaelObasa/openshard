@@ -49,6 +49,22 @@ OpenShard is not trying to replace every coding agent. It is the layer above the
 
 ## Install
 
+**pip** (once published on PyPI):
+```bash
+pip install openshard
+```
+
+**pipx** (isolated, recommended for CLI tools):
+```bash
+pipx install openshard
+```
+
+**uv** (fast, modern):
+```bash
+uv tool install openshard
+```
+
+**Local dev install** (from a clone):
 ```bash
 git clone https://github.com/MichaelObasa/openshard.git
 cd openshard
