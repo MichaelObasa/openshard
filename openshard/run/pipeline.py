@@ -15,7 +15,6 @@ import click
 from openshard.analysis.repo import RepoFacts, analyze_repo
 from openshard.cli.run_output import (
     _Spinner,
-    _build_model_line,
     _build_routing_line,
     _exec_message,
     _model_label,
@@ -23,9 +22,8 @@ from openshard.cli.run_output import (
     _print_dry_run,
     _print_shrunk,
     _print_summary,
-    _render_repo_summary,
     _should_shrink,
-    _truncate_note,
+    render_post_run,
 )
 from openshard.config.settings import get_anthropic_api_key, get_openai_api_key
 from openshard.execution.gates import GateEvaluator, VALID_APPROVAL_MODES
@@ -970,58 +968,24 @@ class RunPipeline:
 
         click.echo("\nDone")
         click.echo(exec_result.summary)
-
-        _model_line = _build_model_line(routing_decision, stage_runs, model=_dispatch_executor_model or _routed_model)
-        if _model_line:
-            click.echo(f"\n{_model_line}")
-
-        # Stages — shown before file count so the reader sees what ran (--more only)
-        if detail != "default" and stage_runs:
-            click.echo("\nStages")
-            for sr in stage_runs:
-                _sr_cost = f"${sr.cost:.4f}" if sr.cost is not None else "-"
-                _stage_label = "Analysis" if (_readonly_task and sr.stage.stage_type == "implementation") else sr.stage.stage_type.capitalize()
-                click.echo(f"  {_stage_label} ({_model_label(sr.model)}): {sr.duration:.1f}s, {_sr_cost}")
-
-        # Validator verdict (--more / --full, shown when validator ran this run)
-        if detail != "default" and _validator_result is not None:
-            _vv = _validator_result.get("verdict", "?")
-            click.echo(f"\nValidator: {_vv}")
-            if detail == "full":
-                _vsum = _validator_result.get("summary", "")
-                if _vsum:
-                    click.echo(f"  Summary: {_vsum}")
-                _vmod = _validator_result.get("model")
-                if _vmod:
-                    click.echo(f"  Model:   {_model_label(_vmod)}")
-
-        if exec_result.files:
-            _fc = sum(1 for f in exec_result.files if f.change_type == "create")
-            _fu = sum(1 for f in exec_result.files if f.change_type == "update")
-            _fd = sum(1 for f in exec_result.files if f.change_type == "delete")
-            _counts = ", ".join(p for p in [
-                f"{_fc} created" if _fc else "",
-                f"{_fu} updated" if _fu else "",
-                f"{_fd} deleted" if _fd else "",
-            ] if p)
-            click.echo(f"\nFiles: {_counts}")
-            if detail != "default":
-                for f in exec_result.files:
-                    _desc = f" - {f.summary}" if f.summary else ""
-                    click.echo(f"  {f.path}{_desc}")
-
-        if detail != "default" and exec_result.notes:
-            _notes = [_truncate_note(n) for n in exec_result.notes if n][:3]
-            if _notes:
-                click.echo("\nNotes")
-                for note in _notes:
-                    click.echo(f"  {note}")
-
-        if detail != "default":
-            try:
-                _render_repo_summary(analyze_repo(Path.cwd()))
-            except Exception:
-                click.echo("\n  [repo] Repo summary unavailable")
+        _tier_validated = _validator_result is not None
+        _tier_passed = (
+            _validator_result.get("verdict", "fail") in ("pass", "warn")
+            if _tier_validated else None
+        )
+        render_post_run(
+            stage_runs=stage_runs,
+            routing_decision=routing_decision,
+            verification_attempted=_tier_validated,
+            verification_passed=_tier_passed,
+            readonly_task=_readonly_task,
+            validator_policy=_validator_policy,
+            validator_result=_validator_result,
+            final_files=exec_result.files,
+            detail=detail,
+            notes=exec_result.notes or [],
+            repo_facts=_repo_facts,
+        )
 
         if dry_run:
             if _should_shrink(exec_result.files, no_shrink):

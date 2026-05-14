@@ -1359,3 +1359,150 @@ def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None
 def _print_tier_dispatch_block(tdr: Any, detail: str, validator_result: dict | None = None, validator_policy: Any = None, is_ask: bool = False) -> None:
     for line in _render_tier_dispatch_block(tdr, detail, validator_result=validator_result, validator_policy=validator_policy, is_ask=is_ask):
         click.echo(line)
+
+
+# ---------------------------------------------------------------------------
+# Post-Run Stage Summary
+# ---------------------------------------------------------------------------
+
+def build_stage_displays(
+    stage_runs: list[StageRun],
+    routing_decision: Any,
+    verification_attempted: bool,
+    verification_passed: bool | None,
+    readonly_task: bool,
+    validator_policy: Any,
+    final_files: list,
+) -> list:
+    """Build the ordered list of StageDisplay objects for the post-run panel."""
+    from openshard.cli.ui.run_screen import StageDisplay
+
+    stages: list[StageDisplay] = []
+
+    # Route — always
+    if routing_decision is not None:
+        m = _model_label(routing_decision.model)
+        r = _RATIONALE_SHORT.get(routing_decision.rationale, routing_decision.category or "")
+        detail = f"{m}  {r}".strip()
+        stages.append(StageDisplay("Route", "routed", detail))
+
+    # Plan — only if a planning StageRun exists, or if readonly (show skipped)
+    plan_runs = [sr for sr in stage_runs if sr.stage.stage_type == "planning"]
+    if plan_runs:
+        sr = plan_runs[-1]
+        stages.append(StageDisplay("Plan", "passed", f"{_model_label(sr.model)}  {sr.duration:.1f}s"))
+    elif readonly_task:
+        stages.append(StageDisplay("Plan", "skipped", "read-only task"))
+    # else: direct executor — omit Plan row entirely
+
+    # Work (non-readonly) or Ask (readonly)
+    impl_runs = [sr for sr in stage_runs if sr.stage.stage_type == "implementation"]
+    if readonly_task:
+        if impl_runs:
+            sr = impl_runs[-1]
+            stages.append(StageDisplay("Ask", "ask", f"{_model_label(sr.model)}  {sr.duration:.1f}s"))
+        elif routing_decision is not None:
+            stages.append(StageDisplay("Ask", "ask", _model_label(routing_decision.model)))
+        else:
+            stages.append(StageDisplay("Ask", "ask", ""))
+    else:
+        if impl_runs:
+            sr = impl_runs[-1]
+            stages.append(StageDisplay("Work", "passed", f"{_model_label(sr.model)}  {sr.duration:.1f}s"))
+        elif routing_decision is not None:
+            stages.append(StageDisplay("Work", "passed", _model_label(routing_decision.model)))
+        else:
+            stages.append(StageDisplay("Work", "passed", ""))
+
+    # Verify — always
+    if verification_attempted:
+        status = "passed" if verification_passed else "failed"
+        stages.append(StageDisplay("Verify", status, ""))
+    else:
+        if readonly_task:
+            reason = "read-only task"
+        elif validator_policy is not None and not validator_policy.run:
+            reason = validator_policy.reason or "not configured"
+        else:
+            reason = "not configured"
+        stages.append(StageDisplay("Verify", "skipped", reason))
+
+    # Receipt — always
+    n = len(final_files)
+    file_str = f"{n} file{'s' if n != 1 else ''} changed" if n else "no files changed"
+    stages.append(StageDisplay("Receipt", "saved", file_str))
+
+    return stages
+
+
+def render_post_run(
+    *,
+    stage_runs: list[StageRun],
+    routing_decision: Any,
+    verification_attempted: bool,
+    verification_passed: bool | None,
+    readonly_task: bool,
+    validator_policy: Any,
+    validator_result: dict | None,
+    final_files: list,
+    detail: str,
+    notes: list[str],
+    repo_facts: Any,
+) -> None:
+    """Render the post-execution staged summary panel."""
+    import os
+
+    from openshard.cli.ui.console import make_console
+    from openshard.cli.ui.run_screen import render_run_stages, render_run_stages_plain
+
+    stages = build_stage_displays(
+        stage_runs=stage_runs,
+        routing_decision=routing_decision,
+        verification_attempted=verification_attempted,
+        verification_passed=verification_passed,
+        readonly_task=readonly_task,
+        validator_policy=validator_policy,
+        final_files=final_files,
+    )
+
+    no_color = bool(os.environ.get("NO_COLOR")) or os.environ.get("TERM") == "dumb"
+    if no_color:
+        render_run_stages_plain(stages)
+    else:
+        render_run_stages(stages, make_console())
+
+    if detail == "default":
+        return
+
+    # --more / --full: validator detail
+    if validator_result is not None:
+        _vv = validator_result.get("verdict", "?")
+        click.echo(f"\nValidator: {_vv}")
+        if detail == "full":
+            _vsum = validator_result.get("summary", "")
+            if _vsum:
+                click.echo(f"  Summary: {_vsum}")
+            _vmod = validator_result.get("model")
+            if _vmod:
+                click.echo(f"  Model:   {_model_label(_vmod)}")
+
+    # --more / --full: file paths
+    if final_files:
+        for f in final_files:
+            _desc = f" - {f.summary}" if f.summary else ""
+            click.echo(f"  {f.path}{_desc}")
+
+    # --more / --full: notes
+    if notes:
+        _notes = [_truncate_note(n) for n in notes if n][:3]
+        if _notes:
+            click.echo("\nNotes")
+            for note in _notes:
+                click.echo(f"  {note}")
+
+    # --more / --full: repo summary
+    if repo_facts is not None:
+        try:
+            _render_repo_summary(repo_facts)
+        except Exception:
+            click.echo("\n  [repo] Repo summary unavailable")
