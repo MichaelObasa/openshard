@@ -21,6 +21,13 @@ from .theme import ACCENT_STYLE, BORDER_STYLE, BRAND_STYLE, MUTED_STYLE, SECTION
 
 TAGLINE = "The control layer for AI coding agents."
 
+QUICK_COMMANDS = [
+    ("run",      "Make a controlled change"),
+    ("last",     "Inspect latest receipt"),
+    ("models",   "View model route"),
+    ("demo-run", "Preview OpenShard output"),
+]
+
 
 @dataclass
 class HomeState:
@@ -55,11 +62,9 @@ def render_home_screen() -> None:
     console = make_console()
     console.print(_build_cockpit_panel(state))
     console.print()
-    console.print(TAGLINE, style=MUTED_STYLE)
+    console.print(_build_quick_commands_panel())
     console.print()
-    console.print("> OpenShard ready. What would you like to build?")
-    console.print()
-    _print_try_block(console)
+    console.print(_build_prompt_hint_panel())
     console.print()
     console.print(render_controls_row())
     console.print()
@@ -73,8 +78,9 @@ def render_brand_panel(state: HomeState) -> Table:
     outer.add_column()
 
     header = Text()
-    header.append("• OpenShard", style=BRAND_STYLE)
+    header.append("* OpenShard", style=BRAND_STYLE)
     outer.add_row(header)
+    outer.add_row(Text(TAGLINE, style=MUTED_STYLE))
     outer.add_row(Text(""))
 
     status = Table.grid(padding=(0, 1))
@@ -149,17 +155,28 @@ def _build_cockpit_panel(state: HomeState) -> Panel:
     )
 
 
-def _print_try_block(console: Any) -> None:
+def _build_quick_commands_panel() -> Panel:
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="bold", no_wrap=True, min_width=10)
+    grid.add_column(style=MUTED_STYLE)
+    for cmd, desc in QUICK_COMMANDS:
+        grid.add_row(cmd, desc)
+    return Panel(
+        grid,
+        title="Quick commands",
+        title_align="left",
+        border_style=BORDER_STYLE,
+        box=box.ROUNDED,
+        padding=(0, 2),
+    )
+
+
+def _build_prompt_hint_panel() -> Panel:
     t = Text()
-    t.append("Try:\n", style=SECTION_STYLE)
-    for cmd in (
-        'openshard run "explain this repo"',
-        "openshard last --full",
-        "openshard demo-run",
-        "openshard models",
-    ):
-        t.append(f"  > {cmd}\n", style=TIP_STYLE)
-    console.print(t)
+    t.append("> ", style=BRAND_STYLE)
+    t.append('Type a command or try: openshard run "explain this repo"', style=MUTED_STYLE)
+    return Panel(t, border_style=BORDER_STYLE, box=box.ROUNDED, padding=(0, 2))
+
 
 
 def _title() -> str:
@@ -282,7 +299,7 @@ def _receipt_line(entry: dict[str, Any]) -> str:
     verify = _verify_label(entry)
     cost = entry.get("estimated_cost")
     cost_label = f"${cost:.4f}" if isinstance(cost, (int, float)) else "no cost"
-    return f"{mode} · {task} · {verify} · {cost_label} · receipt saved"
+    return f"{mode:<12} {task:<36} {verify:<16} {cost_label}"
 
 
 def _verify_label(entry: dict[str, Any]) -> str:

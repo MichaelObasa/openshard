@@ -25,7 +25,7 @@ class TestHomeScreen(unittest.TestCase):
         result = CliRunner().invoke(cli, [])
         self.assertEqual(result.exit_code, 0)
         self.assertIn("OpenShard", result.output)
-        self.assertIn("The control layer for AI coding agents.", result.output)
+        self.assertIn("The control layer for AI coding", result.output)
 
     def test_help_still_renders_click_help(self):
         result = CliRunner().invoke(cli, ["--help"])
@@ -168,6 +168,38 @@ class TestHomeScreen(unittest.TestCase):
                 result = runner.invoke(cli, [])
             self.assertEqual(result.exit_code, 0)
             self.assertIn("Not configured", result.output)
+
+
+    def test_output_includes_quick_commands(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, [])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Quick commands", result.output)
+        self.assertIn("run", result.output)
+        self.assertIn("demo-run", result.output)
+
+    def test_output_includes_prompt_hint(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            result = runner.invoke(cli, [])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Type a command", result.output)
+
+    def test_recent_receipts_no_repeated_dashes(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([{
+                "task": "alpha task",
+                "workflow": "Run",
+                "verification_passed": True,
+                "estimated_cost": 0.005,
+            }])
+            result = runner.invoke(cli, [])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("alpha task", result.output)
+        self.assertNotIn("· ·", result.output)
+        self.assertNotIn("receipt saved", result.output)
 
 
 if __name__ == "__main__":
