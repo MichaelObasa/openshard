@@ -172,6 +172,11 @@ _MAX_OSN_QUEUE_CAP: int = 10
 _MAX_OSN_CONSECUTIVE_EMPTY: int = 2
 
 
+def _is_safe_osn_tool_name(tool_name: str) -> bool:
+    """Return True iff tool_name is in the bounded OSN read-only allowlist."""
+    return tool_name in _LOOP_ALLOWED_TOOLS
+
+
 def _infer_result_count(tool_name: str, result: NativeToolResult) -> int:
     if not result.ok:
         return 0
@@ -893,7 +898,7 @@ class NativeAgentExecutor:
                 terminated_reason = "max_steps"
                 break
 
-            if tool_name not in _LOOP_ALLOWED_TOOLS:
+            if not _is_safe_osn_tool_name(tool_name):
                 warnings.append(f"skipped disallowed tool: {tool_name}")
                 executed_steps.append(OSNLoopStep(
                     step_index=idx,

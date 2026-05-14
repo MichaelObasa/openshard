@@ -1588,6 +1588,13 @@ class RunPipeline:
                 retry_used=bool(_vloop and _vloop.retried),
                 approval_granted=bool(_approval_rcpt and _approval_rcpt.granted),
             )
+            # Refresh snapshot: _extra_metadata was built before complete_osn_loop ran
+            if _extra_metadata is not None and _native_meta is not None:
+                _extra_metadata["osn_loop_summary"] = (
+                    asdict(_native_meta.osn_loop_summary)
+                    if _native_meta.osn_loop_summary is not None
+                    else None
+                )
         try:
             _log_run(start, task, generator, retry_triggered, final_files,
                      verification_attempted=(write and verify),

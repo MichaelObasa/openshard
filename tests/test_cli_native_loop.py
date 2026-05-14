@@ -8,7 +8,12 @@ from click.testing import CliRunner
 
 from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
-from openshard.native.context import OSNLoopMeta, OSNLoopStep
+from openshard.native.context import (
+    OSNLoopMeta,
+    OSNLoopStep,
+    NativeOSNLoopSummary,
+    NativeOSNLoopStep,
+)
 
 _DEFAULT_CONFIG = {"approval_mode": "smart"}
 
@@ -267,3 +272,204 @@ class TestNativeLoopRenderingOldRuns(unittest.TestCase):
         rendered = self._render(entry)
         self.assertIsInstance(rendered, str)
         self.assertIn("osn loop", rendered)
+
+
+def _make_native_mock_with_summary(osn_loop_summary=None):
+    native_mock = _make_native_mock()
+    native_mock.native_meta.osn_loop_summary = osn_loop_summary
+    return native_mock
+
+
+class TestOsnLoopSummaryInRunHistory(unittest.TestCase):
+    """osn_loop_summary serialized in logged run and rendered in --full."""
+
+    # ------------------------------------------------------------------
+    # helpers (mirror TestNativeLoopCLIFlag pattern)
+    # ------------------------------------------------------------------
+
+    def _invoke_with_pipeline_mock(self, args, native_mock=None):
+        if native_mock is None:
+            native_mock = _make_native_mock()
+        logged = {}
+
+        def _capture_log(*a, **kw):
+            logged.update(kw.get("extra_metadata") or {})
+
+        with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
+             patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.run.pipeline._log_run", side_effect=_capture_log):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run"] + args)
+        return result, native_mock, logged
+
+    def _entry_with_osn_loop_summary(self, summary_dict):
+        return {
+            "task": "fix the bug",
+            "workflow": "native",
+            "executor": "native",
+            "execution_depth": "fast",
+            "selected_skills": [],
+            "tool_trace": [],
+            "native_loop_steps": ["plan"],
+            "native_loop_trace": {"events": []},
+            "read_search_findings": [],
+            "osn_loop_summary": summary_dict,
+        }
+
+    def _render_full(self, entry):
+        from openshard.cli.run_output import _render_native_demo_block, _native_meta_from_entry
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta, detail="full")
+        return "\n".join(lines)
+
+    def _render_default(self, entry):
+        from openshard.cli.run_output import _render_native_demo_block, _native_meta_from_entry
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta, detail="default")
+        return "\n".join(lines)
+
+    def _summary_with_step(self, **kwargs):
+        """Build a NativeOSNLoopSummary with one preflight step for rendering tests."""
+        from dataclasses import asdict
+        step = NativeOSNLoopStep(step_index=0, step_name="preflight", status="passed")
+        summary = NativeOSNLoopSummary(
+            enabled=True,
+            mode="experimental",
+            steps_taken=1,
+            completed=True,
+            stopped_reason="completed",
+            steps=[step],
+            **kwargs,
+        )
+        return asdict(summary)
+
+    # ------------------------------------------------------------------
+    # run history serialization
+    # ------------------------------------------------------------------
+
+    def test_log_contains_osn_loop_summary_key_when_none(self):
+        result, _, logged = self._invoke_with_pipeline_mock(
+            ["--workflow", "native", "fix the bug"]
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("osn_loop_summary", logged)
+        self.assertIsNone(logged["osn_loop_summary"])
+
+    def test_log_contains_osn_loop_summary_dict_when_present(self):
+        summary = NativeOSNLoopSummary(
+            enabled=True, mode="experimental", steps_taken=3,
+            completed=True, stopped_reason="completed", verification_status="passed",
+        )
+        native_mock = _make_native_mock_with_summary(summary)
+        result, _, logged = self._invoke_with_pipeline_mock(
+            ["--workflow", "native", "--native-loop", "experimental", "fix the bug"],
+            native_mock=native_mock,
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("osn_loop_summary", logged)
+        self.assertIsNotNone(logged["osn_loop_summary"])
+        osn = logged["osn_loop_summary"]
+        self.assertTrue(osn["enabled"])
+        self.assertEqual(osn["steps_taken"], 3)
+        self.assertEqual(osn["stopped_reason"], "completed")
+        self.assertEqual(osn["verification_status"], "passed")
+
+    def test_log_osn_loop_summary_is_json_serializable(self):
+        import json
+        step = NativeOSNLoopStep(step_index=0, step_name="preflight", status="passed")
+        summary = NativeOSNLoopSummary(
+            enabled=True, mode="experimental", steps_taken=1,
+            completed=True, stopped_reason="completed", steps=[step],
+        )
+        native_mock = _make_native_mock_with_summary(summary)
+        result, _, logged = self._invoke_with_pipeline_mock(
+            ["--workflow", "native", "--native-loop", "experimental", "fix the bug"],
+            native_mock=native_mock,
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        json.dumps(logged["osn_loop_summary"])  # must not raise
+
+    def test_experimental_flag_attaches_summary_to_run_metadata(self):
+        """End-to-end: executor with native_loop=experimental produces osn_loop_summary in log."""
+        from unittest.mock import MagicMock, patch as _patch
+        from openshard.native.executor import NativeAgentExecutor
+
+        logged = {}
+
+        def _capture_log(*a, **kw):
+            logged.update(kw.get("extra_metadata") or {})
+
+        fake_gen = MagicMock()
+        fake_gen.generate.return_value = MagicMock(usage=None, files=[], summary="ok", notes=[])
+        fake_gen.model = "mock-model"
+        fake_gen.fixer_model = "mock-fixer"
+
+        with _patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen), \
+             _patch("openshard.run.pipeline.NativeAgentExecutor", wraps=None) as _cls, \
+             _patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+             _patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             _patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             _patch("openshard.run.pipeline._log_run", side_effect=_capture_log):
+            # Build a real executor (not a MagicMock) with native_loop="experimental"
+            real_executor = NativeAgentExecutor(provider=MagicMock(), native_loop="experimental")
+            # Attach the generate mock so pipeline can call it
+            real_executor._gen = fake_gen
+            _cls.return_value = real_executor
+
+            runner = CliRunner()
+            result = runner.invoke(
+                cli,
+                ["run", "--workflow", "native", "--native-loop", "experimental", "fix the bug"],
+            )
+
+        self.assertEqual(result.exit_code, 0, result.output)
+        # osn_loop_summary key must be present and must be a dict (not None)
+        self.assertIn("osn_loop_summary", logged)
+        self.assertIsNotNone(logged["osn_loop_summary"])
+        self.assertIsInstance(logged["osn_loop_summary"], dict)
+        self.assertTrue(logged["osn_loop_summary"]["enabled"])
+
+    # ------------------------------------------------------------------
+    # --full rendering of osn_loop_summary
+    # ------------------------------------------------------------------
+
+    def test_full_detail_renders_osn_pipeline_section(self):
+        entry = self._entry_with_osn_loop_summary(self._summary_with_step())
+        rendered = self._render_full(entry)
+        self.assertIn("OSN loop (pipeline):", rendered)
+
+    def test_full_detail_shows_step_names(self):
+        entry = self._entry_with_osn_loop_summary(self._summary_with_step())
+        rendered = self._render_full(entry)
+        self.assertIn("preflight", rendered)
+        self.assertIn("passed", rendered)
+
+    def test_full_detail_shows_mode_and_steps_count(self):
+        entry = self._entry_with_osn_loop_summary(self._summary_with_step())
+        rendered = self._render_full(entry)
+        self.assertIn("experimental", rendered)
+        self.assertIn("Steps:", rendered)
+
+    def test_full_detail_shows_completed_yes(self):
+        entry = self._entry_with_osn_loop_summary(self._summary_with_step())
+        rendered = self._render_full(entry)
+        self.assertIn("yes", rendered)
+
+    def test_full_detail_no_pipeline_section_when_summary_none(self):
+        entry = self._entry_with_osn_loop_summary(None)
+        rendered = self._render_full(entry)
+        self.assertNotIn("OSN loop (pipeline):", rendered)
+
+    def test_full_detail_no_pipeline_section_when_no_steps(self):
+        from dataclasses import asdict
+        summary = NativeOSNLoopSummary(enabled=True, mode="experimental", steps=[])
+        entry = self._entry_with_osn_loop_summary(asdict(summary))
+        rendered = self._render_full(entry)
+        self.assertNotIn("OSN loop (pipeline):", rendered)
+
+    def test_default_detail_no_pipeline_section(self):
+        entry = self._entry_with_osn_loop_summary(self._summary_with_step())
+        rendered = self._render_default(entry)
+        self.assertNotIn("OSN loop (pipeline):", rendered)
