@@ -15,7 +15,11 @@ from openshard.native.context import (
     OSNLoopMeta,
 )
 from openshard.native.osn_loop_recorder import OsnLoopRecorder, should_enable_osn_recorder
-from openshard.native.executor import NativeAgentExecutor
+from openshard.native.executor import (
+    NativeAgentExecutor,
+    _LOOP_ALLOWED_TOOLS,
+    _is_safe_osn_tool_name,
+)
 
 
 def _make_executor(native_loop: str | None = "experimental"):
@@ -422,6 +426,122 @@ class TestGenerateInstrumentsEarlyPhases(unittest.TestCase):
                     len(step.result_summary), 120,
                     f"result_summary too long on step {step.step_name!r}",
                 )
+
+
+# ---------------------------------------------------------------------------
+# _is_safe_osn_tool_name and _LOOP_ALLOWED_TOOLS
+# ---------------------------------------------------------------------------
+
+class TestIsSafeOsnToolName(unittest.TestCase):
+
+    def test_allowed_tools_are_safe(self):
+        for name in _LOOP_ALLOWED_TOOLS:
+            with self.subTest(name=name):
+                self.assertTrue(_is_safe_osn_tool_name(name))
+
+    def test_write_file_is_not_safe(self):
+        self.assertFalse(_is_safe_osn_tool_name("write_file"))
+
+    def test_run_command_is_not_safe(self):
+        self.assertFalse(_is_safe_osn_tool_name("run_command"))
+
+    def test_run_verification_is_not_safe(self):
+        self.assertFalse(_is_safe_osn_tool_name("run_verification"))
+
+    def test_empty_string_is_not_safe(self):
+        self.assertFalse(_is_safe_osn_tool_name(""))
+
+    def test_unknown_tool_is_not_safe(self):
+        self.assertFalse(_is_safe_osn_tool_name("arbitrary_tool"))
+
+    def test_allowlist_contains_exactly_four_tools(self):
+        self.assertEqual(len(_LOOP_ALLOWED_TOOLS), 4)
+
+    def test_known_safe_tools_in_allowlist(self):
+        expected = {"list_files", "read_file", "search_repo", "get_git_diff"}
+        self.assertTrue(expected.issubset(_LOOP_ALLOWED_TOOLS))
+
+
+# ---------------------------------------------------------------------------
+# verify / retry_once / final_receipt steps at the executor level
+# ---------------------------------------------------------------------------
+
+class TestVerifyRetryReceiptIntegration(unittest.TestCase):
+
+    def _make(self):
+        return _make_executor(native_loop="experimental")
+
+    def test_verify_step_recorded(self):
+        executor, _ = self._make()
+        executor.record_osn_loop_step("verify", "passed", verification_status="passed")
+        names = [s.step_name for s in executor._osn_recorder.summary.steps]
+        self.assertIn("verify", names)
+
+    def test_verify_step_verification_status_propagated(self):
+        executor, _ = self._make()
+        executor.record_osn_loop_step("verify", "passed", verification_status="passed")
+        step = next(s for s in executor._osn_recorder.summary.steps if s.step_name == "verify")
+        self.assertEqual(step.verification_status, "passed")
+
+    def test_verify_step_failed_status(self):
+        executor, _ = self._make()
+        executor.record_osn_loop_step("verify", "failed", verification_status="failed")
+        step = next(s for s in executor._osn_recorder.summary.steps if s.step_name == "verify")
+        self.assertEqual(step.status, "failed")
+        self.assertEqual(step.verification_status, "failed")
+
+    def test_retry_once_step_recorded(self):
+        executor, _ = self._make()
+        executor.record_osn_loop_step("retry_once", "running")
+        names = [s.step_name for s in executor._osn_recorder.summary.steps]
+        self.assertIn("retry_once", names)
+
+    def test_final_receipt_step_recorded(self):
+        executor, _ = self._make()
+        executor.record_osn_loop_step("final_receipt", "passed")
+        names = [s.step_name for s in executor._osn_recorder.summary.steps]
+        self.assertIn("final_receipt", names)
+
+    def test_all_three_steps_in_sequence(self):
+        executor, _ = self._make()
+        executor.record_osn_loop_step("verify", "passed", verification_status="passed")
+        executor.record_osn_loop_step("retry_once", "running")
+        executor.record_osn_loop_step("final_receipt", "passed")
+        names = [s.step_name for s in executor._osn_recorder.summary.steps]
+        self.assertIn("verify", names)
+        self.assertIn("retry_once", names)
+        self.assertIn("final_receipt", names)
+        # order is preserved
+        self.assertLess(names.index("verify"), names.index("retry_once"))
+        self.assertLess(names.index("retry_once"), names.index("final_receipt"))
+
+    def test_complete_osn_loop_after_verify_sets_verification_status(self):
+        executor, _ = self._make()
+        executor.record_osn_loop_step("verify", "passed", verification_status="passed")
+        executor.record_osn_loop_step("final_receipt", "passed")
+        executor.complete_osn_loop(stopped_reason="completed", verification_status="passed")
+        self.assertEqual(executor.native_meta.osn_loop_summary.verification_status, "passed")
+
+    def test_complete_osn_loop_after_retry_sets_retry_used(self):
+        executor, _ = self._make()
+        executor.record_osn_loop_step("retry_once", "running")
+        executor.record_osn_loop_step("final_receipt", "passed")
+        executor.complete_osn_loop(stopped_reason="completed", retry_used=True)
+        self.assertTrue(executor.native_meta.osn_loop_summary.retry_used)
+
+    def test_final_receipt_allows_complete_true(self):
+        executor, _ = self._make()
+        executor.record_osn_loop_step("final_receipt", "passed")
+        executor.complete_osn_loop(stopped_reason="completed")
+        self.assertTrue(executor.native_meta.osn_loop_summary.completed)
+
+    def test_no_recorder_noop_for_all_steps(self):
+        executor, _ = _make_executor(native_loop=None)
+        executor.record_osn_loop_step("verify", "passed", verification_status="passed")
+        executor.record_osn_loop_step("retry_once", "running")
+        executor.record_osn_loop_step("final_receipt", "passed")
+        executor.complete_osn_loop(stopped_reason="completed")
+        self.assertIsNone(executor.native_meta.osn_loop_summary)
 
 
 if __name__ == "__main__":
