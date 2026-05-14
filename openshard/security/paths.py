@@ -61,4 +61,8 @@ def resolve_safe_repo_path(repo_root: Path, user_path: str) -> Path:
     if rel == Path(".openshard") / "runs.jsonl":
         raise UnsafePathError("Path must not target .openshard/runs.jsonl.")
 
+    # Reject .openshard/interactions.jsonl specifically
+    if rel == Path(".openshard") / "interactions.jsonl":
+        raise UnsafePathError("Path must not target .openshard/interactions.jsonl.")
+
     return resolved
