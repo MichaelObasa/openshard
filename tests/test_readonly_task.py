@@ -427,7 +427,7 @@ class TestReadonlyFastPath(unittest.TestCase):
             self.assertNotIn("read-only task", reason_line)
 
     def test_direct_ask_model_line_uses_executor_model(self):
-        """With tier dispatch, Model: line reflects executor model, not routing candidate."""
+        """Stage table Ask row reflects executor model, not routing candidate."""
         with patch("openshard.native.dispatch.resolve_tier_for_category",
                    return_value=("z-ai/glm-5.1", "executor-tier", False, "")), \
              patch("openshard.native.dispatch.resolve_tier",
@@ -437,14 +437,17 @@ class TestReadonlyFastPath(unittest.TestCase):
                 extra_args=["--more", "--experimental-tier-dispatch"],
             )
         self.assertEqual(result.exit_code, 0, result.output)
-        model_lines = [ln for ln in result.output.splitlines() if ln.startswith("Model:")]
-        self.assertTrue(model_lines, f"No Model: line found\n{result.output}")
-        # routing candidate is "openrouter/test-model" (from _make_manager_mock_with_entry)
-        # executor model is "z-ai/glm-5.1" — Model: line must show the executor, not routing
-        self.assertNotIn("test-model", model_lines[0])
+        # Stage table Ask row must show executor model (GLM-5.1), not routing candidate
+        ask_rows = [ln for ln in result.output.splitlines() if "ask" in ln.lower() and "GLM" in ln]
+        self.assertTrue(ask_rows, f"No Ask row with GLM model found\n{result.output}")
+        # routing candidate is "openrouter/test-model" — must not appear in Ask row
+        self.assertFalse(
+            any("test-model" in ln for ln in ask_rows),
+            f"Routing candidate leaked into Ask row: {ask_rows}",
+        )
 
     def test_direct_ask_model_line_consistent_with_ask_plan(self):
-        """Model: line and Model plan Ask: line show the same model for direct Ask."""
+        """Stage table Ask row and Model plan Ask: entry show the same model."""
         with patch("openshard.native.dispatch.resolve_tier_for_category",
                    return_value=("z-ai/glm-5.1", "executor-tier", False, "")), \
              patch("openshard.native.dispatch.resolve_tier",
@@ -455,12 +458,12 @@ class TestReadonlyFastPath(unittest.TestCase):
             )
         self.assertEqual(result.exit_code, 0, result.output)
         lines = result.output.splitlines()
-        model_lines = [ln.strip() for ln in lines if ln.startswith("Model:")]
-        ask_lines = [ln.strip() for ln in lines if ln.strip().startswith("Ask:")]
-        if model_lines and ask_lines:
+        ask_stage_rows = [ln.strip() for ln in lines if ln.strip().startswith("Ask") and "ask" in ln.lower()]
+        ask_plan_lines = [ln.strip() for ln in lines if ln.strip().startswith("Ask:")]
+        if ask_stage_rows and ask_plan_lines:
             # Both should reference the same model label
-            ask_model = ask_lines[0].split("Ask:", 1)[-1].strip()
+            ask_plan_model = ask_plan_lines[0].split("Ask:", 1)[-1].strip()
             self.assertTrue(
-                any(ask_model in ln for ln in model_lines),
-                f"Model: {model_lines!r} does not match Ask: model {ask_model!r}",
+                any(ask_plan_model in ln for ln in ask_stage_rows),
+                f"Stage Ask row {ask_stage_rows!r} does not match plan Ask: model {ask_plan_model!r}",
             )
