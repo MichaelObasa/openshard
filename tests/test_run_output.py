@@ -298,3 +298,109 @@ class TestOldEntriesUnaffected(unittest.TestCase):
         line = _build_model_line(rd, [], model="anthropic/claude-sonnet-4.6")
         self.assertIsNotNone(line)
         self.assertIn("Model:", line)
+
+
+# ---------------------------------------------------------------------------
+# Receipt panel rendering
+# ---------------------------------------------------------------------------
+
+class TestReceiptPanel(unittest.TestCase):
+    """Tests for render_receipt_panel and render_receipt_panel_plain."""
+
+    def _render_rich(self, stages, mode_label=None, cost_str=None) -> str:
+        import click
+        from click.testing import CliRunner
+        from openshard.cli.ui.console import make_console
+        from openshard.cli.ui.run_screen import render_receipt_panel
+
+        @click.command()
+        def cmd():
+            render_receipt_panel(stages, mode_label, cost_str, make_console())
+
+        return CliRunner().invoke(cmd).output
+
+    def _render_plain(self, stages, mode_label=None, cost_str=None) -> str:
+        import click
+        from click.testing import CliRunner
+        from openshard.cli.ui.run_screen import render_receipt_panel_plain
+
+        @click.command()
+        def cmd():
+            render_receipt_panel_plain(stages, mode_label, cost_str)
+
+        return CliRunner().invoke(cmd).output
+
+    def _ask_stages(self):
+        return _stages(readonly_task=True, verification_attempted=False)
+
+    def _write_stages(self, n_files=2):
+        files = [
+            SimpleNamespace(path=f"f{i}.py", change_type="create", summary="")
+            for i in range(n_files)
+        ]
+        return _stages(
+            stage_runs=[_sr("implementation")],
+            readonly_task=False,
+            verification_attempted=True,
+            verification_passed=True,
+            final_files=files,
+        )
+
+    def test_panel_title_present(self):
+        out = self._render_rich(self._ask_stages(), mode_label="Ask")
+        self.assertIn("OpenShard Receipt", out)
+
+    def test_ask_run_mode_row(self):
+        out = self._render_rich(self._ask_stages(), mode_label="Ask")
+        self.assertIn("Mode", out)
+        self.assertIn("Ask", out)
+
+    def test_ask_run_no_work_row(self):
+        out = self._render_rich(self._ask_stages(), mode_label="Ask")
+        self.assertNotIn("Work", out)
+
+    def test_ask_run_verify_skipped(self):
+        out = self._render_rich(self._ask_stages(), mode_label="Ask")
+        self.assertIn("Verify", out)
+        self.assertIn("skipped", out)
+
+    def test_ask_run_receipt_saved(self):
+        out = self._render_rich(self._ask_stages(), mode_label="Ask")
+        self.assertIn("Receipt", out)
+        self.assertIn("saved", out)
+
+    def test_write_run_work_row_present(self):
+        out = self._render_rich(self._write_stages(), mode_label="Run")
+        self.assertIn("Work", out)
+        self.assertIn("passed", out)
+
+    def test_write_run_work_shows_files_changed(self):
+        out = self._render_rich(self._write_stages(n_files=2), mode_label="Run")
+        self.assertIn("2 files changed", out)
+
+    def test_cost_row_present_when_provided(self):
+        out = self._render_rich(self._ask_stages(), mode_label="Ask", cost_str="$0.0020")
+        self.assertIn("Cost", out)
+        self.assertIn("$0.0020", out)
+
+    def test_no_cost_row_when_absent(self):
+        out = self._render_rich(self._ask_stages(), mode_label="Ask", cost_str=None)
+        self.assertNotIn("Cost", out)
+
+    def test_no_color_plain_title(self):
+        out = self._render_plain(self._ask_stages(), mode_label="Ask")
+        self.assertIn("OpenShard Receipt", out)
+
+    def test_no_color_plain_receipt_saved(self):
+        out = self._render_plain(self._ask_stages(), mode_label="Ask")
+        self.assertIn("Receipt", out)
+        self.assertIn("saved", out)
+
+    def test_no_color_no_work_for_readonly(self):
+        out = self._render_plain(self._ask_stages(), mode_label="Ask")
+        self.assertNotIn("Work", out)
+
+    def test_no_color_write_shows_files(self):
+        out = self._render_plain(self._write_stages(n_files=3), mode_label="Run")
+        self.assertIn("Work", out)
+        self.assertIn("3 files changed", out)

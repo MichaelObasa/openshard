@@ -70,7 +70,7 @@ def _print_summary(
     )
 
     if detail == "default":
-        click.echo(f"\nTime: {elapsed:.1f}s   Cost: {cost_str}")
+        click.echo(f"\nTime: {elapsed:.1f}s")
         return
 
     # more and full
@@ -1448,12 +1448,14 @@ def render_post_run(
     detail: str,
     notes: list[str],
     repo_facts: Any,
+    mode_label: str | None = None,
+    usage: Any = None,
 ) -> None:
-    """Render the post-execution staged summary panel."""
+    """Render the post-execution receipt panel."""
     import os
 
     from openshard.cli.ui.console import make_console
-    from openshard.cli.ui.run_screen import render_run_stages, render_run_stages_plain
+    from openshard.cli.ui.run_screen import render_receipt_panel, render_receipt_panel_plain
 
     stages = build_stage_displays(
         stage_runs=stage_runs,
@@ -1465,11 +1467,17 @@ def render_post_run(
         final_files=final_files,
     )
 
+    cost_str = (
+        f"${usage.estimated_cost:.4f}"
+        if usage is not None and usage.estimated_cost is not None
+        else None
+    )
+
     no_color = bool(os.environ.get("NO_COLOR")) or os.environ.get("TERM") == "dumb"
     if no_color:
-        render_run_stages_plain(stages)
+        render_receipt_panel_plain(stages, mode_label, cost_str)
     else:
-        render_run_stages(stages, make_console())
+        render_receipt_panel(stages, mode_label, cost_str, make_console())
 
     if detail == "default":
         return

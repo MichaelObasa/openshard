@@ -973,6 +973,10 @@ class RunPipeline:
             _validator_result.get("verdict", "fail") in ("pass", "warn")
             if _tier_validated else None
         )
+        _mode_label = _profile_display_label(
+            _profile_decision.profile if _profile_decision is not None else None,
+            is_readonly=_readonly_task,
+        )
         render_post_run(
             stage_runs=stage_runs,
             routing_decision=routing_decision,
@@ -985,6 +989,8 @@ class RunPipeline:
             detail=detail,
             notes=exec_result.notes or [],
             repo_facts=_repo_facts,
+            mode_label=_mode_label,
+            usage=usage,
         )
 
         if dry_run:
