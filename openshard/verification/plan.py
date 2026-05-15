@@ -17,14 +17,70 @@ _SAFE_PREFIXES: list[tuple[str, ...]] = [
     ("python3", "-m", "pytest"),
     (sys.executable, "-m", "pytest"),
     ("pytest",),
+    ("npm", "run", "test"),
+    ("npm", "run", "lint"),
+    ("npm", "run", "typecheck"),
     ("npm", "test"),
     ("cargo", "test"),
     ("go", "test"),
     ("bundle", "exec", "rspec"),
     ("mvn", "test"),
+    ("git", "status"),
+    ("git", "diff"),
+    ("git", "rev-parse"),
+    ("grep",),
+    ("rg",),
 ]
 
-_BLOCKED_COMMANDS = {"curl", "wget", "rm", "sudo", "chmod", "chown"}
+_BLOCKED_COMMANDS = {"curl", "wget", "rm", "sudo", "chmod", "chown", "printenv"}
+
+# Multi-token argv-prefix patterns that are always blocked.
+_BLOCKED_ARGV_PREFIXES: list[tuple[str, ...]] = [
+    ("git", "push"),
+    ("git", "clean"),
+    ("npm", "publish"),
+    ("docker", "push"),
+    # IaC destructive/deploying ops
+    ("terraform", "apply"),
+    ("terraform", "destroy"),
+    ("terraform", "import"),
+    ("terraform", "state"),
+    # kubectl destructive ops
+    ("kubectl", "apply"),
+    ("kubectl", "delete"),
+    ("kubectl", "patch"),
+    ("kubectl", "scale"),
+    # helm deploy ops
+    ("helm", "install"),
+    ("helm", "upgrade"),
+    ("helm", "uninstall"),
+    ("ansible",),
+    ("ansible-playbook",),
+]
+
+# Flags that make `git reset` destructive.
+_BLOCKED_GIT_RESET_FLAGS: frozenset[str] = frozenset({"--hard", "--mixed", "--keep"})
+
+# Medium-risk commands — classified needs_approval with an informative reason.
+_NEEDS_APPROVAL_PREFIXES: list[tuple[str, ...]] = [
+    ("npm", "install"),
+    ("npm", "ci"),
+    ("npm", "run", "build"),
+    ("pip", "install"),
+    ("pip3", "install"),
+    ("yarn", "install"),
+    ("yarn", "add"),
+    ("git", "checkout"),
+    ("git", "switch"),
+    ("git", "branch"),
+    ("git", "merge"),
+    ("git", "rebase"),
+    ("make",),
+    ("cargo", "build"),
+    ("go", "build"),
+    ("terraform", "plan"),
+    ("terraform", "init"),
+]
 
 _TEST_KINDS: list[tuple[str, ...]] = [
     ("pytest",),
@@ -86,6 +142,7 @@ def classify_command_safety(
     if not argv:
         return CommandSafety.blocked, "empty argv"
 
+    # Step 2: shell metacharacters — catches piped grep/rg and chained commands.
     for token in argv:
         if _SHELL_METACHAR.search(token):
             return CommandSafety.blocked, f"shell metacharacter in token: {token!r}"
@@ -94,15 +151,36 @@ def classify_command_safety(
     if _SHELL_METACHAR.search(joined):
         return CommandSafety.blocked, "shell metacharacters detected"
 
+    # Step 3: single-token blocked executables.
     executable = argv[0].lower()
     base = executable.split("/")[-1].split("\\")[-1]
     if base in _BLOCKED_COMMANDS or executable in _BLOCKED_COMMANDS:
         return CommandSafety.blocked, f"blocked executable: {argv[0]!r}"
 
+    # Step 4: multi-token blocked argv prefix.
+    argv_lower = [t.lower() for t in argv]
+    for prefix in _BLOCKED_ARGV_PREFIXES:
+        if len(argv_lower) >= len(prefix) and tuple(argv_lower[: len(prefix)]) == prefix:
+            return CommandSafety.blocked, f"blocked command: {' '.join(prefix)}"
+
+    # Step 5: git reset with destructive flags.
+    if len(argv_lower) >= 2 and argv_lower[0] == "git" and argv_lower[1] == "reset":
+        flags_present = frozenset(t.lower() for t in argv[2:]) & _BLOCKED_GIT_RESET_FLAGS
+        if flags_present:
+            flag = next(iter(flags_present))
+            return CommandSafety.blocked, f"destructive git reset flag: {flag}"
+
+    # Step 6: safe prefixes — checked before approval to protect e.g. npm run test.
     for prefix in _SAFE_PREFIXES:
         if len(argv) >= len(prefix) and tuple(argv[: len(prefix)]) == prefix:
             return CommandSafety.safe, f"matches safe prefix: {' '.join(prefix)}"
 
+    # Step 7: explicit medium-risk prefixes (informative reason string).
+    for prefix in _NEEDS_APPROVAL_PREFIXES:
+        if len(argv_lower) >= len(prefix) and tuple(argv_lower[: len(prefix)]) == prefix:
+            return CommandSafety.needs_approval, f"medium-risk command requires approval: {' '.join(prefix)}"
+
+    # Step 8: default.
     return CommandSafety.needs_approval, "unrecognised command requires approval"
 
 

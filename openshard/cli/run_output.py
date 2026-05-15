@@ -407,7 +407,7 @@ def _loop_event_value(event: Any, key: str, default: Any = "") -> Any:
     return getattr(event, key, default)
 
 
-def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list[str]:
+def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: "dict | None" = None) -> list[str]:
     """Return ordered indented lines for the [native] block. Pure, no I/O."""
     if native_meta is None:
         return []
@@ -521,6 +521,30 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                 f"{getattr(cpp, 'blocked_count', 0)} blocked"
             )
             has_content = True
+            if detail == "full":
+                _entry = entry or {}
+                _vplan_cmds = _entry.get("verification_plan") or []
+                _cpp_records = getattr(cpp, "command_records", []) or []
+                _records_to_show = _vplan_cmds or _cpp_records
+                for _rec in _records_to_show:
+                    if isinstance(_rec, dict):
+                        _cmd = _rec.get("command") or " ".join(_rec.get("argv", []))
+                        _cls = _rec.get("classification") or _rec.get("safety", "?")
+                        _why = _rec.get("decision_reason") or _rec.get("reason", "")
+                        _exit = _rec.get("exit_code")
+                        _chars = _rec.get("output_chars", 0)
+                        _dur = _rec.get("duration_ms")
+                    else:
+                        _cmd = getattr(_rec, "command", "")
+                        _cls = getattr(_rec, "classification", "?")
+                        _why = getattr(_rec, "decision_reason", "")
+                        _exit = getattr(_rec, "exit_code", None)
+                        _chars = getattr(_rec, "output_chars", 0)
+                        _dur = getattr(_rec, "duration_ms", None)
+                    _exit_s = f" exit={_exit}" if _exit is not None else ""
+                    _chars_s = f" chars={_chars}" if _chars else ""
+                    _dur_s = f" {_dur}ms" if _dur is not None else ""
+                    lines.append(f"    cmd: {_cmd}  [{_cls}]{_exit_s}{_chars_s}{_dur_s}  {_why}")
 
     diff_review = getattr(native_meta, "diff_review", None)
     if diff_review is not None and getattr(diff_review, "has_diff", False):
@@ -1186,11 +1210,11 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
     return lines if has_content else []
 
 
-def _print_native_demo_block(native_meta: Any, detail: str = "default") -> None:
+def _print_native_demo_block(native_meta: Any, detail: str = "default", entry: "dict | None" = None) -> None:
     """Print the [native] demo block via click.echo."""
     if native_meta is None:
         return
-    body = _render_native_demo_block(native_meta, detail=detail)
+    body = _render_native_demo_block(native_meta, detail=detail, entry=entry)
     if not body:
         return
     click.echo("\n[native]")
@@ -1270,7 +1294,7 @@ def _render_native_inspection(entry: dict, detail: str) -> None:
     native_meta = _native_meta_from_entry(entry)
     if native_meta is None:
         return
-    _print_native_demo_block(native_meta, detail=detail)
+    _print_native_demo_block(native_meta, detail=detail, entry=entry)
     _print_native_summary(native_meta, detail)
     _print_native_step_log(entry, detail)
 

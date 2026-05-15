@@ -133,6 +133,7 @@ class NativeCommandPolicyPreview:
     blocked_count: int = 0
     command_classes: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    command_records: list[dict] = field(default_factory=list)
 
 
 def build_native_command_policy_preview(
@@ -142,6 +143,7 @@ def build_native_command_policy_preview(
         return NativeCommandPolicyPreview()
     safe = needs_approval = blocked = 0
     classes: set[str] = set()
+    records: list[dict] = []
     for cmd in verification_plan.commands:
         safety = getattr(cmd, "safety", None)
         if safety is None:
@@ -154,6 +156,12 @@ def build_native_command_policy_preview(
         elif label == "blocked":
             blocked += 1
         classes.add(label)
+        records.append({
+            "command": " ".join(getattr(cmd, "argv", [])),
+            "classification": label,
+            "decision_reason": getattr(cmd, "reason", ""),
+            "raw_content_stored": False,
+        })
     warnings: list[str] = []
     if safe + needs_approval + blocked == 0:
         warnings.append("no commands with safety classification found")
@@ -163,6 +171,7 @@ def build_native_command_policy_preview(
         blocked_count=blocked,
         command_classes=sorted(classes),
         warnings=warnings,
+        command_records=records,
     )
 
 
