@@ -579,5 +579,198 @@ class TestReceiptSavedNativeRun(unittest.TestCase):
         self.assertEqual(loaded["fallback_reason"], "native tier dispatch is recorded only in v1")
 
 
+class TestBuildReceiptActualModels(unittest.TestCase):
+    def test_executor_model_actual_stored(self):
+        r = _build(
+            experimental_tier_dispatch=True,
+            applied=False,
+            not_applied_reason="routing decisions resolved post-execution",
+            executor_model_actual=MODEL_STRONG,
+            routing_category="standard",
+        )
+        self.assertEqual(r.executor_model_actual, MODEL_STRONG)
+
+    def test_planner_model_actual_stored(self):
+        r = _build(
+            experimental_tier_dispatch=True,
+            applied=False,
+            planner_model_actual=MODEL_STRONG,
+            routing_category="standard",
+        )
+        self.assertEqual(r.planner_model_actual, MODEL_STRONG)
+
+    def test_actual_defaults_to_none(self):
+        r = _build(experimental_tier_dispatch=True, routing_category="standard")
+        self.assertIsNone(r.executor_model_actual)
+        self.assertIsNone(r.planner_model_actual)
+        self.assertIsNone(r.validator_model_actual)
+
+    def test_actual_included_in_asdict(self):
+        r = _build(
+            experimental_tier_dispatch=True,
+            executor_model_actual=MODEL_MAIN,
+            routing_category="standard",
+        )
+        d = asdict(r)
+        self.assertIn("executor_model_actual", d)
+        self.assertEqual(d["executor_model_actual"], MODEL_MAIN)
+
+    def test_flag_off_actual_fields_default(self):
+        r = _build(experimental_tier_dispatch=False, executor_model_actual=MODEL_STRONG)
+        self.assertIsNone(r.executor_model_actual)
+
+
+class TestBuildReceiptValidatorStatus(unittest.TestCase):
+    def test_validator_dispatch_status_reserved(self):
+        r = _build(
+            experimental_tier_dispatch=True,
+            applied=False,
+            not_applied_reason="routing decisions resolved post-execution",
+            validator_dispatch_status="reserved",
+            routing_category="standard",
+        )
+        self.assertEqual(r.validator_dispatch_status, "reserved")
+
+    def test_validator_dispatch_status_defaults_empty(self):
+        r = _build(experimental_tier_dispatch=True, routing_category="standard")
+        self.assertEqual(r.validator_dispatch_status, "")
+
+    def test_flag_off_status_empty(self):
+        r = _build(experimental_tier_dispatch=False, validator_dispatch_status="applied")
+        self.assertEqual(r.validator_dispatch_status, "")
+
+    def test_validator_dispatch_status_in_asdict(self):
+        r = _build(
+            experimental_tier_dispatch=True,
+            validator_dispatch_status="reserved",
+            routing_category="security",
+        )
+        d = asdict(r)
+        self.assertEqual(d["validator_dispatch_status"], "reserved")
+
+
+class TestReceiptOldHistoryRender(unittest.TestCase):
+    """Old receipts stored without actual-model fields still render cleanly."""
+
+    def setUp(self):
+        from openshard.cli.run_output import _render_tier_dispatch_block
+        self._render = _render_tier_dispatch_block
+
+    def _old_tdr(self):
+        return {
+            "enabled": True,
+            "applied": True,
+            "tier_source": "category_fallback",
+            "planner_tier": "frontier-reasoning-model",
+            "planner_model": MODEL_STRONG,
+            "executor_tier": "balanced-coding-model",
+            "executor_model": MODEL_MAIN,
+            "validator_tier": "independent-validator-model",
+            "validator_model": MODEL_STRONG,
+            "fallback_used": False,
+            "fallback_reason": "",
+            "warnings": [],
+            # executor_model_actual, validator_dispatch_status absent (old format)
+        }
+
+    def test_missing_actual_field_is_none_on_default_receipt(self):
+        r = NativeTierDispatchReceipt()
+        self.assertIsNone(r.executor_model_actual)
+
+    def test_old_dict_renders_without_crash_at_more(self):
+        lines = self._render(self._old_tdr(), "more")
+        self.assertTrue(len(lines) >= 1)
+        self.assertFalse(any("Actual model" in ln for ln in lines))
+
+    def test_old_dict_renders_without_crash_at_full(self):
+        lines = self._render(self._old_tdr(), "full")
+        self.assertTrue(len(lines) >= 1)
+
+    def test_actual_line_absent_when_same_model(self):
+        tdr = {**self._old_tdr(), "executor_model_actual": MODEL_MAIN}
+        lines = self._render(tdr, "more")
+        self.assertFalse(any("Actual model" in ln for ln in lines))
+
+
+class TestPolicyBlockedTierNotUsed(unittest.TestCase):
+    """Policy-blocked candidates should not appear as selected models."""
+
+    def test_downgraded_planner_not_blocked_model(self):
+        from openshard.native.context import NativeModelCandidateScoring
+        scoring = NativeModelCandidateScoring(
+            candidates=[],
+            selected_by_role={
+                "planner": "balanced-coding-model",
+                "executor": "balanced-coding-model",
+                "validator": "independent-validator-model",
+            },
+            strategy="cost-balanced",
+            confidence="medium",
+            warnings=["planner downgraded by policy"],
+            blocked_candidates=[MODEL_STRONG],
+        )
+        r = _build(
+            experimental_tier_dispatch=True,
+            model_candidate_scoring=scoring,
+            routing_receipt=None,
+            applied=True,
+        )
+        self.assertEqual(r.planner_tier, "balanced-coding-model")
+        self.assertEqual(r.planner_model, MODEL_MAIN)
+        self.assertNotEqual(r.planner_model, MODEL_STRONG)
+
+
+class TestActualModelRendering(unittest.TestCase):
+    """Actual model line appears in more/full only when it differs from planned model."""
+
+    def setUp(self):
+        from openshard.cli.run_output import _render_tier_dispatch_block
+        self._render = _render_tier_dispatch_block
+
+    def _tdr_with_actual(self, actual: str) -> dict:
+        return {
+            "enabled": True,
+            "applied": False,
+            "tier_source": "candidate_scoring",
+            "planner_tier": "frontier-reasoning-model",
+            "planner_model": MODEL_STRONG,
+            "executor_tier": "balanced-coding-model",
+            "executor_model": MODEL_MAIN,
+            "validator_tier": "independent-validator-model",
+            "validator_model": MODEL_STRONG,
+            "fallback_used": False,
+            "fallback_reason": "routing decisions resolved post-execution",
+            "warnings": [],
+            "executor_model_actual": actual,
+            "validator_dispatch_status": "reserved",
+        }
+
+    def test_actual_shown_in_more_when_differs(self):
+        tdr = self._tdr_with_actual(MODEL_STRONG)
+        lines = self._render(tdr, "more")
+        self.assertTrue(any("Actual model" in ln for ln in lines))
+
+    def test_actual_shown_in_full_when_differs(self):
+        tdr = self._tdr_with_actual(MODEL_STRONG)
+        lines = self._render(tdr, "full")
+        self.assertTrue(any("Actual:" in ln for ln in lines))
+
+    def test_actual_absent_in_more_when_same(self):
+        tdr = self._tdr_with_actual(MODEL_MAIN)
+        lines = self._render(tdr, "more")
+        self.assertFalse(any("Actual model" in ln for ln in lines))
+
+    def test_actual_absent_in_full_when_same(self):
+        tdr = self._tdr_with_actual(MODEL_MAIN)
+        lines = self._render(tdr, "full")
+        self.assertFalse(any("Actual:" in ln for ln in lines))
+
+    def test_validator_reserved_in_full(self):
+        tdr = self._tdr_with_actual(MODEL_STRONG)
+        lines = self._render(tdr, "full")
+        joined = "\n".join(lines)
+        self.assertIn("reserved for validation", joined)
+
+
 if __name__ == "__main__":
     unittest.main()

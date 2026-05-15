@@ -709,6 +709,7 @@ class RunPipeline:
         _tier_dispatch_receipt = None
         _dispatch_planner_model: str | None = None
         _dispatch_executor_model: str | None = None
+        _effective_model: str | None = None
         _validator_result: dict | None = None
         _validator_policy: ValidatorPolicyDecision | None = None
 
@@ -949,6 +950,15 @@ class RunPipeline:
                     click.echo(f"  [validator] warning: {_val_exc}")
             finally:
                 spinner.stop()
+
+        # Record validator dispatch outcome on the non-native tier dispatch receipt.
+        # (_can_dispatch already excludes native, so _tier_dispatch_receipt here is
+        # always the non-native receipt built at lines 742-755.)
+        if _tier_dispatch_receipt is not None:
+            if _validator_result is not None:
+                _tier_dispatch_receipt.validator_dispatch_status = "applied"
+            elif _validator_policy is not None and not _validator_policy.run:
+                _tier_dispatch_receipt.validator_dispatch_status = "skipped"
 
         # Safety net: discard generated file changes for read-only tasks even if the
         # model ignored the read-only instruction injected into the context.
@@ -1360,9 +1370,12 @@ class RunPipeline:
                 _native_meta.tier_dispatch_receipt = build_native_tier_dispatch_receipt(
                     routing_receipt=_native_meta.routing_receipt,
                     model_candidate_scoring=_native_meta.model_candidate_scoring,
+                    routing_category=routing_decision.category if routing_decision else None,
                     experimental_tier_dispatch=True,
                     applied=False,
-                    not_applied_reason="native tier dispatch is recorded only in v1",
+                    not_applied_reason="routing decisions resolved post-execution",
+                    executor_model_actual=_effective_model,
+                    validator_dispatch_status="reserved",
                 )
                 _tier_dispatch_receipt = _native_meta.tier_dispatch_receipt
         if _native_meta is not None and detail != "default":
