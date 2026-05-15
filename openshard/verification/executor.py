@@ -7,6 +7,8 @@ import click
 
 from openshard.verification.plan import CommandSafety, VerificationPlan
 
+_DEFAULT_TIMEOUT: float = 120.0
+
 
 def confirm_or_abort(reason: str) -> None:
     click.echo(f"\n[gate] {reason}")
@@ -22,6 +24,7 @@ def run_verification_plan(
     label: str = "[verify]",
     capture: bool = False,
     detail: str = "default",
+    timeout: float = _DEFAULT_TIMEOUT,
 ) -> "int | tuple[int, str]":
     """Execute the first VerificationCommand from *plan*.
 
@@ -32,6 +35,10 @@ def run_verification_plan(
 
     capture=False: streams output live, returns int exit code.
     capture=True: captures silently, returns (exit_code, output).
+
+    timeout: seconds before the subprocess is killed (default 120). Callers that
+    depend on captured output still receive a string on timeout; raw stdout is
+    never stored in run history or NativeStepEvent metadata.
     """
     if not plan.has_commands:
         if not capture:
@@ -54,14 +61,21 @@ def run_verification_plan(
     if not capture:
         click.echo(f"  {label} running: {' '.join(cmd.argv)}")
 
-    proc = subprocess.run(
-        cmd.argv,
-        cwd=cwd,
-        stdout=subprocess.PIPE if capture else None,
-        stderr=subprocess.STDOUT if capture else None,
-        text=capture,
-        **({"encoding": "utf-8", "errors": "replace"} if capture else {}),
-    )
+    try:
+        proc = subprocess.run(
+            cmd.argv,
+            cwd=cwd,
+            stdout=subprocess.PIPE if capture else None,
+            stderr=subprocess.STDOUT if capture else None,
+            text=capture,
+            timeout=timeout,
+            **({"encoding": "utf-8", "errors": "replace"} if capture else {}),
+        )
+    except subprocess.TimeoutExpired:
+        msg = f"  {label} timed out after {timeout}s"
+        if not capture:
+            click.echo(msg)
+        return (1, msg) if capture else 1
 
     if capture:
         return proc.returncode, proc.stdout or ""

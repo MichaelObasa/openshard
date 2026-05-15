@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -305,13 +306,24 @@ def _exec_run_verification(
     blocked = [c for c in plan.commands if c.safety == CommandSafety.blocked]
     needs_approval_cmds = [c for c in plan.commands if c.safety == CommandSafety.needs_approval]
 
+    first_cmd = plan.commands[0]
+
     if blocked:
         reasons = "; ".join(c.reason for c in blocked)
         return NativeToolResult(
             tool_name="run_verification",
             ok=False,
             error=f"Verification command is blocked: {reasons}",
-            metadata={"attempted": False, "command_count": len(plan.commands)},
+            metadata={
+                "attempted": False,
+                "command_count": len(plan.commands),
+                "classification": "blocked",
+                "decision_reason": blocked[0].reason,
+                "exit_code": 1,
+                "duration_ms": 0,
+                "output_chars": 0,
+                "raw_content_stored": False,
+            },
         )
 
     if needs_approval_cmds and not approved:
@@ -319,10 +331,22 @@ def _exec_run_verification(
             tool_name="run_verification",
             ok=False,
             error="Verification command requires approval. Set approved=True to run.",
-            metadata={"attempted": False, "command_count": len(plan.commands)},
+            metadata={
+                "attempted": False,
+                "command_count": len(plan.commands),
+                "classification": "needs_approval",
+                "decision_reason": needs_approval_cmds[0].reason,
+                "exit_code": None,
+                "duration_ms": 0,
+                "output_chars": 0,
+                "raw_content_stored": False,
+            },
         )
 
+    t0 = time.monotonic()
     exit_code, raw_output = run_verification_plan(plan, repo_root, capture=True)
+    duration_ms = int((time.monotonic() - t0) * 1000)
+
     output = compact_tool_result(raw_output, limit)
     passed = exit_code == 0
 
@@ -338,6 +362,10 @@ def _exec_run_verification(
             "command_count": len(plan.commands),
             "output_chars": len(raw_output),
             "truncated": len(raw_output) > limit,
+            "classification": first_cmd.safety.value,
+            "decision_reason": first_cmd.reason,
+            "duration_ms": duration_ms,
+            "raw_content_stored": False,
         },
     )
 
