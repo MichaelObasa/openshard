@@ -3766,5 +3766,103 @@ class TestLastOSNLoopSummaryRendering(unittest.TestCase):
         self.assertNotIn("OSN loop summary:", out)
 
 
+class TestLastContractVerificationDisplay(unittest.TestCase):
+
+    def _entry_with_vcr(self, overall_status: str, checks: list[dict]) -> dict:
+        entry = _native_entry()
+        entry["validation_contract"] = {
+            "intent": "add feature",
+            "risk_level": "medium",
+            "expected_change_scope": "2-5 files",
+            "acceptance_checks": [c["expected_check"] for c in checks],
+            "verification_commands": ["pytest"],
+            "approval_expected": False,
+            "strength": "strong",
+            "warnings": [],
+        }
+        entry["verification_contract_result"] = {
+            "checks": checks,
+            "overall_status": overall_status,
+            "reason": "verification suite " + overall_status,
+            "raw_content_stored": False,
+        }
+        return entry
+
+    def _passed_checks(self) -> list[dict]:
+        return [
+            {
+                "check_id": "check_0", "expected_check": "tests pass",
+                "verification_source": "verification_loop", "status": "passed",
+                "reason": "verification suite passed", "evidence_summary": "exit_code=0, 300 chars output",
+                "raw_content_stored": False,
+            },
+            {
+                "check_id": "check_1", "expected_check": "lint clean",
+                "verification_source": "verification_loop", "status": "passed",
+                "reason": "verification suite passed", "evidence_summary": "exit_code=0, 300 chars output",
+                "raw_content_stored": False,
+            },
+        ]
+
+    def _skipped_checks(self) -> list[dict]:
+        return [
+            {
+                "check_id": "check_0", "expected_check": "tests pass",
+                "verification_source": "none", "status": "skipped",
+                "reason": "verification not attempted", "evidence_summary": "",
+                "raw_content_stored": False,
+            },
+        ]
+
+    def test_more_shows_compact_contract_verification(self):
+        entry = self._entry_with_vcr("passed", self._passed_checks())
+        out = _render(entry, detail="more")
+        self.assertIn("contract verification:", out)
+        self.assertIn("passed", out)
+        self.assertIn("2 checks", out)
+
+    def test_full_shows_per_check_detail(self):
+        entry = self._entry_with_vcr("passed", self._passed_checks())
+        out = _render(entry, detail="full")
+        self.assertIn("check_0", out)
+        self.assertIn("check_1", out)
+        self.assertIn("status=passed", out)
+        self.assertIn("tests pass", out)
+        self.assertIn("lint clean", out)
+
+    def test_default_does_not_show_contract_verification(self):
+        entry = self._entry_with_vcr("passed", self._passed_checks())
+        out = _render(entry, detail="default")
+        self.assertNotIn("contract verification:", out)
+
+    def test_old_record_without_vcr_renders_cleanly(self):
+        entry = _native_entry()
+        entry.pop("verification_contract_result", None)
+        out = _render(entry, detail="more")
+        self.assertIn("[native]", out)
+        self.assertNotIn("contract verification:", out)
+
+    def test_skipped_status_displayed(self):
+        entry = self._entry_with_vcr("skipped", self._skipped_checks())
+        out = _render(entry, detail="more")
+        self.assertIn("contract verification:", out)
+        self.assertIn("skipped", out)
+
+    def test_failed_status_displayed(self):
+        failed_checks = [
+            {
+                "check_id": "check_0", "expected_check": "tests pass",
+                "verification_source": "verification_loop", "status": "failed",
+                "reason": "verification suite failed", "evidence_summary": "exit_code=1, 80 chars output",
+                "raw_content_stored": False,
+            },
+        ]
+        entry = self._entry_with_vcr("failed", failed_checks)
+        out = _render(entry, detail="full")
+        self.assertIn("contract verification:", out)
+        self.assertIn("failed", out)
+        self.assertIn("status=failed", out)
+
+
 if __name__ == "__main__":
     unittest.main()

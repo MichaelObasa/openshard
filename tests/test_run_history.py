@@ -647,5 +647,94 @@ class TestFormFactorHistory(unittest.TestCase):
         self.assertIsNone(ff)
 
 
+class TestVerificationContractResultHistory(unittest.TestCase):
+    """verification_contract_result serialization in run history."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._tmpdir = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _call(self, **kwargs):
+        defaults = dict(
+            start=time.time(),
+            task="test task",
+            generator=_make_generator(),
+            retry_triggered=False,
+            files=[],
+            verification_attempted=False,
+            verification_passed=None,
+            workspace=None,
+        )
+        defaults.update(kwargs)
+        with patch("openshard.cli.main.Path.cwd", return_value=self._tmpdir):
+            _log_run(**defaults)
+
+    def _read_entry(self) -> dict:
+        log_path = self._tmpdir / ".openshard" / "runs.jsonl"
+        lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        return json.loads(lines[-1])
+
+    def _make_vcr_dict(self) -> dict:
+        return {
+            "checks": [
+                {
+                    "check_id": "check_0",
+                    "expected_check": "tests pass",
+                    "verification_source": "verification_loop",
+                    "status": "passed",
+                    "reason": "verification suite passed",
+                    "evidence_summary": "exit_code=0, 200 chars output",
+                    "raw_content_stored": False,
+                }
+            ],
+            "overall_status": "passed",
+            "reason": "verification suite passed",
+            "raw_content_stored": False,
+        }
+
+    def test_verification_contract_result_serialized(self):
+        vcr = self._make_vcr_dict()
+        self._call(extra_metadata={"verification_contract_result": vcr})
+        entry = self._read_entry()
+        self.assertIn("verification_contract_result", entry)
+        stored = entry["verification_contract_result"]
+        self.assertEqual(stored["overall_status"], "passed")
+        self.assertEqual(len(stored["checks"]), 1)
+        self.assertFalse(stored["raw_content_stored"])
+
+    def test_verification_contract_result_json_roundtrip(self):
+        from openshard.native.context import (
+            NativeContractCheckResult,
+            NativeVerificationContractResult,
+        )
+        from dataclasses import asdict
+        result = NativeVerificationContractResult(
+            checks=[
+                NativeContractCheckResult(
+                    check_id="check_0",
+                    expected_check="tests pass",
+                    verification_source="verification_loop",
+                    status="passed",
+                    reason="verification suite passed",
+                    evidence_summary="exit_code=0, 200 chars output",
+                    raw_content_stored=False,
+                )
+            ],
+            overall_status="passed",
+            reason="verification suite passed",
+            raw_content_stored=False,
+        )
+        serialized = asdict(result)
+        raw = json.dumps(serialized)
+        parsed = json.loads(raw)
+        self.assertEqual(parsed["overall_status"], "passed")
+        self.assertFalse(parsed["raw_content_stored"])
+        self.assertFalse(parsed["checks"][0]["raw_content_stored"])
+        self.assertEqual(parsed["checks"][0]["check_id"], "check_0")
+
+
 if __name__ == "__main__":
     unittest.main()

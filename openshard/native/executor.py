@@ -44,6 +44,7 @@ from openshard.native.context import (
     NativeRoutingReceipt,
     NativeTierDispatchReceipt,
     NativeValidationContract,
+    NativeVerificationContractResult,
     NativeOSNLoopSummary,
     OSNLoopMeta,
     OSNLoopStep,
@@ -136,6 +137,7 @@ class NativeRunMeta:
     deepagents_adapter: DeepAgentsAdapterMeta | None = None
     context_provenance: NativeContextProvenance | None = None
     run_trust_score: NativeRunTrustScore | None = None
+    verification_contract_result: NativeVerificationContractResult | None = None
     model_selection_decision: NativeModelSelectionDecision | None = None
     model_candidate_scoring: NativeModelCandidateScoring | None = None
     model_policy: NativeModelPolicy | None = None
