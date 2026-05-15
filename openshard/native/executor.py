@@ -471,6 +471,26 @@ def _build_native_plan(
     )
 
 
+_STEP_TO_STAGE: dict[str, str] = {
+    "preflight": "setup",
+    "observe": "setup",
+    "gather_context": "setup",
+    "plan_update": "planning",
+    "budget_check": "planning",
+    "generate_patch": "generation",
+    "approval": "approval",
+    "safe_write": "write",
+    "verify": "verification",
+    "retry_once": "retry",
+    "final_receipt": "done",
+    "max_steps_exceeded": "done",
+}
+
+
+def _step_to_stage(step_name: str) -> str:
+    return _STEP_TO_STAGE.get(step_name, "pipeline")
+
+
 class NativeAgentExecutor:
     """Fast-path native executor. Delegates generation to ExecutionGenerator."""
 
@@ -507,6 +527,8 @@ class NativeAgentExecutor:
             self.native_meta.native_backend_notes = [
                 "Install deepagents to enable this experimental backend."
             ]
+        self._run_id: str = ""
+        self._step_counter: int = 0
 
     def record_loop_step(
         self,
@@ -522,6 +544,52 @@ class NativeAgentExecutor:
     def record_osn_loop_step(self, step_name: str, status: str, **kwargs) -> None:
         if self._osn_recorder is not None:
             self._osn_recorder.record_step(step_name, status, **kwargs)
+        self.log_step_event(
+            step_name,
+            status,
+            summary=kwargs.get("result_summary", ""),
+            tool_name=kwargs.get("tool_name", ""),
+            approval_required=bool(kwargs.get("approval_required", False)),
+            approval_granted=kwargs.get("approval_granted"),
+            verification_status=kwargs.get("verification_status", ""),
+        )
+
+    def log_step_event(
+        self,
+        step_name: str,
+        status: str,
+        *,
+        summary: str = "",
+        tool_name: str = "",
+        policy_decision: str = "",
+        approval_required: bool = False,
+        approval_granted: bool | None = None,
+        verification_status: str = "",
+        retry_count: int = 0,
+        duration_ms: int | None = None,
+        metadata: dict | None = None,
+    ) -> None:
+        if not self._run_id:
+            return
+        from openshard.history.native_steps import NativeStepEvent, log_native_step_event
+        event = NativeStepEvent(
+            run_id=self._run_id,
+            step_index=self._step_counter,
+            step_name=step_name,
+            stage=_step_to_stage(step_name),
+            status=status,
+            summary=summary[:120],
+            tool_name=tool_name,
+            policy_decision=policy_decision,
+            approval_required=approval_required,
+            approval_granted=approval_granted,
+            verification_status=verification_status,
+            retry_count=retry_count,
+            duration_ms=duration_ms,
+            metadata=metadata or {},
+        )
+        self._step_counter += 1
+        log_native_step_event(event)
 
     def complete_osn_loop(self, **kwargs) -> None:
         if self._osn_recorder is not None:
