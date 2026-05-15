@@ -365,6 +365,7 @@ class RunPipeline:
         _routed_model = routing_decision.model if routing_decision else None
         _scored: ScoredRoutingResult | None = None
         _runs: list[dict] = []
+        _feedback_receipt: dict | None = None
 
         # Attempt scored model selection; fall back silently to keyword routing.
         if not opencode_mode and routing_decision is not None:
@@ -426,9 +427,22 @@ class RunPipeline:
                 _feedback_reasons: dict[str, str] = {}
                 if _use_feedback_scoring:
                     try:
+                        from openshard.history.interactions import load_interaction_events
                         _fb_runs = load_runs()
-                        _feedback_adjustments = compute_feedback_adjustments(_fb_runs)
-                        _feedback_reasons = compute_feedback_adjustment_reasons(_fb_runs)
+                        _fb_events = load_interaction_events()
+                        _feedback_adjustments = compute_feedback_adjustments(
+                            _fb_runs, interaction_events=_fb_events
+                        )
+                        _feedback_reasons = compute_feedback_adjustment_reasons(
+                            _fb_runs, interaction_events=_fb_events
+                        )
+                        _feedback_receipt = {
+                            "routing_feedback_scoring_used": True,
+                            "routing_feedback_adjustments": {
+                                m: round(v, 3) for m, v in _feedback_adjustments.items()
+                            },
+                            "routing_feedback_reasons": dict(_feedback_reasons),
+                        }
                     except Exception:
                         pass
                 _merged_adjustments: dict[str, float] | None = None
@@ -1025,6 +1039,10 @@ class RunPipeline:
                 if _dr_extra is None:
                     _dr_extra = {}
                 _dr_extra["validator_policy"] = {"run": _validator_policy.run, "reason": _validator_policy.reason}
+            if _feedback_receipt is not None:
+                if _dr_extra is None:
+                    _dr_extra = {}
+                _dr_extra.update(_feedback_receipt)
             try:
                 _log_run(start, task, generator, retry_triggered, final_files,
                          verification_attempted=False, verification_passed=None,
@@ -1235,6 +1253,10 @@ class RunPipeline:
                         if _vf_extra is None:
                             _vf_extra = {}
                         _vf_extra["validator_policy"] = {"run": _validator_policy.run, "reason": _validator_policy.reason}
+                    if _feedback_receipt is not None:
+                        if _vf_extra is None:
+                            _vf_extra = {}
+                        _vf_extra.update(_feedback_receipt)
                     _log_run(start, task, generator, retry_triggered, final_files,
                              verification_attempted=True, verification_passed=False,
                              workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
@@ -1602,6 +1624,10 @@ class RunPipeline:
             if _extra_metadata is None:
                 _extra_metadata = {}
             _extra_metadata["validator_policy"] = {"run": _validator_policy.run, "reason": _validator_policy.reason}
+        if _feedback_receipt is not None:
+            if _extra_metadata is None:
+                _extra_metadata = {}
+            _extra_metadata.update(_feedback_receipt)
         # Finalise OSN loop summary before serialising to run history
         if effective_executor == "native" and hasattr(generator, "complete_osn_loop"):
             _vloop = getattr(generator.native_meta, "verification_loop", None)

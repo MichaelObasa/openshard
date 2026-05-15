@@ -3864,5 +3864,80 @@ class TestLastContractVerificationDisplay(unittest.TestCase):
         self.assertIn("status=failed", out)
 
 
+class TestFeedbackScoringRendering(unittest.TestCase):
+
+    def _entry_with_feedback_scoring(self, adjustments: dict, reasons: dict | None = None) -> dict:
+        return {
+            "task": "test task",
+            "routing_category": "standard",
+            "routing_candidate_count": 3,
+            "routing_selected_model": "openrouter/fast-model",
+            "routing_selected_provider": "openrouter",
+            "routing_used_fallback": False,
+            "routing_feedback_scoring_used": True,
+            "routing_feedback_adjustments": adjustments,
+            "routing_feedback_reasons": reasons or {},
+        }
+
+    def test_last_more_renders_feedback_scoring_header(self):
+        entry = self._entry_with_feedback_scoring({"openrouter/fast-model": -0.20})
+        out = _render(entry, "more")
+        self.assertIn("Feedback scoring:", out)
+
+    def test_last_more_renders_model_and_adjustment(self):
+        entry = self._entry_with_feedback_scoring({"openrouter/fast-model": -0.20})
+        out = _render(entry, "more")
+        self.assertIn("-0.20", out)
+
+    def test_last_more_renders_reason_string(self):
+        entry = self._entry_with_feedback_scoring(
+            {"openrouter/fast-model": -0.20},
+            {"openrouter/fast-model": "feedback: 3 rejected"},
+        )
+        out = _render(entry, "more")
+        self.assertIn("feedback: 3 rejected", out)
+
+    def test_last_more_renders_positive_adjustment(self):
+        entry = self._entry_with_feedback_scoring({"openrouter/fast-model": 0.15})
+        out = _render(entry, "more")
+        self.assertIn("+0.15", out)
+
+    def test_last_more_no_adjustment_shows_enabled_message(self):
+        entry = self._entry_with_feedback_scoring({})
+        out = _render(entry, "more")
+        self.assertIn("Feedback scoring: enabled (no adjustment)", out)
+
+    def test_last_full_renders_feedback_scoring_too(self):
+        entry = self._entry_with_feedback_scoring({"openrouter/fast-model": -0.10})
+        out = _render(entry, "full")
+        self.assertIn("Feedback scoring:", out)
+
+    def test_old_run_without_feedback_scoring_key_renders_safely(self):
+        entry = {
+            "task": "old run",
+            "routing_category": "standard",
+            "routing_candidate_count": 2,
+            "routing_selected_model": "openrouter/fast-model",
+            "routing_selected_provider": "openrouter",
+            "routing_used_fallback": False,
+        }
+        out = _render(entry, "more")
+        self.assertNotIn("Feedback scoring:", out)
+        self.assertIn("Category: standard", out)
+
+    def test_default_detail_does_not_show_feedback_scoring(self):
+        entry = self._entry_with_feedback_scoring({"openrouter/fast-model": -0.20})
+        out = _render(entry, "default")
+        self.assertNotIn("Feedback scoring:", out)
+
+    def test_multiple_models_all_rendered(self):
+        entry = self._entry_with_feedback_scoring(
+            {"openrouter/fast-model": -0.20, "openrouter/strong-model": 0.10},
+        )
+        out = _render(entry, "more")
+        self.assertIn("-0.20", out)
+        self.assertIn("+0.10", out)
+
+
 if __name__ == "__main__":
     unittest.main()
