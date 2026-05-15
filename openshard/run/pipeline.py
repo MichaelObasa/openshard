@@ -1165,8 +1165,6 @@ class RunPipeline:
                     finally:
                         spinner.stop()
                     _loop_meta.retried = True
-                    if hasattr(generator, "record_osn_loop_step"):
-                        generator.record_osn_loop_step("retry_once", "running")
                     exec_result = _retry_result
                     final_files = _retry_result.files
                     _write_files(_retry_result.files, workspace)
@@ -1178,6 +1176,11 @@ class RunPipeline:
                     _loop_meta.output_chars = len(_loop_output2)
                     _loop_meta.truncated = len(_loop_output2) > 1200
                     _loop_meta.passed = _loop_code2 == 0
+                    if hasattr(generator, "record_osn_loop_step"):
+                        _retry_vst = "passed" if _loop_meta.passed else "failed"
+                        generator.record_osn_loop_step(
+                            "retry_once", _retry_vst, verification_status=_retry_vst,
+                        )
 
         if write and verify:
             click.echo("")
