@@ -647,6 +647,30 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
                 for _vc_line in _full_contract.splitlines():
                     lines.append(f"  {_vc_line}")
 
+    vcr = getattr(native_meta, "verification_contract_result", None)
+    if vcr is not None:
+        _vcr_status = _loop_event_value(vcr, "overall_status", "unknown")
+        _vcr_checks = _loop_event_value(vcr, "checks", None) or []
+        _n = len(_vcr_checks)
+        _check_word = "check" if _n == 1 else "checks"
+        lines.append(f"  contract verification: {_vcr_status} ({_n} {_check_word})")
+        has_content = True
+        if detail == "full" and _vcr_checks:
+            for _ck in _vcr_checks:
+                _ck_id = _loop_event_value(_ck, "check_id", "?")
+                _ck_status = _loop_event_value(_ck, "status", "unknown")
+                _ck_expected = _loop_event_value(_ck, "expected_check", "")
+                _ck_reason = _loop_event_value(_ck, "reason", "")
+                _ck_evidence = _loop_event_value(_ck, "evidence_summary", "")
+                _detail_parts = [f"status={_ck_status}"]
+                if _ck_reason:
+                    _detail_parts.append(f"reason={_ck_reason}")
+                if _ck_evidence:
+                    _detail_parts.append(f"evidence={_ck_evidence}")
+                lines.append(f"    {_ck_id}: {', '.join(_detail_parts)}")
+                if _ck_expected:
+                    lines.append(f"      expected: {_ck_expected}")
+
     budget_preview = getattr(native_meta, "change_budget_preview", None)
     if budget_preview is not None:
         _proposed = getattr(budget_preview, "proposed_files", 0)
@@ -1205,6 +1229,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "osn_loop_summary": entry.get("osn_loop_summary"),
         "deepagents_adapter": entry.get("deepagents_adapter"),
         "validation_contract": entry.get("validation_contract"),
+        "verification_contract_result": entry.get("verification_contract_result"),
         "context_provenance": entry.get("context_provenance"),
         "run_trust_score": entry.get("run_trust_score"),
         "model_selection_decision": entry.get("model_selection_decision"),

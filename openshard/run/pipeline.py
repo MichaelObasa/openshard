@@ -1300,6 +1300,11 @@ class RunPipeline:
                 context_usage_summary=_native_meta.context_usage_summary,
                 final_report=_native_meta.final_report,
             )
+            from openshard.native.context import build_native_verification_contract_result
+            _native_meta.verification_contract_result = build_native_verification_contract_result(
+                validation_contract=_native_meta.validation_contract,
+                verification_loop=_native_meta.verification_loop,
+            )
             from openshard.native.context import build_native_model_selection_decision
             _native_meta.model_selection_decision = build_native_model_selection_decision(
                 verification_plan=_native_meta.verification_plan,
@@ -1519,6 +1524,11 @@ class RunPipeline:
                 "validation_contract": (
                     asdict(_native_meta.validation_contract)
                     if _native_meta is not None and _native_meta.validation_contract is not None
+                    else None
+                ),
+                "verification_contract_result": (
+                    asdict(_native_meta.verification_contract_result)
+                    if _native_meta is not None and _native_meta.verification_contract_result is not None
                     else None
                 ),
                 "context_provenance": (

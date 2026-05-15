@@ -1062,6 +1062,25 @@ class NativeValidationContract:
 
 
 @dataclass
+class NativeContractCheckResult:
+    check_id: str = ""
+    expected_check: str = ""
+    verification_source: str = "none"  # "verification_loop" | "none"
+    status: str = "unknown"  # passed | failed | skipped | unknown
+    reason: str = ""
+    evidence_summary: str = ""
+    raw_content_stored: bool = False
+
+
+@dataclass
+class NativeVerificationContractResult:
+    checks: list[NativeContractCheckResult] = field(default_factory=list)
+    overall_status: str = "unknown"  # passed | failed | skipped | unknown
+    reason: str = ""
+    raw_content_stored: bool = False
+
+
+@dataclass
 class NativeContextUsageSummary:
     repo_summary_included: bool = False
     selected_files_count: int = 0
@@ -1433,6 +1452,64 @@ def render_native_validation_contract(contract: NativeValidationContract | None)
     lines.append(f"approval expected: {'yes' if contract.approval_expected else 'no'}")
     lines.append(f"strength: {contract.strength}")
     return "\n".join(lines)
+
+
+def build_native_verification_contract_result(
+    *,
+    validation_contract: NativeValidationContract | None,
+    verification_loop: Any | None,
+) -> NativeVerificationContractResult:
+    if validation_contract is None:
+        return NativeVerificationContractResult(overall_status="unknown", reason="no validation contract")
+
+    checks_text: list[str] = list(getattr(validation_contract, "acceptance_checks", None) or [])
+    if not checks_text:
+        return NativeVerificationContractResult(overall_status="unknown", reason="no acceptance checks defined")
+
+    v_attempted = verification_loop is not None and getattr(verification_loop, "attempted", False)
+    v_passed = v_attempted and getattr(verification_loop, "passed", False)
+    exit_code = getattr(verification_loop, "exit_code", None) if verification_loop is not None else None
+    output_chars = getattr(verification_loop, "output_chars", 0) if verification_loop is not None else 0
+
+    if not v_attempted:
+        status = "skipped"
+        reason = "verification not attempted"
+        source = "none"
+        evidence = ""
+        overall = "skipped"
+    elif v_passed:
+        status = "passed"
+        reason = "verification suite passed"
+        source = "verification_loop"
+        _ec = f"exit_code={exit_code}" if exit_code is not None else "exit_code=0"
+        evidence = f"{_ec}, {output_chars} chars output"
+        overall = "passed"
+    else:
+        status = "failed"
+        reason = "verification suite failed"
+        source = "verification_loop"
+        _ec = f"exit_code={exit_code}" if exit_code is not None else "exit_code=nonzero"
+        evidence = f"{_ec}, {output_chars} chars output"
+        overall = "failed"
+
+    checks = [
+        NativeContractCheckResult(
+            check_id=f"check_{i}",
+            expected_check=text,
+            verification_source=source,
+            status=status,
+            reason=reason,
+            evidence_summary=evidence,
+            raw_content_stored=False,
+        )
+        for i, text in enumerate(checks_text)
+    ]
+    return NativeVerificationContractResult(
+        checks=checks,
+        overall_status=overall,
+        reason=reason,
+        raw_content_stored=False,
+    )
 
 
 @dataclass
