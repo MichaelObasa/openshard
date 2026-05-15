@@ -3021,3 +3021,12 @@ def build_native_tier_dispatch_receipt(
         validator_model_actual=validator_model_actual,
         validator_dispatch_status=validator_dispatch_status,
     )
+
+
+@dataclass
+class NativeSandboxMeta:
+    sandbox_enabled: bool = False
+    sandbox_type: str = "none"        # "worktree" | "temp" | "none"
+    worktree_path: str | None = None
+    worktree_branch: str | None = None
+    fallback_reason: str | None = None

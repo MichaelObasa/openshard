@@ -1079,7 +1079,12 @@ class RunPipeline:
 
         if write:
             if not opencode_mode:
-                workspace = Path(tempfile.mkdtemp())
+                if effective_executor == "native" and hasattr(generator, "native_meta"):
+                    from openshard.native.sandbox import create_run_sandbox as _create_sandbox
+                    workspace, _sb_meta = _create_sandbox(Path.cwd(), _run_id)
+                    generator.native_meta.sandbox = _sb_meta
+                else:
+                    workspace = Path(tempfile.mkdtemp())
                 if detail == "full":
                     click.echo(f"\n  [workspace] {workspace}")
                 _file_paths = [f.path for f in exec_result.files if f.path]
@@ -1612,6 +1617,11 @@ class RunPipeline:
                 "tier_dispatch_receipt": (
                     asdict(_native_meta.tier_dispatch_receipt)
                     if _native_meta is not None and _native_meta.tier_dispatch_receipt is not None
+                    else None
+                ),
+                "sandbox": (
+                    asdict(_native_meta.sandbox)
+                    if _native_meta is not None and _native_meta.sandbox is not None
                     else None
                 ),
             }

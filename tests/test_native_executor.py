@@ -661,13 +661,16 @@ class TestNativeWorkflowIntegration(unittest.TestCase):
         native_mock.generate.return_value = fake_result
 
         with tempfile.TemporaryDirectory() as workspace_dir:
+            from openshard.native.context import NativeSandboxMeta
+            _sb_meta = NativeSandboxMeta(sandbox_enabled=True, sandbox_type="temp", fallback_reason="test")
             with patch("openshard.run.pipeline.NativeAgentExecutor", return_value=native_mock), \
                  patch("openshard.run.pipeline.ExecutionGenerator", return_value=_make_generator_mock()), \
                  patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
                  patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
                  patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
                  patch("openshard.run.pipeline._log_run"), \
-                 patch("openshard.run.pipeline.tempfile.mkdtemp", return_value=workspace_dir):
+                 patch("openshard.native.sandbox.create_run_sandbox",
+                       return_value=(Path(workspace_dir), _sb_meta)):
                 runner = CliRunner()
                 result = runner.invoke(
                     cli, ["run", "--workflow", "native", "--write", "create hello file"]
