@@ -699,17 +699,29 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
     if tool_search_events:
         count = len(tool_search_events)
         lines.append(f"  tool/search events: {count}")
-        if detail == "full":
+        if detail in ("more", "full"):
             for ev in tool_search_events:
                 _tn = _loop_event_value(ev, "tool_name", "?")
                 _rq = _loop_event_value(ev, "result_quality", "unknown")
                 _rc = _loop_event_value(ev, "result_count", 0)
-                _sr = _loop_event_value(ev, "selected_reason", "") or ""
-                _q = _loop_event_value(ev, "query", "") or ""
                 _ci = _loop_event_value(ev, "context_injected", False)
-                _q_part = f'  query="{_q}"' if _q else ""
-                _ci_part = ", injected" if _ci else ""
-                lines.append(f"    {_tn}  {_rq}  {_rc} results  {_sr}{_q_part}{_ci_part}")
+                _cp = _loop_event_value(ev, "changed_plan", False)
+                _q  = _loop_event_value(ev, "query", "") or ""
+                _ft = _loop_event_value(ev, "fallback_tool", None)
+                _label   = "zero-results" if _rq == "empty" else _rq
+                _q_part  = f'  query="{_q[:30]}"' if _q else ""
+                _ci_part = "  injected" if _ci else ""
+                _cp_part = "  plan-changed" if _cp else ""
+                if detail == "full":
+                    _sr = _loop_event_value(ev, "selected_reason", "") or ""
+                    _ft_part = f"  fallback={_ft}" if _ft else ""
+                    lines.append(
+                        f"    {_tn}  {_label}  {_rc} results  {_sr}{_q_part}{_ci_part}{_cp_part}{_ft_part}"
+                    )
+                else:
+                    lines.append(
+                        f"    {_tn}  {_label}  {_rc} results{_q_part}{_ci_part}{_cp_part}"
+                    )
         has_content = True
 
     _cqs_w = getattr(getattr(native_meta, "context_quality_score", None), "warnings", []) or []

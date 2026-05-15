@@ -555,6 +555,24 @@ class TestToolSearchEventsHistory(unittest.TestCase):
         names = [e["tool_name"] for e in entry["tool_search_events"]]
         self.assertEqual(names, ["list_files", "get_git_diff", "search_repo"])
 
+    def test_available_tools_serialized_in_event(self):
+        events = [self._make_event_dict(available_tools=["list_files", "read_file", "search_repo"])]
+        self._call(extra_metadata={"tool_search_events": events})
+        entry = self._read_entry()
+        ev = entry["tool_search_events"][0]
+        self.assertIn("available_tools", ev)
+        self.assertEqual(ev["available_tools"], ["list_files", "read_file", "search_repo"])
+
+    def test_old_event_without_available_tools_is_valid(self):
+        # Old JSONL records have no available_tools key — must load without error.
+        events = [self._make_event_dict()]  # _make_event_dict has no available_tools key
+        self._call(extra_metadata={"tool_search_events": events})
+        entry = self._read_entry()
+        ev = entry["tool_search_events"][0]
+        # Rendering helper must gracefully default to []
+        from openshard.cli.run_output import _loop_event_value
+        self.assertEqual(_loop_event_value(ev, "available_tools", []), [])
+
 
 class TestFormFactorHistory(unittest.TestCase):
 

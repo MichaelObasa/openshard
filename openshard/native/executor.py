@@ -86,7 +86,7 @@ from openshard.native.backends import DeepAgentsAdapterMeta, build_deepagents_ad
 from openshard.native.loop import NativeLoopTrace
 from openshard.native.skills import match_builtin_skills, selected_skill_names
 from openshard.native.tool_runner import NativeToolRunner
-from openshard.native.tools import NativeToolCall, NativeToolResult, NativeToolSearchEvent
+from openshard.native.tools import NativeToolCall, NativeToolResult, NativeToolSearchEvent, list_native_tools
 
 
 @dataclass
@@ -547,6 +547,7 @@ class NativeAgentExecutor:
             result_quality=quality,
             context_injected=context_injected,
             warnings=list(warnings or []),
+            available_tools=[t.name for t in list_native_tools()],
         )
         self.native_meta.tool_search_events.append(event)
         return event
