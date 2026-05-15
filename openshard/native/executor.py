@@ -46,6 +46,7 @@ from openshard.native.context import (
     NativeValidationContract,
     NativeVerificationContractResult,
     NativeOSNLoopSummary,
+    NativeSandboxMeta,
     OSNLoopMeta,
     OSNLoopStep,
     build_initial_context_budget,
@@ -146,6 +147,7 @@ class NativeRunMeta:
     routing_receipt: NativeRoutingReceipt | None = None
     tier_dispatch_receipt: NativeTierDispatchReceipt | None = None
     osn_loop_summary: NativeOSNLoopSummary | None = None
+    sandbox: NativeSandboxMeta | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({

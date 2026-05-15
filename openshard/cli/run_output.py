@@ -468,6 +468,27 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default") -> list
     write_path = getattr(native_meta, "write_path", "pipeline")
     lines.append(f"  write path: {write_path}")
 
+    sandbox = getattr(native_meta, "sandbox", None)
+    if sandbox is not None:
+        _sb_enabled = _loop_event_value(sandbox, "sandbox_enabled", False)
+        if _sb_enabled:
+            _stype = _loop_event_value(sandbox, "sandbox_type", "none")
+            _branch = _loop_event_value(sandbox, "worktree_branch", None)
+            _spath = _loop_event_value(sandbox, "worktree_path", None)
+            _reason = _loop_event_value(sandbox, "fallback_reason", None)
+            if _stype == "worktree" and _branch:
+                lines.append(f"  sandbox: worktree ({_branch})")
+                if detail == "full":
+                    if _spath:
+                        lines.append(f"  sandbox path: {_spath}")
+                        lines.append(f"  sandbox cleanup: git worktree remove {_spath}")
+            elif _stype == "temp":
+                _fr = f" — fallback: {_reason}" if _reason else ""
+                lines.append(f"  sandbox: temp{_fr}")
+                if detail == "full" and _spath:
+                    lines.append(f"  sandbox path: {_spath}")
+            has_content = True
+
     vloop = getattr(native_meta, "verification_loop", None)
     if vloop is not None and getattr(vloop, "attempted", False):
         has_content = True
@@ -1240,6 +1261,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "routing_receipt": entry.get("routing_receipt"),
         "tier_dispatch_receipt": entry.get("tier_dispatch_receipt"),
         "tool_search_events": entry.get("tool_search_events", []),
+        "sandbox": entry.get("sandbox"),
     })
 
 
