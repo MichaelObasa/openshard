@@ -3,6 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from openshard.native.dispatch import (
+    _ROLE_DEFAULT_TIER as _DEFAULT_ROLE_TIERS,
+    _ROLE_VALID_TIERS as _VALID_TIERS_BY_ROLE,
+)
+
 
 @dataclass
 class NativeContextBudget:
@@ -2243,17 +2248,6 @@ _CANDIDATE_TIERS = [
     "independent-validator-model",
 ]
 
-_DEFAULT_ROLE_TIERS = {
-    "planner": "frontier-reasoning-model",
-    "executor": "balanced-coding-model",
-    "validator": "independent-validator-model",
-}
-
-_VALID_TIERS_BY_ROLE: dict[str, list[str]] = {
-    "planner": ["frontier-reasoning-model", "balanced-coding-model"],
-    "executor": ["frontier-reasoning-model", "balanced-coding-model", "low-cost-coding-model"],
-    "validator": ["independent-validator-model", "frontier-reasoning-model", "balanced-coding-model"],
-}
 
 
 def build_native_model_candidate_scoring(
