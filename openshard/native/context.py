@@ -79,6 +79,19 @@ class NativePlan:
 
 
 @dataclass
+class RetryMetadata:
+    retry_attempted: bool = False
+    retry_reason: str = ""
+    failure_summary: str = ""
+    retry_patch_files: list[str] = field(default_factory=list)
+    retry_verification_status: str = ""
+    raw_content_stored: bool = False
+
+    def __post_init__(self) -> None:
+        self.raw_content_stored = False
+
+
+@dataclass
 class NativeVerificationLoop:
     attempted: bool = False
     passed: bool = False
@@ -86,6 +99,7 @@ class NativeVerificationLoop:
     exit_code: int | None = None
     output_chars: int = 0
     truncated: bool = False
+    retry_metadata: "RetryMetadata | None" = None
 
 
 @dataclass
@@ -414,6 +428,33 @@ def render_verification_failure_context(
     if len(bounded) > body_limit:
         bounded = bounded[:body_limit].rstrip() + suffix
     return (header + "\n" + bounded)[:limit]
+
+
+_FAILURE_PATTERNS: list[tuple[str, str]] = [
+    ("syntaxerror", "syntax_error"),
+    ("importerror", "import_error"),
+    ("modulenotfounderror", "import_error"),
+    ("assertionerror", "assertion_error"),
+    ("typeerror", "type_error"),
+    ("nameerror", "name_error"),
+    ("attributeerror", "attribute_error"),
+]
+
+
+def build_failure_summary(output: str, exit_code: int) -> str:
+    """Structured failure summary — no raw content stored."""
+    lo = output.lower()
+    failure_type = "test_failure"
+    for token, label in _FAILURE_PATTERNS:
+        if token in lo:
+            failure_type = label
+            break
+    return (
+        f"exit_code={exit_code} "
+        f"failure_type={failure_type} "
+        f"output_chars={len(output)} "
+        f"raw_content_stored=false"
+    )
 
 
 def build_compact_run_state(
