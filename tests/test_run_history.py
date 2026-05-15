@@ -304,6 +304,71 @@ class TestLogRunHistory(unittest.TestCase):
         self.assertEqual(entry["execution_profile_reason"], "explicit override")
 
 
+class TestFeedbackScoringMetadata(unittest.TestCase):
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._tmpdir = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _call(self, **kwargs):
+        defaults = dict(
+            start=time.time(),
+            task="test task",
+            generator=_make_generator(),
+            retry_triggered=False,
+            files=[],
+            verification_attempted=False,
+            verification_passed=None,
+            workspace=None,
+        )
+        defaults.update(kwargs)
+        with patch("openshard.cli.main.Path.cwd", return_value=self._tmpdir):
+            _log_run(**defaults)
+
+    def _read_entry(self) -> dict:
+        log_path = self._tmpdir / ".openshard" / "runs.jsonl"
+        lines = [ln for ln in log_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        return json.loads(lines[-1])
+
+    def test_feedback_scoring_used_recorded_via_extra_metadata(self):
+        receipt = {
+            "routing_feedback_scoring_used": True,
+            "routing_feedback_adjustments": {"openrouter/fast-model": -0.2},
+            "routing_feedback_reasons": {"openrouter/fast-model": "feedback: 3 rejected"},
+        }
+        self._call(extra_metadata=receipt)
+        entry = self._read_entry()
+        self.assertTrue(entry.get("routing_feedback_scoring_used"))
+        self.assertIn("openrouter/fast-model", entry.get("routing_feedback_adjustments", {}))
+        self.assertAlmostEqual(entry["routing_feedback_adjustments"]["openrouter/fast-model"], -0.2)
+
+    def test_feedback_scoring_absent_by_default(self):
+        self._call()
+        entry = self._read_entry()
+        self.assertNotIn("routing_feedback_scoring_used", entry)
+        self.assertNotIn("routing_feedback_adjustments", entry)
+
+    def test_feedback_scoring_reasons_recorded(self):
+        receipt = {
+            "routing_feedback_scoring_used": True,
+            "routing_feedback_adjustments": {"m": 0.15},
+            "routing_feedback_reasons": {"m": "feedback: 4 accepted"},
+        }
+        self._call(extra_metadata=receipt)
+        entry = self._read_entry()
+        self.assertEqual(entry.get("routing_feedback_reasons", {}).get("m"), "feedback: 4 accepted")
+
+    def test_old_run_without_feedback_scoring_keys_renders_safely(self):
+        self._call()
+        entry = self._read_entry()
+        self.assertNotIn("routing_feedback_scoring_used", entry)
+        self.assertNotIn("routing_feedback_adjustments", entry)
+        self.assertNotIn("routing_feedback_reasons", entry)
+
+
 class TestVerificationPlanLogging(unittest.TestCase):
 
     def setUp(self):

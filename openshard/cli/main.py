@@ -706,6 +706,17 @@ def _render_log_entry(entry: dict, detail: str) -> None:
         _tdr_check = entry.get("tier_dispatch_receipt")
         if _tdr_check and _tdr_check.get("enabled") and _tdr_check.get("applied"):
             click.echo("    Note: tier dispatch changed the work model shown below.")
+        if entry.get("routing_feedback_scoring_used"):
+            _fb_adjs = entry.get("routing_feedback_adjustments") or {}
+            _fb_rsns = entry.get("routing_feedback_reasons") or {}
+            if _fb_adjs:
+                click.echo("    Feedback scoring:")
+                for _fm, _fa in _fb_adjs.items():
+                    _rsn = _fb_rsns.get(_fm, "")
+                    _rsn_str = f" ({_rsn})" if _rsn else ""
+                    click.echo(f"      {_model_label(_fm)}: {_fa:+.2f}{_rsn_str}")
+            else:
+                click.echo("    Feedback scoring: enabled (no adjustment)")
 
     # Execution profile (--more / --full)
     if detail != "default" and entry.get("execution_profile"):
