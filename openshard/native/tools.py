@@ -48,6 +48,7 @@ class NativeToolSearchEvent:
     context_injected: bool = False
     changed_plan: bool = False
     warnings: list[str] = field(default_factory=list)
+    available_tools: list[str] = field(default_factory=list)
 
 
 _BUILTIN_TOOLS: list[NativeTool] = [

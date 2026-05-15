@@ -6456,3 +6456,25 @@ class TestNativeToolSearchEventRecording(unittest.TestCase):
             context_injected=False,
         )
         self.assertEqual(ev.result_quality, "weak")
+
+    def test_available_tools_populated_in_event(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("x = 1")
+            executor = self._make_executor_with_repo(root)
+            executor._run_preflight()
+        for ev in executor.native_meta.tool_search_events:
+            self.assertIsInstance(ev.available_tools, list)
+            self.assertGreater(len(ev.available_tools), 0)
+            self.assertIn("list_files", ev.available_tools)
+
+    def test_available_tools_contains_only_name_strings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+        from openshard.native.tools import NativeToolResult
+        result = NativeToolResult(tool_name="list_files", ok=True, output="main.py\n")
+        ev = executor._record_tool_search_event("list_files", result, context_injected=True)
+        for item in ev.available_tools:
+            self.assertIsInstance(item, str)
+            self.assertNotIn(" ", item.strip() if " " not in item else "")

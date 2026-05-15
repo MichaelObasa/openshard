@@ -3475,6 +3475,68 @@ class TestToolSearchEventsRendering(unittest.TestCase):
         self.assertIn("2 results", joined)
         self.assertIn("read-search strategy=default", joined)
 
+    def test_more_shows_per_event_tool_name(self):
+        events = [
+            {"tool_name": "search_repo", "result_quality": "useful", "result_count": 3,
+             "selected_reason": "observe search trigger", "query": "auth",
+             "context_injected": True, "retry_count": 0, "fallback_tool": None,
+             "changed_plan": False, "warnings": []},
+        ]
+        out = _render(self._native_entry(events), detail="more")
+        self.assertIn("search_repo", out)
+
+    def test_more_shows_result_count(self):
+        events = [
+            {"tool_name": "search_repo", "result_quality": "useful", "result_count": 7,
+             "selected_reason": "observe search trigger", "query": "token",
+             "context_injected": True, "retry_count": 0, "fallback_tool": None,
+             "changed_plan": False, "warnings": []},
+        ]
+        out = _render(self._native_entry(events), detail="more")
+        self.assertIn("7 results", out)
+
+    def test_more_shows_zero_results_label(self):
+        events = [
+            {"tool_name": "get_git_diff", "result_quality": "empty", "result_count": 0,
+             "selected_reason": "observe dirty diff", "query": "",
+             "context_injected": False, "retry_count": 0, "fallback_tool": None,
+             "changed_plan": False, "warnings": []},
+        ]
+        out = _render(self._native_entry(events), detail="more")
+        self.assertIn("zero-results", out)
+        self.assertNotIn("  empty  ", out)
+
+    def test_more_shows_plan_changed(self):
+        events = [
+            {"tool_name": "search_repo", "result_quality": "useful", "result_count": 2,
+             "selected_reason": "observe search trigger", "query": "config",
+             "context_injected": True, "retry_count": 0, "fallback_tool": None,
+             "changed_plan": True, "warnings": []},
+        ]
+        out = _render(self._native_entry(events), detail="more")
+        self.assertIn("plan-changed", out)
+
+    def test_full_shows_changed_plan(self):
+        events = [
+            {"tool_name": "read_file", "result_quality": "useful", "result_count": 1,
+             "selected_reason": "osn loop step", "query": "src/auth.py",
+             "context_injected": True, "retry_count": 0, "fallback_tool": None,
+             "changed_plan": True, "warnings": []},
+        ]
+        out = _render(self._native_entry(events), detail="full")
+        self.assertIn("plan-changed", out)
+
+    def test_full_shows_zero_results_label(self):
+        events = [
+            {"tool_name": "search_repo", "result_quality": "empty", "result_count": 0,
+             "selected_reason": "observe search trigger", "query": "nonexistent",
+             "context_injected": False, "retry_count": 0, "fallback_tool": None,
+             "changed_plan": False, "warnings": []},
+        ]
+        out = _render(self._native_entry(events), detail="full")
+        self.assertIn("zero-results", out)
+        self.assertNotIn("  empty  ", out)
+
 
 class TestFormFactorRendering(unittest.TestCase):
 
