@@ -2925,6 +2925,10 @@ class NativeTierDispatchReceipt:
     fallback_used: bool = False
     fallback_reason: str = ""
     warnings: list[str] = field(default_factory=list)
+    planner_model_actual: str | None = None
+    executor_model_actual: str | None = None
+    validator_model_actual: str | None = None
+    validator_dispatch_status: str = ""   # "applied" | "reserved" | "skipped" | ""
 
 
 def build_native_tier_dispatch_receipt(
@@ -2935,6 +2939,10 @@ def build_native_tier_dispatch_receipt(
     experimental_tier_dispatch: bool = False,
     applied: bool = False,
     not_applied_reason: str = "",
+    planner_model_actual: str | None = None,
+    executor_model_actual: str | None = None,
+    validator_model_actual: str | None = None,
+    validator_dispatch_status: str = "",
 ) -> "NativeTierDispatchReceipt":
     """Build a tier dispatch receipt.
 
@@ -3014,4 +3022,8 @@ def build_native_tier_dispatch_receipt(
         fallback_used=any_fallback,
         fallback_reason=effective_fallback_reason,
         warnings=warnings,
+        planner_model_actual=planner_model_actual,
+        executor_model_actual=executor_model_actual,
+        validator_model_actual=validator_model_actual,
+        validator_dispatch_status=validator_dispatch_status,
     )

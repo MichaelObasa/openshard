@@ -1358,6 +1358,9 @@ def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None
                 lines.append("      Used: no, reserved for validation")
         return lines
 
+    _e_actual = _g("executor_model_actual") or None
+    _v_status = _g("validator_dispatch_status", "")
+
     if detail == "more":
         lines.append("  Model plan")
         lines.append(f"    Planning:  {_lbl(p_model)}")
@@ -1374,6 +1377,8 @@ def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None
         lines.append(f"    Applied: {'yes' if applied else 'no'}")
         lines.append(f"    Source:  {source_label}")
         lines.append(f"    Work model: {_lbl(e_model)}")
+        if _e_actual and _e_actual != e_model:
+            lines.append(f"    Actual model: {_lbl(_e_actual)}")
         if initial_model:
             lines.append(f"    Initial candidate: {_model_label(initial_model)}")
         if fb:
@@ -1390,6 +1395,8 @@ def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None
         lines.append(f"    Work: {_lbl(e_model)}")
         lines.append(f"      Tier:  {e_tier}")
         lines.append(f"      Model: {e_model}")
+        if _e_actual and _e_actual != e_model:
+            lines.append(f"      Actual: {_e_actual}")
         lines.append("")
         lines.append(f"    Validator: {_lbl(v_model)}")
         lines.append(f"      Tier:  {v_tier}")
@@ -1409,6 +1416,8 @@ def _render_tier_dispatch_block(tdr: Any, detail: str, initial_model: str | None
         lines.append(f"    Applied: {'yes' if applied else 'no'}")
         lines.append(f"    Source:  {source_label}")
         lines.append(f"    Work model: {_lbl(e_model)}")
+        if _e_actual and _e_actual != e_model:
+            lines.append(f"    Actual model: {_lbl(_e_actual)}")
         if initial_model:
             lines.append(f"    Initial candidate: {_model_label(initial_model)}")
         lines.append(f"    Fallback: {'yes' if fb else 'no'}")
