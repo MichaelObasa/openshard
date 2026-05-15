@@ -1225,6 +1225,33 @@ def _render_native_inspection(entry: dict, detail: str) -> None:
         return
     _print_native_demo_block(native_meta, detail=detail)
     _print_native_summary(native_meta, detail)
+    _print_native_step_log(entry, detail)
+
+
+def _print_native_step_log(entry: dict, detail: str) -> None:
+    if detail == "default":
+        return
+    # Only render for native runs
+    if entry.get("workflow") != "native":
+        return
+    from openshard.history.native_steps import native_step_events_for_run
+    run_id = entry.get("timestamp", "")
+    if not run_id:
+        return
+    events = native_step_events_for_run(run_id)
+    if not events:
+        return
+    if detail == "more":
+        names = " · ".join(e.step_name for e in events[:5])
+        suffix = " · …" if len(events) > 5 else ""
+        click.echo(f"\n[native steps]  {len(events)} steps · {names}{suffix}")
+    else:  # full
+        click.echo("\n[native steps]")
+        for evt in events:
+            summary_part = f"  {evt.summary[:60]}" if evt.summary else ""
+            click.echo(
+                f"  [{evt.step_index:02d}] {evt.step_name:<20} {evt.stage:<14} {evt.status:<8}{summary_part}"
+            )
 
 
 def _print_dry_run(files: list[ChangedFile]) -> None:

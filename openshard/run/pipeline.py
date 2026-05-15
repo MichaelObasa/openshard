@@ -211,6 +211,9 @@ class RunPipeline:
 
         start = time.time()
         result_obj.start = start
+        _run_id = datetime.datetime.fromtimestamp(
+            start, tz=datetime.timezone.utc
+        ).isoformat().replace("+00:00", "Z")
         retry_triggered = False
         workspace: Path | None = None
         verification_passed: bool | None = None
@@ -307,6 +310,8 @@ class RunPipeline:
                     native_loop=self._native_loop,
                     model_policy=self._model_policy,
                 )
+                if hasattr(generator, "_run_id"):
+                    generator._run_id = _run_id
             else:
                 generator = ExecutionGenerator(provider=_provider_instance)
         except (ValueError, RuntimeError) as exc:
@@ -1607,7 +1612,8 @@ class RunPipeline:
                      profile_decision=_profile_decision,
                      verification_plan=_verification_plan,
                      form_factor_decision=_form_factor_decision,
-                     extra_metadata=_extra_metadata)
+                     extra_metadata=_extra_metadata,
+                     run_id=_run_id)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
 
@@ -1734,9 +1740,10 @@ def _log_run(
     verification_plan: VerificationPlan | None = None,
     form_factor_decision: ExecutionFormFactorDecision | None = None,
     extra_metadata: dict | None = None,
+    run_id: str | None = None,
 ) -> None:
     entry: dict = {
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+        "timestamp": run_id if run_id else datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
         "task": task,
         "execution_model": model or generator.model,
         "retry_triggered": retry_triggered,
