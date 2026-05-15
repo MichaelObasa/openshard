@@ -497,6 +497,22 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
             v_parts.append("retried")
         v_parts.append("passed" if getattr(vloop, "passed", False) else "failed")
         lines.append(f"  verification: {', '.join(v_parts)}")
+        _rmeta = getattr(vloop, "retry_metadata", None)
+        if _rmeta is not None and getattr(_rmeta, "retry_attempted", False):
+            if detail in ("more", "full"):
+                _rv_status = getattr(_rmeta, "retry_verification_status", "")
+                _rf_count = len(getattr(_rmeta, "retry_patch_files", []) or [])
+                lines.append(
+                    f"  retry: {_rv_status} | reason: verification_failed"
+                    f" | files patched: {_rf_count}"
+                )
+            if detail == "full":
+                _fs = getattr(_rmeta, "failure_summary", "")
+                if _fs:
+                    lines.append(f"  retry failure: {_fs}")
+                _rpf = getattr(_rmeta, "retry_patch_files", []) or []
+                if _rpf:
+                    lines.append(f"  retry patch: {', '.join(_rpf[:5])}")
 
     vcs = getattr(native_meta, "verification_command_summary", None)
     if vcs is not None and getattr(vcs, "command_count", 0) > 0:

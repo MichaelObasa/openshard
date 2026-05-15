@@ -34,7 +34,12 @@ from openshard.execution.generator import (
     check_stack_mismatch,
 )
 from openshard.execution.opencode_executor import OpenCodeExecutor
-from openshard.native.context import NativeVerificationLoop, render_verification_failure_context
+from openshard.native.context import (
+    NativeVerificationLoop,
+    RetryMetadata,
+    build_failure_summary,
+    render_verification_failure_context,
+)
 from openshard.native.executor import NativeAgentExecutor
 from openshard.execution.stages import Stage, StageRun, split_task, route_stage, run_planning_stage, run_validator_stage
 from openshard.history.adjustments import (
@@ -1143,6 +1148,21 @@ class RunPipeline:
                     _vst_first = "passed" if _loop_meta.passed else "failed"
                     generator.record_osn_loop_step("verify", _vst_first, verification_status=_vst_first)
                 if _loop_code != 0:
+                    # Build structured failure metadata — no raw content stored
+                    _fsummary = build_failure_summary(_loop_output, exit_code=_loop_code)
+                    _retry_meta = RetryMetadata(
+                        retry_attempted=True,
+                        retry_reason="verification_failed",
+                        failure_summary=_fsummary,
+                    )
+                    _loop_meta.retry_metadata = _retry_meta
+                    if hasattr(generator, "record_osn_loop_step"):
+                        generator.record_osn_loop_step(
+                            "retry_diagnosis", "passed",
+                            result_summary="verification failed — diagnosis recorded",
+                            metadata={"failure_summary": _fsummary, "raw_content_stored": False},
+                        )
+                    # Raw failure context injected into retry prompt only — never stored
                     _failure_ctx = render_verification_failure_context(
                         _loop_output, exit_code=_loop_code
                     )
@@ -1172,8 +1192,20 @@ class RunPipeline:
                     _loop_meta.retried = True
                     exec_result = _retry_result
                     final_files = _retry_result.files
-                    _write_files(_retry_result.files, workspace)
-                    # Run verification once more after retry — update metadata with final result
+                    _write_files(_retry_result.files, workspace)  # workspace is sandbox/worktree-backed
+                    _retry_patch_files = [f.path for f in _retry_result.files]
+                    _retry_meta.retry_patch_files = _retry_patch_files
+                    if hasattr(generator, "record_osn_loop_step"):
+                        generator.record_osn_loop_step(
+                            "retry_patch", "passed",
+                            result_summary=f"retry patch written: {len(_retry_patch_files)} file(s)",
+                            metadata={
+                                "files": _retry_patch_files,
+                                "file_count": len(_retry_patch_files),
+                                "raw_content_stored": False,
+                            },
+                        )
+                    # Second verification run
                     _loop_code2, _loop_output2 = _run_verification_plan(
                         _verification_plan, workspace, capture=True
                     )
@@ -1181,8 +1213,9 @@ class RunPipeline:
                     _loop_meta.output_chars = len(_loop_output2)
                     _loop_meta.truncated = len(_loop_output2) > 1200
                     _loop_meta.passed = _loop_code2 == 0
+                    _retry_vst = "passed" if _loop_meta.passed else "failed"
+                    _retry_meta.retry_verification_status = _retry_vst
                     if hasattr(generator, "record_osn_loop_step"):
-                        _retry_vst = "passed" if _loop_meta.passed else "failed"
                         generator.record_osn_loop_step(
                             "retry_once", _retry_vst, verification_status=_retry_vst,
                         )

@@ -485,6 +485,8 @@ _STEP_TO_STAGE: dict[str, str] = {
     "approval": "approval",
     "safe_write": "write",
     "verify": "verification",
+    "retry_diagnosis": "retry",
+    "retry_patch": "retry",
     "retry_once": "retry",
     "final_receipt": "done",
     "max_steps_exceeded": "done",
@@ -547,7 +549,13 @@ class NativeAgentExecutor:
 
     def record_osn_loop_step(self, step_name: str, status: str, **kwargs) -> None:
         if self._osn_recorder is not None:
-            self._osn_recorder.record_step(step_name, status, **kwargs)
+            # OSN summary steps don't support a metadata field — pass only known fields
+            _recorder_kwargs = {
+                k: v for k, v in kwargs.items()
+                if k in {"tool_name", "reason", "result_summary", "context_injected",
+                         "approval_required", "verification_status", "warnings"}
+            }
+            self._osn_recorder.record_step(step_name, status, **_recorder_kwargs)
         self.log_step_event(
             step_name,
             status,
@@ -556,6 +564,7 @@ class NativeAgentExecutor:
             approval_required=bool(kwargs.get("approval_required", False)),
             approval_granted=kwargs.get("approval_granted"),
             verification_status=kwargs.get("verification_status", ""),
+            metadata=kwargs.get("metadata"),
         )
 
     def log_step_event(
