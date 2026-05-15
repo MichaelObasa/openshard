@@ -65,7 +65,7 @@ class TestResolveTier(unittest.TestCase):
 
     def test_unknown_tier_returns_fallback(self):
         model, fallback, reason = resolve_tier("nonexistent-tier")
-        self.assertIsNone(model)
+        self.assertEqual(model, MODEL_MAIN)  # safe fallback to balanced-coding-model preferred
         self.assertTrue(fallback)
         self.assertIn("nonexistent-tier", reason)
 
@@ -240,7 +240,7 @@ class TestBuildReceiptApplied(unittest.TestCase):
 
 
 class TestBuildReceiptUnknownTier(unittest.TestCase):
-    def test_unknown_tier_sets_fallback_and_none_model(self):
+    def test_unknown_tier_sets_fallback_and_safe_model(self):
         rr = _rr(
             planner_tier="some-unknown-tier",
             executor_tier="balanced-coding-model",
@@ -252,7 +252,7 @@ class TestBuildReceiptUnknownTier(unittest.TestCase):
             applied=True,
         )
         self.assertTrue(r.fallback_used)
-        self.assertIsNone(r.planner_model)
+        self.assertEqual(r.planner_model, MODEL_MAIN)  # safe fallback, not None
         self.assertEqual(r.executor_model, MODEL_MAIN)
 
 
