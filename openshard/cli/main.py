@@ -984,6 +984,37 @@ def feedback(rating: str | None, action: str | None, reason: str | None, note: s
     if rating:
         _labels.append(rating.lower())
     click.echo(f"Feedback recorded: {', '.join(_labels) if _labels else 'note'}")
+    try:
+        from openshard.history.interactions import DeveloperInteractionEvent, log_interaction_event
+        _action_lower = action.lower() if action else None
+        _event_type_map = {
+            "accepted": "feedback_accepted",
+            "rejected": "feedback_rejected",
+            "edited": "feedback_edited",
+            "retried": "feedback_retried",
+            "partially-accepted": "feedback_partially_accepted",
+        }
+        _accepted_map = {
+            "accepted": True,
+            "partially-accepted": True,
+            "rejected": False,
+            "retried": False,
+        }
+        _run_id = entries[-1].get("timestamp") or ""
+        _evt = DeveloperInteractionEvent(
+            run_id=_run_id,
+            event_type=_event_type_map.get(_action_lower, "feedback_noted") if _action_lower else "feedback_noted",
+            summary=f"feedback action={_action_lower or 'none'} rating={rating.lower() if rating else 'none'}",
+            correction_reason=reason.lower() if reason else None,
+            accepted=_accepted_map.get(_action_lower),
+            metadata={
+                "rating": rating.lower() if rating else None,
+                "note": note,
+            },
+        )
+        log_interaction_event(_evt)
+    except Exception:
+        pass
 
 
 @cli.command("feedback-stats")
@@ -1210,6 +1241,69 @@ def export_runs(output: str | None, limit: int | None, with_notes: bool, preview
     if preview:
         _render_export_preview(rows)
         return
+    lines = "\n".join(json.dumps(r) for r in rows)
+    if output:
+        output_path = Path(output)
+        if output_path.parent != Path("."):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(lines + "\n", encoding="utf-8")
+    else:
+        click.echo(lines)
+
+
+@cli.command("interactions")
+@click.option(
+    "--last",
+    "last_n",
+    default=10,
+    type=click.IntRange(min=1),
+    show_default=True,
+    help="Show the most recent N interaction events.",
+)
+def interactions_cmd(last_n: int) -> None:
+    """Show recent developer interaction events."""
+    from openshard.history.interactions import load_interaction_events
+    events = load_interaction_events()
+    if not events:
+        click.echo("No interaction events recorded yet.")
+        return
+    recent = events[-last_n:]
+    _TW, _ETW, _SW = 20, 30, 8
+    click.echo("Time".ljust(_TW) + "Event Type".ljust(_ETW) + "Accept".ljust(_SW) + "Summary")
+    for evt in recent:
+        ts = (evt.timestamp or "").rstrip("Z").replace("T", " ")[:16]
+        etype = (evt.event_type or "-")[:_ETW - 1]
+        accepted = (
+            "yes" if evt.accepted is True
+            else "no" if evt.accepted is False
+            else "-"
+        )
+        summary = (evt.summary or "")[:60]
+        click.echo(ts.ljust(_TW) + etype.ljust(_ETW) + accepted.ljust(_SW) + summary)
+
+
+@cli.command("export-interactions")
+@click.option("--output", default=None, help="Write JSONL to this path instead of stdout.")
+@click.option(
+    "--redacted",
+    is_flag=True,
+    default=False,
+    help="Replace summary with '[redacted]' and metadata with {}.",
+)
+def export_interactions(output: str | None, redacted: bool) -> None:
+    """Export developer interaction events as JSONL."""
+    from openshard.history.interactions import load_interaction_events, _event_to_dict
+    events = load_interaction_events()
+    if not events:
+        click.echo("No interaction events recorded yet.")
+        return
+    rows: list[dict] = []
+    for evt in events:
+        d = _event_to_dict(evt)
+        if redacted:
+            d["summary"] = "[redacted]"
+            d["metadata"] = {}
+        rows.append(d)
     lines = "\n".join(json.dumps(r) for r in rows)
     if output:
         output_path = Path(output)
