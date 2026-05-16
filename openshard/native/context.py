@@ -3406,3 +3406,137 @@ def render_native_edit_loop_summary(
             f"  {idx}. {purpose}: {vstatus} files={fcount}{exit_s} chars={chars}"
         )
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Native Candidate Agents v0
+# ---------------------------------------------------------------------------
+
+@dataclass
+class NativeCandidateAttempt:
+    candidate_index: int = 0
+    model: str = ""
+    sandbox_path: str = ""
+    files_written: list[str] = field(default_factory=list)
+    verification_status: str = ""  # "passed" | "failed" | "skipped"
+    exit_code: int | None = None
+    output_chars: int = 0
+    selected: bool = False
+    selection_reason: str = ""
+    raw_content_stored: bool = False
+
+    def __post_init__(self) -> None:
+        self.raw_content_stored = False
+
+
+@dataclass
+class NativeCandidateSummary:
+    enabled: bool = False
+    requested_count: int = 1
+    completed_count: int = 0
+    selected_index: int | None = None  # 1-based
+    selection_reason: str = ""
+    candidates: list[NativeCandidateAttempt] = field(default_factory=list)
+    raw_content_stored: bool = False
+
+    def __post_init__(self) -> None:
+        self.raw_content_stored = False
+
+
+def record_native_candidate_attempt(
+    summary: NativeCandidateSummary,
+    *,
+    candidate_index: int,  # 1-based
+    model: str,
+    sandbox_path: str,
+    files_written: list[str],
+    verification_status: str,
+    exit_code: int | None = None,
+    output_chars: int = 0,
+) -> NativeCandidateSummary:
+    attempt = NativeCandidateAttempt(
+        candidate_index=candidate_index,
+        model=model,
+        sandbox_path=sandbox_path,
+        files_written=list(files_written),
+        verification_status=verification_status,
+        exit_code=exit_code,
+        output_chars=output_chars,
+    )
+    summary.candidates.append(attempt)
+    summary.completed_count = len(summary.candidates)
+    return summary
+
+
+def select_native_candidate(summary: NativeCandidateSummary) -> NativeCandidateSummary:
+    """Select best candidate: first passed → first skipped → first (fallback).
+    Sets selected_index to the 1-based candidate_index of the winner."""
+    if not summary.candidates:
+        return summary
+    winner: NativeCandidateAttempt | None = None
+    reason = ""
+    for c in summary.candidates:
+        if c.verification_status == "passed":
+            winner = c
+            reason = "first_passed"
+            break
+    if winner is None:
+        for c in summary.candidates:
+            if c.verification_status == "skipped":
+                winner = c
+                reason = "first_skipped"
+                break
+    if winner is None:
+        winner = summary.candidates[0]
+        reason = "fallback_first"
+    winner.selected = True
+    winner.selection_reason = reason
+    summary.selected_index = winner.candidate_index  # 1-based
+    summary.selection_reason = reason
+    return summary
+
+
+def render_native_candidate_summary(
+    summary: "NativeCandidateSummary | Any | None",
+    detail: str = "compact",
+) -> str:
+    """Supports dataclass, SimpleNamespace, and dict objects."""
+
+    def _v(obj: Any, key: str, default: Any = None) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+
+    if summary is None:
+        return ""
+    if not _v(summary, "enabled", False):
+        return ""
+    requested = _v(summary, "requested_count", 1)
+    completed = _v(summary, "completed_count", 0)
+    selected = _v(summary, "selected_index", None)  # 1-based or None
+    candidates = _v(summary, "candidates", []) or []
+    passed_count = sum(
+        1 for c in candidates
+        if _v(c, "verification_status", "") == "passed"
+    )
+    sel_str = str(selected) if selected is not None else "none"
+    header = (
+        f"candidates: {completed}/{requested} run,"
+        f" selected={sel_str}, passed={passed_count}"
+    )
+    if detail != "full" or not candidates:
+        return header
+    lines = [header]
+    for c in candidates:
+        idx = _v(c, "candidate_index", 0)  # 1-based
+        vstatus = _v(c, "verification_status", "")
+        fcount = len(_v(c, "files_written", []) or [])
+        exit_code = _v(c, "exit_code", None)
+        chars = _v(c, "output_chars", 0)
+        is_sel = _v(c, "selected", False)
+        sel_marker = "selected " if is_sel else ""
+        exit_s = f" exit={exit_code}" if exit_code is not None else ""
+        lines.append(
+            f"  {idx}. {sel_marker}{vstatus} files={fcount}{exit_s} chars={chars}"
+        )
+    return "\n".join(lines)
