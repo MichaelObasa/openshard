@@ -898,6 +898,12 @@ class RunPipeline:
                 if routing_decision is not None
                 else ("Executing - running with OpenCode" if opencode_mode else "Executing - running task")
             )
+            if effective_executor == "native":
+                from openshard.native.context import build_native_plan_ledger, update_native_plan_ledger_status
+                generator.native_meta.plan_ledger = build_native_plan_ledger(task)
+                generator.native_meta.plan_ledger = update_native_plan_ledger_status(
+                    generator.native_meta.plan_ledger, "Understand task", "passed", evidence="context prepared"
+                )
             spinner.start(_single_msg)
             try:
                 if opencode_mode:
@@ -916,6 +922,12 @@ class RunPipeline:
                 raise click.ClickException(f"API error: {exc}")
             finally:
                 spinner.stop()
+            if effective_executor == "native" and generator.native_meta.plan_ledger is not None:
+                from openshard.native.context import update_native_plan_ledger_status
+                generator.native_meta.plan_ledger = update_native_plan_ledger_status(
+                    generator.native_meta.plan_ledger, "Generate patch", "passed",
+                    evidence=f"files={len(exec_result.files)}",
+                )
 
         usage = exec_result.usage
         # When stages ran, fold the planning cost into the reported total
@@ -1129,6 +1141,12 @@ class RunPipeline:
                     if hasattr(generator, "record_osn_loop_step"):
                         generator.record_osn_loop_step("safe_write", "passed")
                     generator.review_diff()
+                    if generator.native_meta.plan_ledger is not None:
+                        from openshard.native.context import update_native_plan_ledger_status
+                        generator.native_meta.plan_ledger = update_native_plan_ledger_status(
+                            generator.native_meta.plan_ledger, "Write patch", "passed",
+                            evidence="sandbox write complete",
+                        )
             # OpenCode: workspace already created and populated before generate().
 
         # Native controlled verification loop — one retry, safe commands only, no --verify flag required
@@ -1243,6 +1261,16 @@ class RunPipeline:
                         ))
                     except Exception:
                         pass
+            if generator.native_meta.plan_ledger is not None:
+                from openshard.native.context import update_native_plan_ledger_status
+                _vplan_status = (
+                    ("passed" if _loop_meta.passed else "failed")
+                    if _loop_meta.attempted
+                    else "skipped"
+                )
+                generator.native_meta.plan_ledger = update_native_plan_ledger_status(
+                    generator.native_meta.plan_ledger, "Run verification", _vplan_status
+                )
 
         if write and verify:
             click.echo("")
@@ -1478,6 +1506,11 @@ class RunPipeline:
             from openshard.cli.run_output import _print_tier_dispatch_block
             _is_direct_ask = _readonly_task and not _use_stages
             _print_tier_dispatch_block(_tier_dispatch_receipt, detail, validator_result=_validator_result, validator_policy=_validator_policy, is_ask=_is_direct_ask)
+        if _native_meta is not None and _native_meta.plan_ledger is not None:
+            from openshard.native.context import update_native_plan_ledger_status
+            _native_meta.plan_ledger = update_native_plan_ledger_status(
+                _native_meta.plan_ledger, "Record receipt", "passed"
+            )
         _extra_metadata: dict | None = None
         if _native_meta is not None:
             _extra_metadata = {
@@ -1690,6 +1723,11 @@ class RunPipeline:
                     asdict(_native_meta.failure_memory_routing_advisory)
                     if _native_meta is not None
                     and _native_meta.failure_memory_routing_advisory is not None
+                    else None
+                ),
+                "plan_ledger": (
+                    asdict(_native_meta.plan_ledger)
+                    if _native_meta.plan_ledger is not None
                     else None
                 ),
             }
