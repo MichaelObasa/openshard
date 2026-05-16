@@ -910,6 +910,66 @@ def last(more: bool, full: bool):
     _render_log_entry(entries[-1], detail)
 
 
+@cli.command("apply-last")
+@click.option("--dry-run", is_flag=True, default=False, help="Show what would be applied without copying files.")
+def apply_last(dry_run: bool) -> None:
+    """Promote files from the most recent sandbox run into the real repo."""
+    from openshard.native.sandbox_apply import (
+        apply_sandbox_changes,
+        extract_sandbox_path_from_entry,
+        list_sandbox_changed_files,
+    )
+
+    log_path = Path.cwd() / _LOG_PATH
+    entries = _load_run_entries(log_path)
+    if not entries:
+        click.echo("No run history found. Run a task first with 'openshard run'.")
+        return
+
+    entry = entries[-1]
+
+    if entry.get("executor") != "native":
+        click.echo("Latest run is not a native run.")
+        return
+
+    sandbox_path_str = extract_sandbox_path_from_entry(entry)
+    if not sandbox_path_str:
+        click.echo("Latest native run has no sandbox path to apply.")
+        return
+
+    sandbox_path = Path(sandbox_path_str)
+    files = list_sandbox_changed_files(Path.cwd(), sandbox_path)
+    if not files:
+        click.echo("No sandbox changes to apply.")
+        return
+
+    click.echo(f"Sandbox: {sandbox_path_str}")
+    click.echo("")
+    if dry_run:
+        click.echo(f"Would apply {len(files)} file(s):")
+        for f in files:
+            click.echo(f"  - {f}")
+        return
+
+    click.echo(f"Files to apply ({len(files)}):")
+    for f in files:
+        click.echo(f"  - {f}")
+    click.echo("")
+
+    result = apply_sandbox_changes(Path.cwd(), sandbox_path)
+
+    if result.reason and not result.files_applied:
+        raise click.ClickException(result.reason)
+
+    click.echo(f"Applied {len(result.files_applied)} file(s) from sandbox.")
+    for f in result.files_applied:
+        click.echo(f"  - {f}")
+    if result.files_skipped:
+        click.echo(f"Skipped {len(result.files_skipped)} file(s).")
+        for f in result.files_skipped:
+            click.echo(f"  [skipped] {f}")
+
+
 def _load_run_entries(log_path: Path) -> list[dict]:
     if not log_path.exists():
         return []
