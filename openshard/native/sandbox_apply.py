@@ -51,12 +51,15 @@ def get_candidate_records_from_entry(entry: dict) -> list[dict]:
         result = []
         for item in raw:
             if isinstance(item, dict):
-                result.append(item)
+                rec = dict(item)
             else:
                 try:
-                    result.append(vars(item))
+                    rec = vars(item)
                 except TypeError:
-                    pass
+                    continue
+            rec.setdefault("score", 0.0)
+            rec.setdefault("score_reasons", [])
+            result.append(rec)
         return result
     except Exception:
         return []

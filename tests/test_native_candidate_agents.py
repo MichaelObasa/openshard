@@ -356,7 +356,7 @@ def test_select_fallback_first_when_all_failed():
         )
     select_native_candidate(s)
     assert s.selected_index == 1
-    assert s.selection_reason == "fallback_first"
+    assert s.selection_reason.startswith("highest score:")
 
 
 def test_select_sets_selection_reason_first_passed():
@@ -366,7 +366,7 @@ def test_select_sets_selection_reason_first_passed():
         files_written=[], verification_status="passed",
     )
     select_native_candidate(s)
-    assert s.selection_reason == "first_passed"
+    assert s.selection_reason.startswith("highest score:")
 
 
 def test_select_sets_selection_reason_first_skipped():
@@ -380,7 +380,7 @@ def test_select_sets_selection_reason_first_skipped():
         files_written=[], verification_status="skipped",
     )
     select_native_candidate(s)
-    assert s.selection_reason == "first_skipped"
+    assert s.selection_reason.startswith("highest score:")
 
 
 def test_select_only_winner_has_selected_true():
@@ -670,7 +670,7 @@ def test_pipeline_candidates_all_failed_fallback_to_first():
         verify_side_effects=[(1, "fail"), (1, "fail")],
     )
     assert g.native_meta.candidate_summary.selected_index == 1
-    assert g.native_meta.candidate_summary.selection_reason == "fallback_first"
+    assert g.native_meta.candidate_summary.selection_reason.startswith("highest score:")
 
 
 def test_pipeline_candidates_skipped_verification_first_selected():
@@ -682,7 +682,7 @@ def test_pipeline_candidates_skipped_verification_first_selected():
     for cand in g.native_meta.candidate_summary.candidates:
         assert cand.verification_status == "skipped"
     assert g.native_meta.candidate_summary.selected_index == 1
-    assert g.native_meta.candidate_summary.selection_reason == "first_skipped"
+    assert g.native_meta.candidate_summary.selection_reason.startswith("highest score:")
 
 
 def test_pipeline_candidates_two_raw_content_never_stored():
