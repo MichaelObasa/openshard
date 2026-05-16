@@ -912,11 +912,14 @@ def last(more: bool, full: bool):
 
 @cli.command("apply-last")
 @click.option("--dry-run", is_flag=True, default=False, help="Show what would be applied without copying files.")
-def apply_last(dry_run: bool) -> None:
+@click.option("--file", "include_files", multiple=True, help="Only apply this relative file path. Can be used multiple times.")
+@click.option("--exclude", "exclude_files", multiple=True, help="Exclude this relative file path. Can be used multiple times.")
+def apply_last(dry_run: bool, include_files: tuple[str, ...], exclude_files: tuple[str, ...]) -> None:
     """Promote files from the most recent sandbox run into the real repo."""
     from openshard.native.sandbox_apply import (
         apply_sandbox_changes,
         extract_sandbox_path_from_entry,
+        filter_sandbox_changed_files,
         list_sandbox_changed_files,
     )
 
@@ -937,10 +940,18 @@ def apply_last(dry_run: bool) -> None:
         click.echo("Latest native run has no sandbox path to apply.")
         return
 
+    include = list(include_files) or None
+    exclude = list(exclude_files) or None
+
     sandbox_path = Path(sandbox_path_str)
-    files = list_sandbox_changed_files(Path.cwd(), sandbox_path)
+    all_files = list_sandbox_changed_files(Path.cwd(), sandbox_path)
+    files = filter_sandbox_changed_files(all_files, include=include, exclude=exclude)
+
     if not files:
-        click.echo("No sandbox changes to apply.")
+        if include or exclude:
+            click.echo("No sandbox changes matched the apply selection.")
+        else:
+            click.echo("No sandbox changes to apply.")
         return
 
     click.echo(f"Sandbox: {sandbox_path_str}")
@@ -956,7 +967,7 @@ def apply_last(dry_run: bool) -> None:
         click.echo(f"  - {f}")
     click.echo("")
 
-    result = apply_sandbox_changes(Path.cwd(), sandbox_path)
+    result = apply_sandbox_changes(Path.cwd(), sandbox_path, include=include, exclude=exclude)
 
     if result.reason and not result.files_applied:
         raise click.ClickException(result.reason)

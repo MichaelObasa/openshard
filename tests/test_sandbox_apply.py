@@ -12,6 +12,7 @@ from openshard.native.sandbox_apply import (
     SandboxApplyResult,
     apply_sandbox_changes,
     extract_sandbox_path_from_entry,
+    filter_sandbox_changed_files,
     list_sandbox_changed_files,
 )
 
@@ -526,6 +527,253 @@ class TestApplyLastCLI(unittest.TestCase):
                 runner.invoke(cli, ["apply-last"])
             entries = _read_entries(log_path)
             self.assertEqual(len(entries), 3)
+
+
+# ---------------------------------------------------------------------------
+# TestFilterSandboxChangedFiles
+# ---------------------------------------------------------------------------
+
+class TestFilterSandboxChangedFiles(unittest.TestCase):
+
+    def test_no_include_or_exclude_returns_deduped_original_order(self):
+        files = ["b.py", "a.py", "b.py", "c.py"]
+        self.assertEqual(filter_sandbox_changed_files(files), ["b.py", "a.py", "c.py"])
+
+    def test_include_only_selected_file(self):
+        result = filter_sandbox_changed_files(["a.py", "b.py", "c.py"], include=["a.py"])
+        self.assertEqual(result, ["a.py"])
+
+    def test_include_multiple_files_preserves_order(self):
+        result = filter_sandbox_changed_files(["a.py", "b.py", "c.py"], include=["c.py", "a.py"])
+        self.assertEqual(result, ["a.py", "c.py"])
+
+    def test_exclude_removes_file(self):
+        result = filter_sandbox_changed_files(["a.py", "b.py", "c.py"], exclude=["b.py"])
+        self.assertEqual(result, ["a.py", "c.py"])
+
+    def test_include_then_exclude(self):
+        result = filter_sandbox_changed_files(
+            ["a.py", "b.py", "c.py"],
+            include=["a.py", "b.py"],
+            exclude=["b.py"],
+        )
+        self.assertEqual(result, ["a.py"])
+
+    def test_unknown_include_returns_empty(self):
+        result = filter_sandbox_changed_files(["a.py", "b.py"], include=["missing.py"])
+        self.assertEqual(result, [])
+
+    def test_exclude_nonexistent_is_noop(self):
+        result = filter_sandbox_changed_files(["a.py", "b.py"], exclude=["missing.py"])
+        self.assertEqual(result, ["a.py", "b.py"])
+
+    def test_exclude_all_leaves_empty(self):
+        result = filter_sandbox_changed_files(["a.py", "b.py"], exclude=["a.py", "b.py"])
+        self.assertEqual(result, [])
+
+    def test_empty_files_returns_empty(self):
+        self.assertEqual(filter_sandbox_changed_files([], include=["a.py"]), [])
+
+    def test_normalizes_backslashes(self):
+        result = filter_sandbox_changed_files(
+            ["src\\foo.py"],
+            include=["src/foo.py"],
+        )
+        self.assertEqual(result, ["src/foo.py"])
+
+
+# ---------------------------------------------------------------------------
+# TestApplySandboxChangesSelective
+# ---------------------------------------------------------------------------
+
+class TestApplySandboxChangesSelective(unittest.TestCase):
+
+    def test_apply_include_only_one_file(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            repo = Path("repo")
+            repo.mkdir()
+            sandbox = Path("sandbox")
+            sandbox.mkdir()
+            _write_workspace_files(sandbox, ["a.py", "b.py"])
+            with patch("openshard.native.sandbox_apply.list_sandbox_changed_files", return_value=["a.py", "b.py"]):
+                result = apply_sandbox_changes(repo, sandbox, include=["a.py"])
+            self.assertIn("a.py", result.files_applied)
+            self.assertNotIn("b.py", result.files_applied)
+            self.assertTrue((repo / "a.py").exists())
+            self.assertFalse((repo / "b.py").exists())
+
+    def test_apply_exclude_skips_file(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            repo = Path("repo")
+            repo.mkdir()
+            sandbox = Path("sandbox")
+            sandbox.mkdir()
+            _write_workspace_files(sandbox, ["a.py", "b.py"])
+            with patch("openshard.native.sandbox_apply.list_sandbox_changed_files", return_value=["a.py", "b.py"]):
+                result = apply_sandbox_changes(repo, sandbox, exclude=["b.py"])
+            self.assertIn("a.py", result.files_applied)
+            self.assertNotIn("b.py", result.files_applied)
+
+    def test_apply_include_unknown_returns_reason(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            repo = Path("repo")
+            repo.mkdir()
+            sandbox = Path("sandbox")
+            sandbox.mkdir()
+            with patch("openshard.native.sandbox_apply.list_sandbox_changed_files", return_value=["a.py"]):
+                result = apply_sandbox_changes(repo, sandbox, include=["missing.py"])
+            self.assertFalse(result.applied)
+            self.assertIn("selection", result.reason)
+
+    def test_apply_include_and_exclude_results_empty(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            repo = Path("repo")
+            repo.mkdir()
+            sandbox = Path("sandbox")
+            sandbox.mkdir()
+            _write_workspace_files(sandbox, ["a.py"])
+            with patch("openshard.native.sandbox_apply.list_sandbox_changed_files", return_value=["a.py"]):
+                result = apply_sandbox_changes(repo, sandbox, include=["a.py"], exclude=["a.py"])
+            self.assertFalse(result.applied)
+            self.assertTrue(result.reason)
+
+    def test_apply_selection_still_rejects_traversal(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            repo = Path("repo")
+            repo.mkdir()
+            sandbox = Path("sandbox")
+            sandbox.mkdir()
+            with patch("openshard.native.sandbox_apply.list_sandbox_changed_files", return_value=["../escape.py"]):
+                result = apply_sandbox_changes(repo, sandbox, include=["../escape.py"])
+            self.assertFalse(result.applied)
+            self.assertTrue(any("escape.py" in s for s in result.files_skipped))
+
+    def test_apply_selection_still_rejects_openshard_file(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            repo = Path("repo")
+            repo.mkdir()
+            sandbox = Path("sandbox")
+            sandbox.mkdir()
+            _write_workspace_files(sandbox, [".openshard/runs.jsonl"])
+            with patch("openshard.native.sandbox_apply.list_sandbox_changed_files", return_value=[".openshard/runs.jsonl"]):
+                result = apply_sandbox_changes(repo, sandbox, include=[".openshard/runs.jsonl"])
+            self.assertFalse(result.applied)
+
+    def test_binary_content_preserved_with_include(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            repo = Path("repo")
+            repo.mkdir()
+            sandbox = Path("sandbox")
+            sandbox.mkdir()
+            binary = b"\x00\x01\x02\xff\xfe"
+            (sandbox / "data.bin").write_bytes(binary)
+            with patch("openshard.native.sandbox_apply.list_sandbox_changed_files", return_value=["data.bin", "other.py"]):
+                apply_sandbox_changes(repo, sandbox, include=["data.bin"])
+            self.assertEqual((repo / "data.bin").read_bytes(), binary)
+            self.assertFalse((repo / "other.py").exists())
+
+
+# ---------------------------------------------------------------------------
+# TestApplyLastCLISelective
+# ---------------------------------------------------------------------------
+
+class TestApplyLastCLISelective(unittest.TestCase):
+
+    def _make_sandbox_entry(self, sandbox: Path) -> dict:
+        return _make_entry(
+            workspace_path=str(sandbox),
+            sandbox=_make_sandbox_meta(sandbox_type="worktree", worktree_path=str(sandbox.resolve())),
+        )
+
+    def test_dry_run_file_only_shows_selected_file(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            sandbox = Path("wt")
+            sandbox.mkdir()
+            _write_sandbox_files(sandbox, ["a.py", "b.py"])
+            _write_runs([self._make_sandbox_entry(sandbox)])
+            with patch("openshard.native.sandbox_apply.list_sandbox_changed_files", return_value=["a.py", "b.py"]):
+                result = runner.invoke(cli, ["apply-last", "--dry-run", "--file", "a.py"])
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("a.py", result.output)
+            self.assertNotIn("b.py", result.output)
+
+    def test_dry_run_exclude_hides_file(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            sandbox = Path("wt")
+            sandbox.mkdir()
+            _write_sandbox_files(sandbox, ["a.py", "b.py"])
+            _write_runs([self._make_sandbox_entry(sandbox)])
+            with patch("openshard.native.sandbox_apply.list_sandbox_changed_files", return_value=["a.py", "b.py"]):
+                result = runner.invoke(cli, ["apply-last", "--dry-run", "--exclude", "b.py"])
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("a.py", result.output)
+            self.assertNotIn("b.py", result.output)
+
+    def test_apply_file_only_copies_selected_file(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            sandbox = Path("wt")
+            sandbox.mkdir()
+            _write_sandbox_files(sandbox, ["a.py", "b.py"])
+            _write_runs([self._make_sandbox_entry(sandbox)])
+            with patch("openshard.native.sandbox_apply.list_sandbox_changed_files", return_value=["a.py", "b.py"]):
+                result = runner.invoke(cli, ["apply-last", "--file", "a.py"])
+            self.assertEqual(result.exit_code, 0)
+            self.assertTrue(Path("a.py").exists())
+            self.assertFalse(Path("b.py").exists())
+
+    def test_apply_exclude_does_not_copy_excluded_file(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            sandbox = Path("wt")
+            sandbox.mkdir()
+            _write_sandbox_files(sandbox, ["a.py", "b.py"])
+            _write_runs([self._make_sandbox_entry(sandbox)])
+            with patch("openshard.native.sandbox_apply.list_sandbox_changed_files", return_value=["a.py", "b.py"]):
+                result = runner.invoke(cli, ["apply-last", "--exclude", "b.py"])
+            self.assertEqual(result.exit_code, 0)
+            self.assertTrue(Path("a.py").exists())
+            self.assertFalse(Path("b.py").exists())
+
+    def test_unknown_file_selection_prints_no_match(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            sandbox = Path("wt")
+            sandbox.mkdir()
+            _write_sandbox_files(sandbox, ["a.py"])
+            _write_runs([self._make_sandbox_entry(sandbox)])
+            with patch("openshard.native.sandbox_apply.list_sandbox_changed_files", return_value=["a.py"]):
+                result = runner.invoke(cli, ["apply-last", "--file", "missing.py"])
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("No sandbox changes matched", result.output)
+
+    def test_output_has_no_raw_content_with_file_selection(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            sandbox = Path("wt")
+            sandbox.mkdir()
+            secret = "SUPER_SECRET_TOKEN_SELECTIVE_99"
+            (sandbox / "secret.py").write_text(secret)
+            _write_runs([self._make_sandbox_entry(sandbox)])
+            with patch("openshard.native.sandbox_apply.list_sandbox_changed_files", return_value=["secret.py"]):
+                result = runner.invoke(cli, ["apply-last", "--file", "secret.py"])
+            self.assertNotIn(secret, result.output)
+
+
+def _write_sandbox_files(sandbox: Path, rel_paths: list[str]) -> None:
+    for rel in rel_paths:
+        dest = sandbox / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(f"content of {rel}", encoding="utf-8")
 
 
 if __name__ == "__main__":
