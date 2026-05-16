@@ -103,6 +103,34 @@ class NativeVerificationLoop:
 
 
 @dataclass
+class NativeEditLoopAttempt:
+    attempt_index: int = 0
+    purpose: str = ""              # "initial" | "repair"
+    files_written: list[str] = field(default_factory=list)
+    verification_status: str = ""  # "passed" | "failed" | "skipped"
+    exit_code: int | None = None
+    output_chars: int = 0
+    raw_content_stored: bool = False
+
+    def __post_init__(self) -> None:
+        self.raw_content_stored = False
+
+
+@dataclass
+class NativeEditLoopSummary:
+    enabled: bool = True
+    max_attempts: int = 2
+    attempts: list[NativeEditLoopAttempt] = field(default_factory=list)
+    completed: bool = False
+    final_status: str = ""         # "passed" | "failed" | "skipped"
+    repair_used: bool = False
+    raw_content_stored: bool = False
+
+    def __post_init__(self) -> None:
+        self.raw_content_stored = False
+
+
+@dataclass
 class NativeVerificationCommandSummary:
     attempted: bool = False
     command_count: int = 0
@@ -3316,4 +3344,65 @@ def render_native_plan_ledger(
         label = _PLAN_STATUS_LABELS.get(item.status, item.status)
         ev = f"  ({item.evidence})" if item.evidence else ""
         lines.append(f"  {item.index + 1}. {label}  {item.title}{ev}")
+    return "\n".join(lines)
+
+
+def record_native_edit_loop_attempt(
+    summary: NativeEditLoopSummary,
+    *,
+    attempt_index: int,
+    purpose: str,
+    files_written: list[str],
+    verification_status: str,
+    exit_code: int | None,
+    output_chars: int,
+) -> NativeEditLoopSummary:
+    attempt = NativeEditLoopAttempt(
+        attempt_index=attempt_index,
+        purpose=purpose,
+        files_written=list(files_written),
+        verification_status=verification_status,
+        exit_code=exit_code,
+        output_chars=output_chars,
+    )
+    summary.attempts.append(attempt)
+    if purpose == "repair":
+        summary.repair_used = True
+    summary.final_status = verification_status
+    if (
+        verification_status == "passed"
+        or verification_status == "skipped"
+        or attempt_index >= summary.max_attempts
+    ):
+        summary.completed = True
+    return summary
+
+
+def render_native_edit_loop_summary(
+    summary: "NativeEditLoopSummary | Any | None",
+    detail: str = "compact",
+) -> str:
+    if summary is None:
+        return ""
+    if not getattr(summary, "enabled", True):
+        return ""
+    final_status = getattr(summary, "final_status", "") or ""
+    attempts = getattr(summary, "attempts", []) or []
+    max_attempts = getattr(summary, "max_attempts", 2)
+    n = len(attempts)
+    header = f"edit loop: {final_status} after {n}/{max_attempts} attempt(s)"
+    if detail != "full" or not attempts:
+        return header
+    lines = [header]
+    for att in attempts:
+        idx = getattr(att, "attempt_index", 0)
+        purpose = getattr(att, "purpose", "")
+        vstatus = getattr(att, "verification_status", "")
+        fcount = len(getattr(att, "files_written", []) or [])
+        exit_code = getattr(att, "exit_code", None)
+        chars = getattr(att, "output_chars", 0)
+        exit_s = f" exit={exit_code}" if exit_code is not None else ""
+        lines.append(
+            f"  {idx}. {purpose}: {vstatus} files={fcount}{exit_s} chars={chars}"
+        )
     return "\n".join(lines)
