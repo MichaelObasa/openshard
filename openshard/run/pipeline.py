@@ -50,6 +50,11 @@ from openshard.history.feedback_scoring import (
     compute_feedback_adjustments,
     compute_feedback_adjustment_reasons,
 )
+from openshard.history.failure_memory import (
+    NativeFailureMemoryEvent,
+    parse_failure_summary,
+    log_failure_memory_event,
+)
 from openshard.history.metrics import load_runs
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
 from openshard.providers.manager import ProviderManager
@@ -1219,6 +1224,25 @@ class RunPipeline:
                         generator.record_osn_loop_step(
                             "retry_once", _retry_vst, verification_status=_retry_vst,
                         )
+                    # Failure Memory v1: one structured event per retry, best-effort
+                    try:
+                        _fm_parsed = parse_failure_summary(_fsummary)
+                        log_failure_memory_event(NativeFailureMemoryEvent(
+                            run_id=_run_id,
+                            task_summary=task[:120],
+                            failure_type=_fm_parsed.get("failure_type", "test_failure"),
+                            exit_code=int(_fm_parsed.get("exit_code", "1")),
+                            output_chars=int(_fm_parsed.get("output_chars", "0")),
+                            verification_status="failed",
+                            retry_attempted=True,
+                            retry_succeeded=(_retry_vst == "passed"),
+                            retry_patch_files=list(_retry_patch_files),
+                            related_file_paths=list(_retry_patch_files),
+                            model=_routed_model or generator.model,
+                            workflow=effective_workflow,
+                        ))
+                    except Exception:
+                        pass
 
         if write and verify:
             click.echo("")
