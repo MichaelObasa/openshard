@@ -1312,7 +1312,53 @@ def _render_native_inspection(entry: dict, detail: str) -> None:
         return
     _print_native_demo_block(native_meta, detail=detail, entry=entry)
     _print_native_summary(native_meta, detail)
+    _print_failure_memory_block(entry, detail)
     _print_native_step_log(entry, detail)
+
+
+def _render_failure_memory_block(events: list, detail: str) -> list[str]:
+    """Pure render: returns lines for failure memory at --more or --full."""
+    if not events or detail == "default":
+        return []
+    lines: list[str] = []
+    if detail == "more":
+        evt = events[-1]
+        ftype = getattr(evt, "failure_type", "") or "-"
+        retry_s = "yes" if getattr(evt, "retry_attempted", False) else "no"
+        succeeded_s = "yes" if getattr(evt, "retry_succeeded", False) else "no"
+        lines.append(
+            f"\n[failure memory]  {ftype}  exit={getattr(evt, 'exit_code', '?')}"
+            f"  retry={retry_s}  succeeded={succeeded_s}"
+        )
+    else:  # full
+        lines.append("\n[failure memory]")
+        for evt in events:
+            ts = (getattr(evt, "timestamp", "") or "").rstrip("Z").replace("T", " ")[:16]
+            ftype = getattr(evt, "failure_type", "") or "-"
+            exit_c = getattr(evt, "exit_code", "?")
+            chars = getattr(evt, "output_chars", 0)
+            retry_s = "yes" if getattr(evt, "retry_attempted", False) else "no"
+            succeeded_s = "yes" if getattr(evt, "retry_succeeded", False) else "no"
+            patch_files = list(getattr(evt, "retry_patch_files", []) or [])
+            lines.append(f"  {ts}  {ftype}  exit={exit_c}  chars={chars}")
+            lines.append(f"    retry={retry_s}  succeeded={succeeded_s}")
+            if patch_files:
+                lines.append(f"    files: {', '.join(patch_files[:3])}")
+    return lines
+
+
+def _print_failure_memory_block(entry: dict, detail: str) -> None:
+    if detail == "default":
+        return
+    if entry.get("workflow") != "native":
+        return
+    from openshard.history.failure_memory import failure_memory_events_for_run
+    run_id = entry.get("timestamp", "")
+    if not run_id:
+        return
+    events = failure_memory_events_for_run(run_id)
+    for line in _render_failure_memory_block(events, detail):
+        click.echo(line)
 
 
 def _print_native_step_log(entry: dict, detail: str) -> None:

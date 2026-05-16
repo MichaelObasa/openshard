@@ -1325,6 +1325,70 @@ def export_interactions(output: str | None, redacted: bool) -> None:
         click.echo(lines)
 
 
+@cli.command("failure-memory")
+@click.option(
+    "--last",
+    "last_n",
+    default=10,
+    type=click.IntRange(min=1),
+    show_default=True,
+    help="Show the most recent N failure memory events.",
+)
+def failure_memory_cmd(last_n: int) -> None:
+    """Show recent native verification failure events."""
+    from openshard.history.failure_memory import recent_failure_memory
+    events = recent_failure_memory(limit=last_n)
+    if not events:
+        click.echo("No failure memory events recorded yet.")
+        return
+    _TW, _FTW, _MW = 20, 18, 8
+    click.echo(
+        "Time".ljust(_TW) + "Failure Type".ljust(_FTW)
+        + "Exit".ljust(_MW) + "Retry".ljust(_MW) + "Task"
+    )
+    for evt in events:
+        ts = (evt.timestamp or "").rstrip("Z").replace("T", " ")[:16]
+        ftype = (evt.failure_type or "-")[:_FTW - 1]
+        retry_s = "yes" if evt.retry_attempted else "no"
+        task_s = (evt.task_summary or "")[:50]
+        click.echo(
+            ts.ljust(_TW) + ftype.ljust(_FTW)
+            + str(evt.exit_code).ljust(_MW) + retry_s.ljust(_MW) + task_s
+        )
+
+
+@cli.command("export-failure-memory")
+@click.option("--output", default=None, help="Write JSONL to this path instead of stdout.")
+@click.option(
+    "--redacted",
+    is_flag=True,
+    default=False,
+    help="Replace task_summary with '[redacted]' and model with 'redacted'.",
+)
+def export_failure_memory(output: str | None, redacted: bool) -> None:
+    """Export native failure memory events as JSONL."""
+    from openshard.history.failure_memory import load_failure_memory_events, _event_to_dict
+    events = load_failure_memory_events()
+    if not events:
+        click.echo("No failure memory events recorded yet.")
+        return
+    rows: list[dict] = []
+    for evt in events:
+        d = _event_to_dict(evt)
+        if redacted:
+            d["task_summary"] = "[redacted]"
+            d["model"] = "redacted"
+        rows.append(d)
+    lines = "\n".join(json.dumps(r) for r in rows)
+    if output:
+        output_path = Path(output)
+        if output_path.parent != Path("."):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(lines + "\n", encoding="utf-8")
+    else:
+        click.echo(lines)
+
+
 def _demo_default() -> None:
     click.echo("OpenShard demo")
     click.echo("")
