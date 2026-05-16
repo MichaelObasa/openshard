@@ -1051,15 +1051,17 @@ def candidates_last() -> None:
         click.echo("No candidate summary available.")
         return
 
-    click.echo(f"{'Candidate':<10} {'Status':<10} {'Selected':<10} {'Files':<7} Exit")
+    click.echo(f"{'Candidate':<10} {'Status':<10} {'Selected':<10} {'Score':<8} {'Files':<7} Exit")
     for r in records:
         idx = r.get("candidate_index", "?")
         status = r.get("verification_status", "")
         selected = "yes" if r.get("selected") else "no"
+        score = r.get("score", 0.0)
+        score_s = f"{score:.1f}"
         files = len(r.get("files_written") or [])
         ec = r.get("exit_code")
         exit_s = str(ec) if ec is not None else "-"
-        click.echo(f"{idx:<10} {status:<10} {selected:<10} {files:<7} {exit_s}")
+        click.echo(f"{idx:<10} {status:<10} {selected:<10} {score_s:<8} {files:<7} {exit_s}")
 
 
 @cli.command("diff-last")

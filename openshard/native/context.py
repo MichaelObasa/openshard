@@ -3423,6 +3423,8 @@ class NativeCandidateAttempt:
     output_chars: int = 0
     selected: bool = False
     selection_reason: str = ""
+    score: float = 0.0
+    score_reasons: list[str] = field(default_factory=list)
     raw_content_stored: bool = False
 
     def __post_init__(self) -> None:
@@ -3468,28 +3470,87 @@ def record_native_candidate_attempt(
     return summary
 
 
+def score_native_candidate_attempt(candidate: "Any") -> "tuple[float, list[str]]":
+    """Compute a deterministic score for a single candidate attempt.
+
+    Supports dataclass, dict, and SimpleNamespace candidates.
+    Returns (score, reasons) without mutating the candidate.
+    """
+    def _g(key: str, default: "Any" = None) -> "Any":
+        if isinstance(candidate, dict):
+            return candidate.get(key, default)
+        return getattr(candidate, key, default)
+
+    score = 0.0
+    reasons: list[str] = []
+
+    vstatus = _g("verification_status", "")
+    if vstatus == "passed":
+        score += 100
+        reasons.append("verification passed")
+    elif vstatus == "skipped":
+        score += 20
+        reasons.append("verification skipped")
+    elif vstatus == "failed":
+        score -= 50
+        reasons.append("verification failed")
+
+    exit_code = _g("exit_code", None)
+    if exit_code == 0:
+        score += 10
+        reasons.append("exit code 0")
+    elif exit_code is not None:
+        score -= 10
+        reasons.append(f"exit code {exit_code}")
+
+    files_written = _g("files_written", []) or []
+    fcount = len(files_written)
+    if fcount == 0:
+        score -= 20
+        reasons.append("no files written")
+    elif fcount <= 5:
+        score += 10
+        reasons.append("reasonable file count")
+    else:
+        score -= 5
+        reasons.append("large file count")
+
+    output_chars = _g("output_chars", 0) or 0
+    if output_chars > 5000:
+        score -= 5
+        reasons.append("large verification output")
+
+    score = max(-100.0, min(150.0, score))
+    return score, reasons
+
+
+def score_native_candidate_summary(
+    summary: NativeCandidateSummary,
+) -> NativeCandidateSummary:
+    """Score every candidate in summary, mutating score and score_reasons in place."""
+    for candidate in summary.candidates:
+        s, r = score_native_candidate_attempt(candidate)
+        candidate.score = s
+        candidate.score_reasons = r
+    return summary
+
+
 def select_native_candidate(summary: NativeCandidateSummary) -> NativeCandidateSummary:
-    """Select best candidate: first passed → first skipped → first (fallback).
-    Sets selected_index to the 1-based candidate_index of the winner."""
+    """Score all candidates, select highest score (tie-break: lower candidate_index)."""
     if not summary.candidates:
+        summary.selection_reason = "no candidates"
         return summary
-    winner: NativeCandidateAttempt | None = None
-    reason = ""
-    for c in summary.candidates:
-        if c.verification_status == "passed":
-            winner = c
-            reason = "first_passed"
-            break
-    if winner is None:
-        for c in summary.candidates:
-            if c.verification_status == "skipped":
-                winner = c
-                reason = "first_skipped"
-                break
-    if winner is None:
-        winner = summary.candidates[0]
-        reason = "fallback_first"
+    for candidate in summary.candidates:
+        candidate.selected = False
+        candidate.selection_reason = ""
+    score_native_candidate_summary(summary)
+    winner = max(
+        summary.candidates,
+        key=lambda c: (c.score, -c.candidate_index),
+    )
     winner.selected = True
+    first_reason = winner.score_reasons[0] if winner.score_reasons else ""
+    reason = f"highest score: {winner.score} ({first_reason})"
     winner.selection_reason = reason
     summary.selected_index = winner.candidate_index  # 1-based
     summary.selection_reason = reason
@@ -3520,9 +3581,16 @@ def render_native_candidate_summary(
         if _v(c, "verification_status", "") == "passed"
     )
     sel_str = str(selected) if selected is not None else "none"
+    sel_candidate = next(
+        (c for c in candidates if _v(c, "selected", False)), None
+    )
+    score_suffix = ""
+    if sel_candidate is not None:
+        sel_score = _v(sel_candidate, "score", 0.0)
+        score_suffix = f", score={sel_score}"
     header = (
         f"candidates: {completed}/{requested} run,"
-        f" selected={sel_str}, passed={passed_count}"
+        f" selected={sel_str}, passed={passed_count}{score_suffix}"
     )
     if detail != "full" or not candidates:
         return header
@@ -3534,9 +3602,13 @@ def render_native_candidate_summary(
         exit_code = _v(c, "exit_code", None)
         chars = _v(c, "output_chars", 0)
         is_sel = _v(c, "selected", False)
+        cscore = _v(c, "score", 0.0)
+        creasons = _v(c, "score_reasons", []) or []
         sel_marker = "selected " if is_sel else ""
         exit_s = f" exit={exit_code}" if exit_code is not None else ""
         lines.append(
-            f"  {idx}. {sel_marker}{vstatus} files={fcount}{exit_s} chars={chars}"
+            f"  {idx}. {sel_marker}{vstatus} score={cscore} files={fcount}{exit_s} chars={chars}"
         )
+        if creasons:
+            lines.append(f"     reason: {'; '.join(creasons)}")
     return "\n".join(lines)
