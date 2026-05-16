@@ -1014,6 +1014,57 @@ def apply_last(dry_run: bool, include_files: tuple[str, ...], exclude_files: tup
             click.echo(f"  [skipped] {f}")
 
 
+@cli.command("diff-last")
+@click.option("--full", "show_full", is_flag=True, default=False,
+              help="Show full sandbox diff, not just stat summary.")
+def diff_last(show_full: bool) -> None:
+    """Preview the diff from the most recent native sandbox run."""
+    from openshard.native.sandbox_diff import get_sandbox_diff
+    from openshard.native.sandbox_apply import extract_sandbox_path_from_entry
+
+    log_path = Path.cwd() / _LOG_PATH
+    if not log_path.exists():
+        click.echo("No run history found.")
+        return
+
+    entries = _load_run_entries(log_path)
+    if not entries:
+        click.echo("No runs recorded yet.")
+        return
+
+    entry = entries[-1]
+
+    if entry.get("executor") != "native":
+        click.echo("Latest run is not a native run.")
+        return
+
+    sandbox_path_str = extract_sandbox_path_from_entry(entry)
+    if not sandbox_path_str:
+        click.echo("Latest native run has no sandbox path to diff.")
+        return
+
+    result = get_sandbox_diff(Path(sandbox_path_str), full=show_full)
+
+    if not result.available:
+        click.echo(f"No sandbox diff available: {result.reason}")
+        return
+
+    click.echo(f"Sandbox: {sandbox_path_str}")
+    click.echo(f"Changed files ({len(result.files_changed)}):")
+    for f in result.files_changed:
+        click.echo(f"  - {f}")
+
+    if result.stat_text:
+        click.echo("")
+        click.echo("Diff stat:")
+        click.echo(result.stat_text)
+
+    if show_full and result.diff_text:
+        click.echo("")
+        click.echo("Diff:")
+        click.echo(result.diff_text)
+
+
 @cli.command("apply-receipts")
 @click.option("--last", "last_n", default=10, type=click.IntRange(min=1), show_default=True)
 def apply_receipts_cmd(last_n: int) -> None:
