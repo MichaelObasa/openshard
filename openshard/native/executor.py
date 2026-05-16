@@ -48,6 +48,7 @@ from openshard.native.context import (
     NativeOSNLoopSummary,
     NativeSandboxMeta,
     NativeFailureMemoryRoutingAdvisory,
+    NativeCandidateSummary,
     NativeEditLoopSummary,
     NativePlanLedger,
     OSNLoopMeta,
@@ -154,6 +155,7 @@ class NativeRunMeta:
     failure_memory_routing_advisory: NativeFailureMemoryRoutingAdvisory | None = None
     plan_ledger: NativePlanLedger | None = None
     edit_loop_summary: NativeEditLoopSummary | None = None
+    candidate_summary: NativeCandidateSummary | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({

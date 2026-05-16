@@ -176,7 +176,13 @@ def plan(task: str):
     default=None,
     help="Model selection policy mode (metadata-only v1): auto, cheapest-safe, frontier-heavy, open-source-only, local-only, custom.",
 )
-def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, native_backend: str | None, experimental_deepagents_run: bool, experimental_tier_dispatch: bool, native_loop: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool, feedback_scoring: bool, model_policy: str | None):
+@click.option(
+    "--candidates",
+    default=1,
+    type=click.IntRange(1, 3),
+    help="Run multiple native candidate agents and select the best verified result (1–3, native --write only).",
+)
+def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, native_backend: str | None, experimental_deepagents_run: bool, experimental_tier_dispatch: bool, native_loop: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool, feedback_scoring: bool, model_policy: str | None, candidates: int):
     """Execute TASK and return a structured result."""
     if native_loop is not None and workflow != "native":
         raise click.UsageError("--native-loop experimental requires --workflow native")
@@ -206,6 +212,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         experimental_tier_dispatch=experimental_tier_dispatch,
         native_loop=native_loop,
         model_policy=model_policy,
+        candidates=candidates,
     )
     result = pipeline.run(task)
     if result.exit_code != 0:

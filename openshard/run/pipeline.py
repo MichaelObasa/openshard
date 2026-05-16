@@ -35,12 +35,15 @@ from openshard.execution.generator import (
 )
 from openshard.execution.opencode_executor import OpenCodeExecutor
 from openshard.native.context import (
+    NativeCandidateSummary,
     NativeEditLoopSummary,
     NativeVerificationLoop,
     RetryMetadata,
     build_failure_summary,
+    record_native_candidate_attempt,
     record_native_edit_loop_attempt,
     render_verification_failure_context,
+    select_native_candidate,
 )
 from openshard.native.executor import NativeAgentExecutor
 from openshard.execution.stages import Stage, StageRun, split_task, route_stage, run_planning_stage, run_validator_stage
@@ -186,6 +189,7 @@ class RunPipeline:
         experimental_tier_dispatch: bool = False,
         native_loop: str | None = None,
         model_policy: str | None = None,
+        candidates: int = 1,
     ) -> None:
         self._config = config
         self._write = write
@@ -207,6 +211,7 @@ class RunPipeline:
         self._experimental_tier_dispatch = experimental_tier_dispatch
         self._native_loop = native_loop
         self._model_policy = model_policy
+        self._candidates = candidates
 
     def run(self, task: str) -> RunResult:  # noqa: C901
         result_obj = RunResult()
@@ -956,6 +961,83 @@ class RunPipeline:
                 )
                 _safe_checkpoint("generate", "passed", files=[f.path for f in exec_result.files])
 
+        # --- Multi-candidate path (candidates > 1, native + write only) ---
+        _multi_candidate_done = False
+        if self._candidates > 1 and effective_executor == "native" and write and not dry_run:
+            from openshard.native.sandbox import create_run_sandbox as _create_mc_sandbox
+            _candidate_summary = NativeCandidateSummary(
+                enabled=True,
+                requested_count=self._candidates,
+            )
+            _candidate_workspaces: list[Path] = []
+            _candidate_results: list = []
+            _candidate_sb_metas: list = []
+            _all_safe = (
+                _verification_plan.has_commands
+                and all(cmd.safety == CommandSafety.safe for cmd in _verification_plan.commands)
+            )
+            for _ci in range(self._candidates):
+                if _ci == 0:
+                    _cand_result = exec_result
+                else:
+                    spinner.start(f"Candidate {_ci + 1}/{self._candidates} - generating")
+                    try:
+                        _cand_result = generator.generate(
+                            task,
+                            model=_effective_model,
+                            repo_facts=_repo_facts,
+                            skills_context=_skills_ctx,
+                        )
+                    except RuntimeError as exc:
+                        raise click.ClickException(str(exc))
+                    except ProviderAuthError:
+                        raise click.ClickException(
+                            "Authentication failed. Check that your provider API key is valid."
+                        )
+                    except ProviderRateLimitError:
+                        raise click.ClickException("Rate limit exceeded. Wait a moment then try again.")
+                    except ProviderError as exc:
+                        raise click.ClickException(f"API error: {exc}")
+                    finally:
+                        spinner.stop()
+                _cand_workspace, _cand_sb_meta = _create_mc_sandbox(
+                    Path.cwd(), f"{_run_id}-candidate-{_ci + 1}"
+                )
+                _write_files(_cand_result.files, _cand_workspace)
+                if _all_safe:
+                    _cand_exit, _cand_out = _run_verification_plan(
+                        _verification_plan, _cand_workspace, capture=True
+                    )
+                    _cand_vstatus = "passed" if _cand_exit == 0 else "failed"
+                    _cand_exit_code: int | None = _cand_exit
+                    _cand_output_chars = len(_cand_out or "")
+                else:
+                    _cand_vstatus = "skipped"
+                    _cand_exit_code = None
+                    _cand_output_chars = 0
+                record_native_candidate_attempt(
+                    _candidate_summary,
+                    candidate_index=_ci + 1,
+                    model=_effective_model or generator.model or "",
+                    sandbox_path=str(_cand_workspace),
+                    files_written=[f.path for f in _cand_result.files],
+                    verification_status=_cand_vstatus,
+                    exit_code=_cand_exit_code,
+                    output_chars=_cand_output_chars,
+                )
+                _candidate_workspaces.append(_cand_workspace)
+                _candidate_results.append(_cand_result)
+                _candidate_sb_metas.append(_cand_sb_meta)
+            select_native_candidate(_candidate_summary)
+            if _candidate_summary.selected_index is None:
+                raise click.ClickException("No candidate result was selected.")
+            generator.native_meta.candidate_summary = _candidate_summary
+            _selected_list_i = _candidate_summary.selected_index - 1
+            exec_result = _candidate_results[_selected_list_i]
+            workspace = _candidate_workspaces[_selected_list_i]
+            generator.native_meta.sandbox = _candidate_sb_metas[_selected_list_i]
+            _multi_candidate_done = True
+
         usage = exec_result.usage
         # When stages ran, fold the planning cost into the reported total
         if stage_runs and usage is not None:
@@ -1128,7 +1210,7 @@ class RunPipeline:
 
         if write:
             if not opencode_mode:
-                if effective_executor == "native" and hasattr(generator, "native_meta"):
+                if effective_executor == "native" and hasattr(generator, "native_meta") and not _multi_candidate_done:
                     from openshard.native.sandbox import create_run_sandbox as _create_sandbox
                     workspace, _sb_meta = _create_sandbox(Path.cwd(), _run_id)
                     generator.native_meta.sandbox = _sb_meta
@@ -1161,7 +1243,8 @@ class RunPipeline:
                         confirm_or_abort(approval_prompt)
                         if effective_executor == "native" and hasattr(generator, "build_approval_receipt"):
                             generator.build_approval_receipt(granted=True)
-                _write_files(exec_result.files, workspace)
+                if not _multi_candidate_done:
+                    _write_files(exec_result.files, workspace)
                 if effective_executor == "native":
                     if hasattr(generator, "record_loop_step"):
                         generator.record_loop_step("write")
@@ -1178,7 +1261,7 @@ class RunPipeline:
             # OpenCode: workspace already created and populated before generate().
 
         # Native controlled verification loop — one retry, safe commands only, no --verify flag required
-        if effective_executor == "native" and write and not dry_run and not verify:
+        if effective_executor == "native" and write and not dry_run and not verify and not _multi_candidate_done:
             generator.native_meta.edit_loop_summary = NativeEditLoopSummary(max_attempts=2)
             _edit_loop = generator.native_meta.edit_loop_summary
             _loop_meta = NativeVerificationLoop()
@@ -1796,6 +1879,11 @@ class RunPipeline:
                 "edit_loop_summary": (
                     asdict(_native_meta.edit_loop_summary)
                     if _native_meta.edit_loop_summary is not None
+                    else None
+                ),
+                "candidate_summary": (
+                    asdict(_native_meta.candidate_summary)
+                    if _native_meta.candidate_summary is not None
                     else None
                 ),
             }
