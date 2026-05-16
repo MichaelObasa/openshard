@@ -468,6 +468,36 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
     write_path = getattr(native_meta, "write_path", "pipeline")
     lines.append(f"  write path: {write_path}")
 
+    plan_ledger_data = getattr(native_meta, "plan_ledger", None)
+    if plan_ledger_data is not None and detail in ("more", "full"):
+        from openshard.native.context import NativePlanItem, NativePlanLedger, render_native_plan_ledger
+        _items_raw = getattr(plan_ledger_data, "items", []) or []
+        _items = []
+        for _it in _items_raw:
+            _it_ns = _dict_to_ns(_it) if isinstance(_it, dict) else _it
+            _items.append(
+                NativePlanItem(
+                    index=getattr(_it_ns, "index", 0),
+                    title=getattr(_it_ns, "title", ""),
+                    status=getattr(_it_ns, "status", "pending"),
+                    evidence=getattr(_it_ns, "evidence", ""),
+                )
+            )
+        _ledger = NativePlanLedger(
+            enabled=getattr(plan_ledger_data, "enabled", True),
+            items=_items,
+            completed_count=getattr(plan_ledger_data, "completed_count", 0),
+            failed_count=getattr(plan_ledger_data, "failed_count", 0),
+            pending_count=getattr(plan_ledger_data, "pending_count", 0),
+        )
+        _rendered = render_native_plan_ledger(
+            _ledger, detail="full" if detail == "full" else "compact"
+        )
+        if _rendered:
+            for _line in _rendered.splitlines():
+                lines.append(f"  {_line}")
+            has_content = True
+
     sandbox = getattr(native_meta, "sandbox", None)
     if sandbox is not None:
         _sb_enabled = _loop_event_value(sandbox, "sandbox_enabled", False)
@@ -1319,6 +1349,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "tool_search_events": entry.get("tool_search_events", []),
         "sandbox": entry.get("sandbox"),
         "failure_memory_routing_advisory": entry.get("failure_memory_routing_advisory"),
+        "plan_ledger": entry.get("plan_ledger"),
     })
 
 

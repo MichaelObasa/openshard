@@ -3210,3 +3210,110 @@ def render_native_failure_memory_routing_advisory(
             lines.append(f"  - {p}")
     lines.append(f"warnings: {_wc}")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Native Plan Ledger v0
+# ---------------------------------------------------------------------------
+
+@dataclass
+class NativePlanItem:
+    index: int = 0
+    title: str = ""
+    status: str = "pending"  # pending | running | passed | failed | skipped
+    evidence: str = ""
+    raw_content_stored: bool = False
+
+    def __post_init__(self) -> None:
+        self.raw_content_stored = False
+
+
+@dataclass
+class NativePlanLedger:
+    enabled: bool = True
+    items: list[NativePlanItem] = field(default_factory=list)
+    completed_count: int = 0
+    failed_count: int = 0
+    pending_count: int = 0
+    raw_content_stored: bool = False
+
+    def __post_init__(self) -> None:
+        self.raw_content_stored = False
+
+
+_VALID_PLAN_STATUSES: frozenset[str] = frozenset({"pending", "running", "passed", "failed", "skipped"})
+
+_V0_PLAN_TITLES: list[str] = [
+    "Understand task and repo context",
+    "Generate patch",
+    "Write patch to sandbox",
+    "Run verification",
+    "Record receipt",
+]
+
+
+def build_native_plan_ledger(
+    task: str,
+    planned_files: list[str] | None = None,
+) -> NativePlanLedger:
+    items = []
+    for i, title in enumerate(_V0_PLAN_TITLES):
+        evidence = ""
+        if planned_files and title == "Write patch to sandbox":
+            evidence = f"files={len(planned_files)}"
+        items.append(NativePlanItem(index=i, title=title, status="pending", evidence=evidence))
+    return NativePlanLedger(
+        enabled=True,
+        items=items,
+        completed_count=0,
+        failed_count=0,
+        pending_count=len(items),
+    )
+
+
+def update_native_plan_ledger_status(
+    ledger: NativePlanLedger,
+    title_contains: str,
+    status: str,
+    evidence: str = "",
+) -> NativePlanLedger:
+    if status not in _VALID_PLAN_STATUSES:
+        return ledger
+    needle = title_contains.lower()
+    for item in ledger.items:
+        if needle in item.title.lower():
+            item.status = status
+            if evidence:
+                item.evidence = evidence
+            break
+    ledger.completed_count = sum(1 for it in ledger.items if it.status == "passed")
+    ledger.failed_count = sum(1 for it in ledger.items if it.status == "failed")
+    ledger.pending_count = sum(1 for it in ledger.items if it.status == "pending")
+    return ledger
+
+
+_PLAN_STATUS_LABELS: dict[str, str] = {
+    "passed": "passed",
+    "failed": "failed",
+    "running": "running",
+    "skipped": "skipped",
+    "pending": "pending",
+}
+
+
+def render_native_plan_ledger(
+    ledger: NativePlanLedger | None,
+    detail: str = "compact",
+) -> str:
+    if ledger is None or not ledger.enabled or not ledger.items:
+        return ""
+    total = len(ledger.items)
+    header = f"plan ledger: {ledger.completed_count}/{total} passed, {ledger.failed_count} failed"
+    if detail != "full":
+        return header
+    lines = [header]
+    for item in ledger.items:
+        label = _PLAN_STATUS_LABELS.get(item.status, item.status)
+        ev = f"  ({item.evidence})" if item.evidence else ""
+        lines.append(f"  {item.index + 1}. {label}  {item.title}{ev}")
+    return "\n".join(lines)
