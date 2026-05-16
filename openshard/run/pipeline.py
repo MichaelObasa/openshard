@@ -35,9 +35,11 @@ from openshard.execution.generator import (
 )
 from openshard.execution.opencode_executor import OpenCodeExecutor
 from openshard.native.context import (
+    NativeEditLoopSummary,
     NativeVerificationLoop,
     RetryMetadata,
     build_failure_summary,
+    record_native_edit_loop_attempt,
     render_verification_failure_context,
 )
 from openshard.native.executor import NativeAgentExecutor
@@ -1177,6 +1179,8 @@ class RunPipeline:
 
         # Native controlled verification loop — one retry, safe commands only, no --verify flag required
         if effective_executor == "native" and write and not dry_run and not verify:
+            generator.native_meta.edit_loop_summary = NativeEditLoopSummary(max_attempts=2)
+            _edit_loop = generator.native_meta.edit_loop_summary
             _loop_meta = NativeVerificationLoop()
             generator.native_meta.verification_loop = _loop_meta
             if (
@@ -1197,6 +1201,15 @@ class RunPipeline:
                 if hasattr(generator, "record_osn_loop_step"):
                     generator.record_osn_loop_step("verify", _vst_first, verification_status=_vst_first)
                 _safe_checkpoint("verify", _vst_first, verification_status=_vst_first)
+                record_native_edit_loop_attempt(
+                    _edit_loop,
+                    attempt_index=1,
+                    purpose="initial",
+                    files_written=[f.path for f in exec_result.files],
+                    verification_status=_vst_first,
+                    exit_code=_loop_code,
+                    output_chars=_loop_meta.output_chars,
+                )
                 if _loop_code != 0:
                     # Build structured failure metadata — no raw content stored
                     _fsummary = build_failure_summary(_loop_output, exit_code=_loop_code)
@@ -1265,6 +1278,15 @@ class RunPipeline:
                     _loop_meta.passed = _loop_code2 == 0
                     _retry_vst = "passed" if _loop_meta.passed else "failed"
                     _retry_meta.retry_verification_status = _retry_vst
+                    record_native_edit_loop_attempt(
+                        _edit_loop,
+                        attempt_index=2,
+                        purpose="repair",
+                        files_written=[f.path for f in _retry_result.files],
+                        verification_status=_retry_vst,
+                        exit_code=_loop_code2,
+                        output_chars=len(_loop_output2),
+                    )
                     if hasattr(generator, "record_osn_loop_step"):
                         generator.record_osn_loop_step(
                             "retry_once", _retry_vst, verification_status=_retry_vst,
@@ -1300,6 +1322,15 @@ class RunPipeline:
                     generator.native_meta.plan_ledger, "Run verification", _vplan_status
                 )
             if not _loop_meta.attempted:
+                record_native_edit_loop_attempt(
+                    _edit_loop,
+                    attempt_index=1,
+                    purpose="initial",
+                    files_written=[f.path for f in exec_result.files],
+                    verification_status="skipped",
+                    exit_code=None,
+                    output_chars=0,
+                )
                 _safe_checkpoint("verify", "skipped", reason="verification not configured")
 
         if write and verify:
@@ -1760,6 +1791,11 @@ class RunPipeline:
                 "plan_ledger": (
                     asdict(_native_meta.plan_ledger)
                     if _native_meta.plan_ledger is not None
+                    else None
+                ),
+                "edit_loop_summary": (
+                    asdict(_native_meta.edit_loop_summary)
+                    if _native_meta.edit_loop_summary is not None
                     else None
                 ),
             }

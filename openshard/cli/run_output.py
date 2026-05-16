@@ -498,6 +498,16 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
                 lines.append(f"  {_line}")
             has_content = True
 
+    _edit_loop_data = getattr(native_meta, "edit_loop_summary", None)
+    if _edit_loop_data is not None and detail in ("more", "full"):
+        from openshard.native.context import render_native_edit_loop_summary
+        _el_detail = "full" if detail == "full" else "compact"
+        _el_rendered = render_native_edit_loop_summary(_edit_loop_data, detail=_el_detail)
+        if _el_rendered:
+            for _line in _el_rendered.splitlines():
+                lines.append(f"  {_line}")
+            has_content = True
+
     sandbox = getattr(native_meta, "sandbox", None)
     if sandbox is not None:
         _sb_enabled = _loop_event_value(sandbox, "sandbox_enabled", False)
@@ -1350,6 +1360,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "sandbox": entry.get("sandbox"),
         "failure_memory_routing_advisory": entry.get("failure_memory_routing_advisory"),
         "plan_ledger": entry.get("plan_ledger"),
+        "edit_loop_summary": entry.get("edit_loop_summary"),
     })
 
 
