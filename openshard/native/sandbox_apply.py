@@ -83,14 +83,55 @@ def list_sandbox_changed_files(repo_root: Path, sandbox_path: Path) -> list[str]
     return files
 
 
-def apply_sandbox_changes(repo_root: Path, sandbox_path: Path) -> SandboxApplyResult:
+def filter_sandbox_changed_files(
+    files: list[str],
+    *,
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
+) -> list[str]:
+    """Return a filtered, deduplicated, order-preserving subset of files.
+
+    Slashes are normalized to / before matching. No glob expansion in v0.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for f in files:
+        f = f.replace("\\", "/")
+        if f not in seen:
+            seen.add(f)
+            result.append(f)
+
+    if include is not None:
+        include_set = {i.replace("\\", "/") for i in include}
+        result = [f for f in result if f in include_set]
+
+    if exclude is not None:
+        exclude_set = {e.replace("\\", "/") for e in exclude}
+        result = [f for f in result if f not in exclude_set]
+
+    return result
+
+
+def apply_sandbox_changes(
+    repo_root: Path,
+    sandbox_path: Path,
+    *,
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
+) -> SandboxApplyResult:
     """Copy changed sandbox files into repo_root. No deletions in v0."""
-    files = list_sandbox_changed_files(repo_root, sandbox_path)
+    files = filter_sandbox_changed_files(
+        list_sandbox_changed_files(repo_root, sandbox_path),
+        include=include,
+        exclude=exclude,
+    )
     if not files:
-        return SandboxApplyResult(
-            sandbox_path=str(sandbox_path),
-            reason="No sandbox changes to apply.",
+        reason = (
+            "No sandbox changes matched the apply selection."
+            if include or exclude
+            else "No sandbox changes to apply."
         )
+        return SandboxApplyResult(sandbox_path=str(sandbox_path), reason=reason)
 
     result = SandboxApplyResult(sandbox_path=str(sandbox_path))
     for rel in files:
