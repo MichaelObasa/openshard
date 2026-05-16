@@ -73,4 +73,8 @@ def resolve_safe_repo_path(repo_root: Path, user_path: str) -> Path:
     if rel == Path(".openshard") / "failure_memory.jsonl":
         raise UnsafePathError("Path must not target .openshard/failure_memory.jsonl.")
 
+    # Reject .openshard/sandbox_apply_receipts.jsonl specifically
+    if rel == Path(".openshard") / "sandbox_apply_receipts.jsonl":
+        raise UnsafePathError("Path must not target .openshard/sandbox_apply_receipts.jsonl.")
+
     return resolved

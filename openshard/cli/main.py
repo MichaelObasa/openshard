@@ -47,6 +47,11 @@ from openshard.cli.run_output import (
 )
 from openshard.evals.registry import load_eval_tasks
 from openshard.evals.runner import append_eval_result, run_eval_task
+from openshard.history.sandbox_apply_receipts import (
+    SandboxApplyReceipt,
+    log_sandbox_apply_receipt,
+    recent_sandbox_apply_receipts,
+)
 
 
 @click.group(invoke_without_command=True)
@@ -952,6 +957,15 @@ def apply_last(dry_run: bool, include_files: tuple[str, ...], exclude_files: tup
             click.echo("No sandbox changes matched the apply selection.")
         else:
             click.echo("No sandbox changes to apply.")
+        log_sandbox_apply_receipt(SandboxApplyReceipt(
+            source_run_id=entry.get("timestamp", ""),
+            sandbox_path=str(sandbox_path),
+            applied=False,
+            files_applied=[],
+            files_skipped=[],
+            dry_run=False,
+            reason="No sandbox changes to apply.",
+        ))
         return
 
     click.echo(f"Sandbox: {sandbox_path_str}")
@@ -960,6 +974,15 @@ def apply_last(dry_run: bool, include_files: tuple[str, ...], exclude_files: tup
         click.echo(f"Would apply {len(files)} file(s):")
         for f in files:
             click.echo(f"  - {f}")
+        log_sandbox_apply_receipt(SandboxApplyReceipt(
+            source_run_id=entry.get("timestamp", ""),
+            sandbox_path=str(sandbox_path),
+            applied=False,
+            files_applied=[],
+            files_skipped=[],
+            dry_run=True,
+            reason="dry run",
+        ))
         return
 
     click.echo(f"Files to apply ({len(files)}):")
@@ -968,6 +991,16 @@ def apply_last(dry_run: bool, include_files: tuple[str, ...], exclude_files: tup
     click.echo("")
 
     result = apply_sandbox_changes(Path.cwd(), sandbox_path, include=include, exclude=exclude)
+
+    log_sandbox_apply_receipt(SandboxApplyReceipt(
+        source_run_id=entry.get("timestamp", ""),
+        sandbox_path=str(sandbox_path),
+        applied=result.applied,
+        files_applied=list(result.files_applied),
+        files_skipped=list(result.files_skipped),
+        dry_run=False,
+        reason=result.reason,
+    ))
 
     if result.reason and not result.files_applied:
         raise click.ClickException(result.reason)
@@ -979,6 +1012,23 @@ def apply_last(dry_run: bool, include_files: tuple[str, ...], exclude_files: tup
         click.echo(f"Skipped {len(result.files_skipped)} file(s).")
         for f in result.files_skipped:
             click.echo(f"  [skipped] {f}")
+
+
+@cli.command("apply-receipts")
+@click.option("--last", "last_n", default=10, type=click.IntRange(min=1), show_default=True)
+def apply_receipts_cmd(last_n: int) -> None:
+    """Show recent sandbox apply receipts."""
+    receipts = recent_sandbox_apply_receipts(limit=last_n)
+    if not receipts:
+        click.echo("No sandbox apply receipts recorded yet.")
+        return
+
+    header = f"{'Time':<18} {'Applied':<8} {'Skipped':<8} {'Dry Run':<8} Sandbox"
+    click.echo(header)
+    for r in receipts:
+        ts = r.timestamp[:16].replace("T", " ")
+        dry = "yes" if r.dry_run else "no"
+        click.echo(f"{ts:<18} {r.applied_count:<8} {r.skipped_count:<8} {dry:<8} {r.sandbox_path}")
 
 
 def _load_run_entries(log_path: Path) -> list[dict]:
