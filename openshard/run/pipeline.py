@@ -55,6 +55,10 @@ from openshard.history.failure_memory import (
     parse_failure_summary,
     log_failure_memory_event,
 )
+from openshard.history.run_checkpoints import (
+    NativeRunCheckpointEvent,
+    log_run_checkpoint_event as _log_run_checkpoint,
+)
 from openshard.history.metrics import load_runs
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
 from openshard.providers.manager import ProviderManager
@@ -361,6 +365,25 @@ class RunPipeline:
         else:
             _use_stages = None  # resolved below after history + repo_facts
         stage_runs: list[StageRun] = []
+
+        def _safe_checkpoint(stage: str, status: str, **kwargs) -> None:
+            try:
+                _wp = str(workspace) if workspace is not None else ""
+                _log_run_checkpoint(NativeRunCheckpointEvent(
+                    run_id=_run_id,
+                    workflow=effective_workflow,
+                    executor=effective_executor,
+                    stage=stage,
+                    status=status,
+                    workspace_path=_wp,
+                    sandbox_path=_wp,
+                    files=list(kwargs.get("files", [])),
+                    verification_status=kwargs.get("verification_status", ""),
+                    retry_used=bool(kwargs.get("retry_used", False)),
+                    reason=kwargs.get("reason", ""),
+                ))
+            except Exception:
+                pass
 
         if opencode_mode:
             workspace = Path(tempfile.mkdtemp())
@@ -904,6 +927,7 @@ class RunPipeline:
                 generator.native_meta.plan_ledger = update_native_plan_ledger_status(
                     generator.native_meta.plan_ledger, "Understand task", "passed", evidence="context prepared"
                 )
+                _safe_checkpoint("plan", "passed")
             spinner.start(_single_msg)
             try:
                 if opencode_mode:
@@ -928,6 +952,7 @@ class RunPipeline:
                     generator.native_meta.plan_ledger, "Generate patch", "passed",
                     evidence=f"files={len(exec_result.files)}",
                 )
+                _safe_checkpoint("generate", "passed", files=[f.path for f in exec_result.files])
 
         usage = exec_result.usage
         # When stages ran, fold the planning cost into the reported total
@@ -1147,6 +1172,7 @@ class RunPipeline:
                             generator.native_meta.plan_ledger, "Write patch", "passed",
                             evidence="sandbox write complete",
                         )
+                    _safe_checkpoint("sandbox_write", "passed", files=[f.path for f in exec_result.files])
             # OpenCode: workspace already created and populated before generate().
 
         # Native controlled verification loop — one retry, safe commands only, no --verify flag required
@@ -1167,9 +1193,10 @@ class RunPipeline:
                 _loop_meta.output_chars = len(_loop_output)
                 _loop_meta.truncated = len(_loop_output) > 1200
                 _loop_meta.passed = _loop_code == 0
+                _vst_first = "passed" if _loop_meta.passed else "failed"
                 if hasattr(generator, "record_osn_loop_step"):
-                    _vst_first = "passed" if _loop_meta.passed else "failed"
                     generator.record_osn_loop_step("verify", _vst_first, verification_status=_vst_first)
+                _safe_checkpoint("verify", _vst_first, verification_status=_vst_first)
                 if _loop_code != 0:
                     # Build structured failure metadata — no raw content stored
                     _fsummary = build_failure_summary(_loop_output, exit_code=_loop_code)
@@ -1242,6 +1269,7 @@ class RunPipeline:
                         generator.record_osn_loop_step(
                             "retry_once", _retry_vst, verification_status=_retry_vst,
                         )
+                    _safe_checkpoint("retry", _retry_vst, retry_used=True, verification_status=_retry_vst)
                     # Failure Memory v1: one structured event per retry, best-effort
                     try:
                         _fm_parsed = parse_failure_summary(_fsummary)
@@ -1271,6 +1299,8 @@ class RunPipeline:
                 generator.native_meta.plan_ledger = update_native_plan_ledger_status(
                     generator.native_meta.plan_ledger, "Run verification", _vplan_status
                 )
+            if not _loop_meta.attempted:
+                _safe_checkpoint("verify", "skipped", reason="verification not configured")
 
         if write and verify:
             click.echo("")
@@ -1511,6 +1541,8 @@ class RunPipeline:
             _native_meta.plan_ledger = update_native_plan_ledger_status(
                 _native_meta.plan_ledger, "Record receipt", "passed"
             )
+        if effective_executor == "native":
+            _safe_checkpoint("receipt", "passed")
         _extra_metadata: dict | None = None
         if _native_meta is not None:
             _extra_metadata = {

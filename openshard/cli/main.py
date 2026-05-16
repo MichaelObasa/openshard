@@ -1082,6 +1082,61 @@ def apply_receipts_cmd(last_n: int) -> None:
         click.echo(f"{ts:<18} {r.applied_count:<8} {r.skipped_count:<8} {dry:<8} {r.sandbox_path}")
 
 
+@cli.command("checkpoints")
+@click.option("--last", "last_n", default=10, type=click.IntRange(min=1), show_default=True)
+def checkpoints_cmd(last_n: int) -> None:
+    """Show recent native run checkpoints."""
+    from openshard.history.run_checkpoints import recent_run_checkpoints
+    events = recent_run_checkpoints(limit=last_n)
+    if not events:
+        click.echo("No run checkpoints recorded yet.")
+        return
+    header = f"{'Time':<18} {'Run':<22} {'Stage':<14} {'Status':<10} {'Verify':<10} Retry"
+    click.echo(header)
+    for evt in events:
+        ts = evt.timestamp[:16].replace("T", " ")
+        run_short = evt.run_id[:20] if evt.run_id else "-"
+        retry_s = "yes" if evt.retry_used else "no"
+        verify_s = evt.verification_status or "-"
+        click.echo(f"{ts:<18} {run_short:<22} {evt.stage:<14} {evt.status:<10} {verify_s:<10} {retry_s}")
+
+
+@cli.command("resume-last")
+def resume_last() -> None:
+    """Show safe resume guidance for the most recent native run (v0)."""
+    from openshard.native.sandbox_apply import extract_sandbox_path_from_entry
+    from openshard.history.run_checkpoints import run_checkpoints_for_run
+
+    log_path = Path.cwd() / _LOG_PATH
+    entries = _load_run_entries(log_path)
+    if not entries:
+        click.echo("No run history found.")
+        return
+
+    entry = entries[-1]
+    if entry.get("executor") != "native":
+        click.echo("Latest run is not a native run.")
+        return
+
+    run_id = entry.get("timestamp", "")
+    checkpoints = run_checkpoints_for_run(run_id)
+    if not checkpoints:
+        click.echo("No checkpoints found for latest native run.")
+        return
+
+    latest = checkpoints[-1]
+    click.echo(f"Latest checkpoint: {latest.stage} ({latest.status})")
+
+    sandbox_path_str = extract_sandbox_path_from_entry(entry)
+    if sandbox_path_str and Path(sandbox_path_str).exists():
+        click.echo("\nResume options:")
+        click.echo("  openshard diff-last --full")
+        click.echo("  openshard apply-last --dry-run")
+        click.echo("  openshard apply-last")
+    else:
+        click.echo("\nNo live sandbox found. This run can be inspected, but not resumed from workspace.")
+
+
 def _load_run_entries(log_path: Path) -> list[dict]:
     if not log_path.exists():
         return []

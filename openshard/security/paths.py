@@ -77,4 +77,8 @@ def resolve_safe_repo_path(repo_root: Path, user_path: str) -> Path:
     if rel == Path(".openshard") / "sandbox_apply_receipts.jsonl":
         raise UnsafePathError("Path must not target .openshard/sandbox_apply_receipts.jsonl.")
 
+    # Reject .openshard/run_checkpoints.jsonl specifically
+    if rel == Path(".openshard") / "run_checkpoints.jsonl":
+        raise UnsafePathError("Path must not target .openshard/run_checkpoints.jsonl.")
+
     return resolved

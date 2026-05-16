@@ -1361,6 +1361,7 @@ def _render_native_inspection(entry: dict, detail: str) -> None:
     _print_native_demo_block(native_meta, detail=detail, entry=entry)
     _print_native_summary(native_meta, detail)
     _print_failure_memory_block(entry, detail)
+    _print_run_checkpoints_block(entry, detail)
     _print_native_step_log(entry, detail)
 
 
@@ -1406,6 +1407,38 @@ def _print_failure_memory_block(entry: dict, detail: str) -> None:
         return
     events = failure_memory_events_for_run(run_id)
     for line in _render_failure_memory_block(events, detail):
+        click.echo(line)
+
+
+def _render_run_checkpoints_block(events: list, detail: str) -> list[str]:
+    if not events or detail == "default":
+        return []
+    if detail == "more":
+        latest = events[-1]
+        return [f"\n[checkpoints]  latest={latest.stage}:{latest.status}  total={len(events)}"]
+    lines: list[str] = ["\n[checkpoints]"]
+    for evt in events:
+        retry_s = "yes" if getattr(evt, "retry_used", False) else "no"
+        lines.append(
+            f"  {evt.stage}: {evt.status} verify={evt.verification_status or '-'} retry={retry_s}"
+        )
+        files = list(getattr(evt, "files", []) or [])
+        if files:
+            lines.append(f"    files: {', '.join(files[:3])}")
+    return lines
+
+
+def _print_run_checkpoints_block(entry: dict, detail: str) -> None:
+    if detail == "default":
+        return
+    if entry.get("workflow") != "native":
+        return
+    run_id = entry.get("timestamp", "")
+    if not run_id:
+        return
+    from openshard.history.run_checkpoints import run_checkpoints_for_run
+    events = run_checkpoints_for_run(run_id)
+    for line in _render_run_checkpoints_block(events, detail):
         click.echo(line)
 
 
