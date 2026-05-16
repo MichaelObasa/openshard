@@ -926,11 +926,14 @@ def last(more: bool, full: bool):
 @click.option("--dry-run", is_flag=True, default=False, help="Show what would be applied without copying files.")
 @click.option("--file", "include_files", multiple=True, help="Only apply this relative file path. Can be used multiple times.")
 @click.option("--exclude", "exclude_files", multiple=True, help="Exclude this relative file path. Can be used multiple times.")
-def apply_last(dry_run: bool, include_files: tuple[str, ...], exclude_files: tuple[str, ...]) -> None:
+@click.option("--candidate", "candidate_index", default=None, type=click.IntRange(min=1),
+              help="Apply files from a specific candidate (1-based index).")
+def apply_last(dry_run: bool, include_files: tuple[str, ...], exclude_files: tuple[str, ...], candidate_index: int | None) -> None:
     """Promote files from the most recent sandbox run into the real repo."""
     from openshard.native.sandbox_apply import (
         apply_sandbox_changes,
         extract_sandbox_path_from_entry,
+        extract_candidate_sandbox_path_from_entry,
         filter_sandbox_changed_files,
         list_sandbox_changed_files,
     )
@@ -947,10 +950,16 @@ def apply_last(dry_run: bool, include_files: tuple[str, ...], exclude_files: tup
         click.echo("Latest run is not a native run.")
         return
 
-    sandbox_path_str = extract_sandbox_path_from_entry(entry)
-    if not sandbox_path_str:
-        click.echo("Latest native run has no sandbox path to apply.")
-        return
+    if candidate_index is not None:
+        sandbox_path_str = extract_candidate_sandbox_path_from_entry(entry, candidate_index)
+        if not sandbox_path_str:
+            click.echo(f"Candidate {candidate_index} has no sandbox path to apply.")
+            return
+    else:
+        sandbox_path_str = extract_sandbox_path_from_entry(entry)
+        if not sandbox_path_str:
+            click.echo("Latest native run has no sandbox path to apply.")
+            return
 
     include = list(include_files) or None
     exclude = list(exclude_files) or None
@@ -1021,13 +1030,50 @@ def apply_last(dry_run: bool, include_files: tuple[str, ...], exclude_files: tup
             click.echo(f"  [skipped] {f}")
 
 
+@cli.command("candidates-last")
+def candidates_last() -> None:
+    """Show the candidate table for the most recent native run."""
+    from openshard.native.sandbox_apply import get_candidate_records_from_entry
+
+    log_path = Path.cwd() / _LOG_PATH
+    entries = _load_run_entries(log_path)
+    if not entries:
+        click.echo("No run history found.")
+        return
+
+    entry = entries[-1]
+    if entry.get("executor") != "native":
+        click.echo("Latest run is not a native run.")
+        return
+
+    records = get_candidate_records_from_entry(entry)
+    if not records:
+        click.echo("No candidate summary available.")
+        return
+
+    click.echo(f"{'Candidate':<10} {'Status':<10} {'Selected':<10} {'Files':<7} Exit")
+    for r in records:
+        idx = r.get("candidate_index", "?")
+        status = r.get("verification_status", "")
+        selected = "yes" if r.get("selected") else "no"
+        files = len(r.get("files_written") or [])
+        ec = r.get("exit_code")
+        exit_s = str(ec) if ec is not None else "-"
+        click.echo(f"{idx:<10} {status:<10} {selected:<10} {files:<7} {exit_s}")
+
+
 @cli.command("diff-last")
 @click.option("--full", "show_full", is_flag=True, default=False,
               help="Show full sandbox diff, not just stat summary.")
-def diff_last(show_full: bool) -> None:
+@click.option("--candidate", "candidate_index", default=None, type=click.IntRange(min=1),
+              help="Show diff for a specific candidate (1-based index).")
+def diff_last(show_full: bool, candidate_index: int | None) -> None:
     """Preview the diff from the most recent native sandbox run."""
     from openshard.native.sandbox_diff import get_sandbox_diff
-    from openshard.native.sandbox_apply import extract_sandbox_path_from_entry
+    from openshard.native.sandbox_apply import (
+        extract_sandbox_path_from_entry,
+        extract_candidate_sandbox_path_from_entry,
+    )
 
     log_path = Path.cwd() / _LOG_PATH
     if not log_path.exists():
@@ -1045,10 +1091,16 @@ def diff_last(show_full: bool) -> None:
         click.echo("Latest run is not a native run.")
         return
 
-    sandbox_path_str = extract_sandbox_path_from_entry(entry)
-    if not sandbox_path_str:
-        click.echo("Latest native run has no sandbox path to diff.")
-        return
+    if candidate_index is not None:
+        sandbox_path_str = extract_candidate_sandbox_path_from_entry(entry, candidate_index)
+        if not sandbox_path_str:
+            click.echo(f"Candidate {candidate_index} has no sandbox path to diff.")
+            return
+    else:
+        sandbox_path_str = extract_sandbox_path_from_entry(entry)
+        if not sandbox_path_str:
+            click.echo("Latest native run has no sandbox path to diff.")
+            return
 
     result = get_sandbox_diff(Path(sandbox_path_str), full=show_full)
 
