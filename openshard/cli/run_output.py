@@ -990,6 +990,22 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
             has_content = True
 
     if detail in ("more", "full"):
+        fmra = getattr(native_meta, "failure_memory_routing_advisory", None)
+        if fmra is not None:
+            _fmra_warnings = (fmra.get("warnings", []) if isinstance(fmra, dict) else getattr(fmra, "warnings", [])) or []
+            if _fmra_warnings:
+                from openshard.native.context import render_native_failure_memory_routing_advisory
+                _fmra_compact = render_native_failure_memory_routing_advisory(fmra, detail="compact")
+                if _fmra_compact:
+                    lines.append(f"  {_fmra_compact}")
+                    has_content = True
+                if detail == "full":
+                    _fmra_full = render_native_failure_memory_routing_advisory(fmra, detail="full")
+                    if _fmra_full:
+                        for _fmra_line in _fmra_full.splitlines():
+                            lines.append(f"  {_fmra_line}")
+
+    if detail in ("more", "full"):
         msd = getattr(native_meta, "model_selection_decision", None)
         if msd is not None:
             _msd_strategy = getattr(msd, "strategy", "unknown")
@@ -1302,6 +1318,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "tier_dispatch_receipt": entry.get("tier_dispatch_receipt"),
         "tool_search_events": entry.get("tool_search_events", []),
         "sandbox": entry.get("sandbox"),
+        "failure_memory_routing_advisory": entry.get("failure_memory_routing_advisory"),
     })
 
 

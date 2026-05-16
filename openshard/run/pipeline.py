@@ -1465,6 +1465,11 @@ class RunPipeline:
                     validator_dispatch_status="reserved",
                 )
                 _tier_dispatch_receipt = _native_meta.tier_dispatch_receipt
+        if _native_meta is not None:
+            from openshard.native.context import build_native_failure_memory_routing_advisory
+            _native_meta.failure_memory_routing_advisory = (
+                build_native_failure_memory_routing_advisory()
+            )
         if _native_meta is not None and detail != "default":
             from openshard.cli.run_output import _print_native_demo_block, _print_native_summary
             _print_native_demo_block(_native_meta, detail=detail)
@@ -1679,6 +1684,12 @@ class RunPipeline:
                 "sandbox": (
                     asdict(_native_meta.sandbox)
                     if _native_meta is not None and _native_meta.sandbox is not None
+                    else None
+                ),
+                "failure_memory_routing_advisory": (
+                    asdict(_native_meta.failure_memory_routing_advisory)
+                    if _native_meta is not None
+                    and _native_meta.failure_memory_routing_advisory is not None
                     else None
                 ),
             }

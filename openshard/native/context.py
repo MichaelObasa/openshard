@@ -3080,3 +3080,133 @@ class NativeSandboxMeta:
     worktree_path: str | None = None
     worktree_branch: str | None = None
     fallback_reason: str | None = None
+
+
+_ADVISORY_MODEL_FAILURE_THRESHOLD: int = 2
+_ADVISORY_FILE_FREQUENCY_THRESHOLD: int = 2
+
+
+@dataclass
+class NativeModelRetryFailureSummary:
+    model: str = ""
+    failure_count: int = 0
+    failure_types: list[str] = field(default_factory=list)
+
+
+@dataclass
+class NativeFailureMemoryRoutingAdvisory:
+    events_scanned: int = 0
+    model_retry_summaries: list[NativeModelRetryFailureSummary] = field(default_factory=list)
+    hot_file_paths: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    advisory_only: bool = True
+
+
+def build_native_failure_memory_routing_advisory(
+    *, limit: int = 10,
+) -> NativeFailureMemoryRoutingAdvisory:
+    try:
+        from openshard.history.failure_memory import recent_failure_memory
+        events = recent_failure_memory(limit=limit)
+    except Exception:
+        return NativeFailureMemoryRoutingAdvisory(advisory_only=True)
+
+    model_failure_counts: dict[str, int] = {}
+    model_failure_types: dict[str, list[str]] = {}
+    for evt in events:
+        if not getattr(evt, "retry_attempted", False):
+            continue
+        model = getattr(evt, "model", "") or ""
+        if not model:
+            continue
+        model_failure_counts[model] = model_failure_counts.get(model, 0) + 1
+        ftype = getattr(evt, "failure_type", "") or ""
+        if ftype:
+            model_failure_types.setdefault(model, []).append(ftype)
+
+    file_counts: dict[str, int] = {}
+    for evt in events:
+        for path in (getattr(evt, "related_file_paths", []) or []):
+            if path:
+                file_counts[path] = file_counts.get(path, 0) + 1
+
+    model_retry_summaries = [
+        NativeModelRetryFailureSummary(
+            model=model,
+            failure_count=count,
+            failure_types=model_failure_types.get(model, []),
+        )
+        for model, count in model_failure_counts.items()
+    ]
+
+    hot_file_paths = [
+        path for path, count in file_counts.items()
+        if count >= _ADVISORY_FILE_FREQUENCY_THRESHOLD
+    ]
+
+    warnings: list[str] = []
+    for s in model_retry_summaries:
+        if s.failure_count >= _ADVISORY_MODEL_FAILURE_THRESHOLD:
+            warnings.append(
+                f"model {s.model!r} has {s.failure_count} repeated retry failures"
+            )
+    for path in hot_file_paths:
+        warnings.append(
+            f"file {path!r} appears in {file_counts[path]} recent failure events"
+        )
+
+    return NativeFailureMemoryRoutingAdvisory(
+        events_scanned=len(events),
+        model_retry_summaries=model_retry_summaries,
+        hot_file_paths=hot_file_paths,
+        warnings=warnings,
+        advisory_only=True,
+    )
+
+
+def render_native_failure_memory_routing_advisory(
+    advisory: "NativeFailureMemoryRoutingAdvisory | dict | None",
+    detail: str = "compact",
+) -> str:
+    if advisory is None:
+        return ""
+    _is_dict = isinstance(advisory, dict)
+    _warnings = (advisory.get("warnings", []) if _is_dict else getattr(advisory, "warnings", [])) or []
+    _scanned = advisory.get("events_scanned", 0) if _is_dict else getattr(advisory, "events_scanned", 0)
+    if not _warnings:
+        if detail == "full":
+            return (
+                "[failure memory routing advisory]\n"
+                f"events_scanned: {_scanned}\n"
+                "warnings: 0"
+            )
+        return ""
+    _wc = len(_warnings)
+    _wword = "warning" if _wc == 1 else "warnings"
+    if detail != "full":
+        return f"failure memory advisory: {_wc} {_wword}"
+    _summaries = (advisory.get("model_retry_summaries", []) if _is_dict else getattr(advisory, "model_retry_summaries", [])) or []
+    _hot_files = (advisory.get("hot_file_paths", []) if _is_dict else getattr(advisory, "hot_file_paths", [])) or []
+    lines = [
+        "[failure memory routing advisory]",
+        f"events_scanned: {_scanned}",
+    ]
+    if _summaries:
+        lines.append("model retry failures:")
+        for s in _summaries:
+            if isinstance(s, dict):
+                _m = s.get("model", "")
+                _c = s.get("failure_count", 0)
+                _ft = s.get("failure_types", []) or []
+            else:
+                _m = getattr(s, "model", "")
+                _c = getattr(s, "failure_count", 0)
+                _ft = getattr(s, "failure_types", []) or []
+            _ft_str = f"  [{', '.join(_ft[:3])}]" if _ft else ""
+            lines.append(f"  - {_m}: {_c} retries{_ft_str}")
+    if _hot_files:
+        lines.append("hot files:")
+        for p in _hot_files:
+            lines.append(f"  - {p}")
+    lines.append(f"warnings: {_wc}")
+    return "\n".join(lines)
