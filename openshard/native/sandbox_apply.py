@@ -38,6 +38,44 @@ def extract_sandbox_path_from_entry(entry: dict) -> str:
     return worktree_path
 
 
+def get_candidate_records_from_entry(entry: dict) -> list[dict]:
+    """Return normalized candidate records from a run entry, or [] if none."""
+    try:
+        cs = entry.get("candidate_summary")
+        if not cs:
+            return []
+        if isinstance(cs, dict):
+            raw = cs.get("candidates") or []
+        else:
+            raw = getattr(cs, "candidates", []) or []
+        result = []
+        for item in raw:
+            if isinstance(item, dict):
+                result.append(item)
+            else:
+                try:
+                    result.append(vars(item))
+                except TypeError:
+                    pass
+        return result
+    except Exception:
+        return []
+
+
+def extract_candidate_sandbox_path_from_entry(entry: dict, candidate_index: int) -> str:
+    """Return the sandbox_path for a specific candidate (1-based index), or ''."""
+    try:
+        for r in get_candidate_records_from_entry(entry):
+            if r.get("candidate_index") == candidate_index:
+                sp = r.get("sandbox_path") or ""
+                if sp and Path(sp).exists():
+                    return sp
+                return ""
+        return ""
+    except Exception:
+        return ""
+
+
 def list_sandbox_changed_files(repo_root: Path, sandbox_path: Path) -> list[str]:
     """Return relative paths of files changed in the sandbox vs HEAD.
 
