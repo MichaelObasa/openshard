@@ -1828,6 +1828,19 @@ def demo_run() -> None:
     _demo_run()
 
 
+@cli.command()
+def tui() -> None:
+    """Launch the interactive OpenShard home screen."""
+    try:
+        from openshard.tui.app import OpenShardTui
+    except ImportError:
+        raise click.ClickException(
+            "The TUI requires the 'textual' package. "
+            "Please reinstall OpenShard or install textual."
+        )
+    OpenShardTui().run()
+
+
 @cli.group(invoke_without_command=True)
 @click.pass_context
 def eval(ctx: click.Context):
