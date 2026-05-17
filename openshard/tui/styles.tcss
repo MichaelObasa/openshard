@@ -1,0 +1,103 @@
+Screen {
+    background: #0E0F11;
+}
+
+/* ── Hero box ─────────────────────────────────────────────── */
+
+#hero {
+    border: round #3A3A44;
+    height: 15;
+    margin: 1 1 0 1;
+}
+
+#hero-left {
+    width: 2fr;
+    padding: 1 2;
+}
+
+#hero-right {
+    width: 3fr;
+    padding: 1 2;
+    border-left: solid #3A3A44;
+}
+
+#hero-brand {
+    color: #E6E6E6;
+    text-style: bold;
+    height: auto;
+}
+
+#hero-tagline {
+    color: #9A9AA3;
+    height: auto;
+    padding-bottom: 1;
+}
+
+#hero-project {
+    color: #E6E6E6;
+    height: auto;
+}
+
+#hero-controls-heading {
+    color: #8B7CF6;
+    text-style: bold;
+    height: auto;
+}
+
+#hero-controls {
+    color: #E6E6E6;
+    height: auto;
+    padding-bottom: 1;
+}
+
+#hero-quickstart-heading {
+    color: #8B7CF6;
+    text-style: bold;
+    height: auto;
+}
+
+#hero-quickstart {
+    color: #9A9AA3;
+    height: auto;
+    padding-bottom: 1;
+}
+
+#hero-activity-heading {
+    color: #8B7CF6;
+    text-style: bold;
+    height: auto;
+}
+
+#hero-activity {
+    color: #E6E6E6;
+    height: auto;
+}
+
+/* ── Below hero ───────────────────────────────────────────── */
+
+#prompt-line {
+    color: #9A9AA3;
+    padding: 1 2 0 2;
+    height: auto;
+}
+
+#below-commands {
+    color: #9A9AA3;
+    padding: 0 2 1 2;
+    height: auto;
+}
+
+#task-input {
+    margin: 1 2;
+    border: round #3A3A44;
+}
+
+Input:focus {
+    border: round #8B7CF6;
+}
+
+#status-msg {
+    color: #9A9AA3;
+    padding: 0 2;
+    height: 1;
+}
