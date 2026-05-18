@@ -105,10 +105,9 @@ Input:focus {
 /* ── Output panel ─────────────────────────────────────────── */
 
 #output-panel {
-    height: 10;
-    margin: 0 2;
-    border: round #3A3A44;
-    overflow-y: scroll;
+    height: 1fr;
+    margin: 1 2 0 2;
+    overflow-y: auto;
 }
 
 #output-content {
