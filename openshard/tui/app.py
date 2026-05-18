@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from click.testing import CliRunner
+from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.widgets import Input, Label, Static
+
+from openshard.tui.commands import TuiCommand, parse_tui_input
 
 BRAND = "✦ OpenShard"
 TAGLINE = "The control layer for AI coding agents."
@@ -32,18 +36,27 @@ _STATUS_COLORS = {
 
 # Two quick-start commands shown inside the hero box
 _HERO_QUICKSTART = [
-    'openshard run "explain this repo"',
-    "openshard last --more",
+    "explain this repo",
+    "/last more",
 ]
 
 # Full try list shown below the hero box
 _BELOW_COMMANDS = [
-    'openshard run "explain this repo"',
-    'openshard run "fix this bug" --write',
-    "openshard last --more",
-    "openshard diff-last",
-    "openshard apply-last --dry-run",
+    "explain this repo",
+    "/last",
+    "/last more",
+    "/help",
 ]
+
+_HELP_TEXT = (
+    "Supported commands:\n"
+    "  /help       Show this help\n"
+    "  /last       Show most recent run\n"
+    "  /last more  Show more details of most recent run\n"
+    "  /clear      Clear output area\n"
+    "  /quit       Exit the TUI\n"
+    "  (plain text) Run as openshard task"
+)
 
 
 class OpenShardTui(App):
@@ -55,6 +68,7 @@ class OpenShardTui(App):
         self._git_info: dict = {}
         self._recent_runs: list[dict] | None = None
         self._guardrails: dict = {}
+        self._output_lines: list[str] = []
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="hero"):
@@ -71,6 +85,7 @@ class OpenShardTui(App):
                 yield Static("", id="hero-activity")
         yield Static("", id="prompt-line")
         yield Static("", id="below-commands")
+        yield ScrollableContainer(Static("", id="output-content"), id="output-panel")
         yield Input(placeholder=PLACEHOLDER, id="task-input")
         yield Label("", id="status-msg")
 
@@ -127,18 +142,59 @@ class OpenShardTui(App):
             "[dim]> OpenShard ready. What would you like to build?[/dim]"
         )
 
-        below_text = "[dim]Try these to get started:[/dim]\n" + "\n".join(
+        below_text = "[dim]Try these inside the TUI:[/dim]\n" + "\n".join(
             f"[dim]> {cmd}[/dim]" for cmd in _BELOW_COMMANDS
         )
         self.query_one("#below-commands", Static).update(below_text)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        task = event.value.strip()
-        if not task:
+        raw = event.value.strip()
+        if not raw:
             return
-        if task.startswith("openshard "):
-            msg = "Running tasks from the TUI is coming soon. Use that command directly in the shell."
-        else:
-            msg = f'Running tasks from the TUI is coming soon. Use: openshard run "{task}"'
-        self.query_one("#status-msg", Label).update(msg)
         self.query_one("#task-input", Input).clear()
+        parsed = parse_tui_input(raw)
+
+        if parsed.cmd == TuiCommand.HELP:
+            self._append_output(_HELP_TEXT)
+        elif parsed.cmd == TuiCommand.CLEAR:
+            self._clear_output()
+        elif parsed.cmd == TuiCommand.QUIT:
+            self.exit()
+        elif parsed.cmd == TuiCommand.LAST:
+            self._run_cli_async(["last"])
+        elif parsed.cmd == TuiCommand.LAST_MORE:
+            self._run_cli_async(["last", "--more"])
+        elif parsed.cmd == TuiCommand.RUN_TASK:
+            self._append_output(f"> {raw}\nRunning...")
+            self._run_cli_async(["run", parsed.task], refresh_after=True)
+        else:
+            self._append_output(f"Unknown command: {raw}\nType /help for supported commands.")
+
+    @work(thread=True)
+    def _run_cli_async(self, args: list[str], refresh_after: bool = False) -> None:
+        # Temporary v0 bridge: routes TUI input through existing Click commands via
+        # CliRunner so we avoid shell=True and stay within supported code paths.
+        from openshard.cli.main import cli as openshard_cli
+
+        runner = CliRunner()
+        result = runner.invoke(openshard_cli, args, input="", catch_exceptions=True)
+        output = result.output or (str(result.exception) if result.exception else "")
+        status = "Done." if result.exit_code == 0 else f"Failed (exit {result.exit_code})."
+        self.call_from_thread(self._on_cli_result, output, status, refresh_after)
+
+    def _on_cli_result(self, output: str, status: str, refresh_after: bool) -> None:
+        self._append_output(output.rstrip("\n") + "\n" + status)
+        if refresh_after:
+            from openshard.tui.state import load_recent_runs
+
+            self._recent_runs = load_recent_runs(self._path)
+            self._refresh_widgets()
+
+    def _append_output(self, text: str) -> None:
+        self._output_lines.append(text)
+        self.query_one("#output-content", Static).update("\n".join(self._output_lines))
+        self.query_one("#output-panel", ScrollableContainer).scroll_end(animate=False)
+
+    def _clear_output(self) -> None:
+        self._output_lines.clear()
+        self.query_one("#output-content", Static).update("")
