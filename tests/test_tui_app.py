@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
+from textual.containers import ScrollableContainer
 from textual.widgets import Input, Label, Static
 
 from openshard.tui.app import OpenShardTui
@@ -145,32 +148,6 @@ async def test_empty_input_does_not_set_status(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_plain_task_shows_run_command_hint(tmp_path):
-    app = _make_app(tmp_path)
-    async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = "fix the bug"
-        await pilot.press("enter")
-        text = _text(app.query_one("#status-msg", Label))
-        assert "Running tasks from the TUI is coming soon" in text
-        assert 'openshard run "fix the bug"' in text
-
-
-@pytest.mark.asyncio
-async def test_openshard_command_shows_shell_hint(tmp_path):
-    app = _make_app(tmp_path)
-    async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = 'openshard run "test"'
-        await pilot.press("enter")
-        text = _text(app.query_one("#status-msg", Label))
-        assert "Running tasks from the TUI is coming soon" in text
-        assert "directly in the shell" in text
-
-
-@pytest.mark.asyncio
 async def test_enter_clears_input(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
@@ -200,3 +177,156 @@ async def test_no_forbidden_terms_in_hero(tmp_path):
             for forbidden in ("routing advisory", "verification loop", "plan ledger"):
                 assert forbidden not in text, f"Found '{forbidden}' in {widget_id}"
             assert "candidate" not in text, f"Found 'candidate' in {widget_id}"
+
+
+# ── Output panel ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_output_panel_is_present(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as _:
+        panel = app.query_one("#output-panel", ScrollableContainer)
+        assert panel is not None
+
+
+@pytest.mark.asyncio
+async def test_help_command_shows_help_in_panel(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        inp = app.query_one("#task-input", Input)
+        inp.focus()
+        inp.value = "/help"
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert "Supported commands" in text
+        assert "/last" in text
+        assert "/quit" in text
+
+
+@pytest.mark.asyncio
+async def test_unknown_slash_command_shows_error(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        inp = app.query_one("#task-input", Input)
+        inp.focus()
+        inp.value = "/badcommand"
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert "Unknown command" in text
+
+
+@pytest.mark.asyncio
+async def test_clear_command_empties_panel(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        inp = app.query_one("#task-input", Input)
+        inp.focus()
+        # First populate the panel via /help
+        inp.value = "/help"
+        await pilot.press("enter")
+        # Then clear it
+        inp.value = "/clear"
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert text.strip() == ""
+
+
+@pytest.mark.asyncio
+async def test_quit_command_exits_app(tmp_path):
+    app = _make_app(tmp_path)
+    with patch.object(app, "exit") as mock_exit:
+        async with app.run_test(size=_SIZE) as pilot:
+            inp = app.query_one("#task-input", Input)
+            inp.focus()
+            inp.value = "/quit"
+            await pilot.press("enter")
+        mock_exit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_plain_task_invokes_cli_runner(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "some output"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            inp = app.query_one("#task-input", Input)
+            inp.focus()
+            inp.value = "explain this repo"
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+
+        calls = mock_runner_cls.return_value.invoke.call_args_list
+        assert len(calls) == 1
+        # CliRunner.invoke(cli, ["run", task], input="", catch_exceptions=True)
+        assert "run" in str(calls[0])
+        assert "explain this repo" in str(calls[0])
+
+
+@pytest.mark.asyncio
+async def test_run_output_appears_in_panel(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Result: all good\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            inp = app.query_one("#task-input", Input)
+            inp.focus()
+            inp.value = "explain this repo"
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+        assert "Result: all good" in text
+        assert "Done." in text
+
+
+@pytest.mark.asyncio
+async def test_failed_run_shows_failure_status(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Error occurred\n"
+    mock_result.exit_code = 1
+    mock_result.exception = None
+
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            inp = app.query_one("#task-input", Input)
+            inp.focus()
+            inp.value = "break something"
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+        assert "Failed" in text
+
+
+@pytest.mark.asyncio
+async def test_recent_activity_refreshes_after_run(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "done\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    new_runs = [{"task": "refreshed task", "timestamp": "2026-05-18T00:00", "status": "passed", "duration": "2.0s"}]
+
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        with patch("openshard.tui.app.OpenShardTui._on_cli_result", wraps=app._on_cli_result):
+            with patch("openshard.tui.state.load_recent_runs", return_value=new_runs) as mock_load:
+                async with app.run_test(size=_SIZE) as pilot:
+                    inp = app.query_one("#task-input", Input)
+                    inp.focus()
+                    inp.value = "explain this repo"
+                    await pilot.press("enter")
+                    await pilot.pause(delay=0.3)
+                mock_load.assert_called()
