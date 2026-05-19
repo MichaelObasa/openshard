@@ -41,7 +41,6 @@ from openshard.cli.run_output import (
     _print_dry_run as _print_dry_run,
     _render_native_inspection,
     _native_meta_from_entry,
-    _render_native_receipt,
     _RATIONALE_SHORT,
     _PUBLIC_MODE_LABEL,
 )
@@ -656,7 +655,7 @@ def metrics():
     click.echo(f"    not attempted    {v['unknown']}")
 
 
-def _render_log_entry(entry: dict, detail: str) -> None:
+def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> None:
     """Render a stored run log entry at the requested detail level."""
     ts = entry.get("timestamp", "").rstrip("Z").replace("T", " ").split(".")[0]
     task = entry.get("task", "")
@@ -690,6 +689,19 @@ def _render_log_entry(entry: dict, detail: str) -> None:
         reason = _RATIONALE_SHORT.get(routing_rationale, "")
         suffix = f" ({reason})" if reason else ""
         click.echo(f"\nModel: {lbl}{suffix}")
+
+    # Shard receipt (--more / --full) — shown near top before diagnostic blocks
+    if detail != "default":
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_compact_shard_receipt,
+            render_full_shard_receipt,
+        )
+        _shard = build_shard_receipt(entry, index)
+        click.echo("")
+        click.echo(render_compact_shard_receipt(_shard))
+        click.echo("")
+        click.echo(render_full_shard_receipt(_shard))
 
     # Stages (--more / --full)
     if detail != "default" and stage_runs_data:
@@ -855,8 +867,17 @@ def _render_log_entry(entry: dict, detail: str) -> None:
     duration = entry.get("duration_seconds", 0)
     cost = entry.get("estimated_cost")
     cost_str = f"${cost:.4f}" if cost is not None else "-"
+
+    # Compact RECEIPT — default view only, appears before Time/Cost footer
+    if detail == "default":
+        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        _shard = build_shard_receipt(entry, index)
+        click.echo("")
+        click.echo(render_compact_shard_receipt(_shard))
+
     click.echo(f"\nTime: {duration:.1f}s   Cost: {cost_str}")
 
+    # Baseline comparison and cost section (after Time/Cost footer)
     if detail == "default":
         _nm = _native_meta_from_entry(entry)
         if _nm is not None:
@@ -866,9 +887,6 @@ def _render_log_entry(entry: dict, detail: str) -> None:
             _bl = format_baseline_line(_pt, _ct, actual_cost=cost)
             if _bl is not None:
                 click.echo(_bl)
-            receipt = _render_native_receipt(_nm)
-            if receipt:
-                click.echo(receipt)
     elif detail in ("more", "full"):
         from openshard.cost.baseline import (
             compute_baseline_comparison,
@@ -919,7 +937,7 @@ def last(more: bool, full: bool):
     if not entries:
         click.echo("No runs recorded yet.")
         return
-    _render_log_entry(entries[-1], detail)
+    _render_log_entry(entries[-1], detail, index=len(entries) - 1)
 
 
 @cli.command("apply-last")
