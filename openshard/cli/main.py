@@ -2268,5 +2268,64 @@ def eval_stats(suite: str | None, model: str | None, task: str | None, by_catego
     click.echo(f"\n  total: {total_runs} runs  pass: {total_pass}  fail: {total_fail}  pass rate: {overall_rate:.0%}")
 
 
+@cli.group("packs", invoke_without_command=True)
+@click.pass_context
+def packs(ctx: click.Context):
+    """Workflow pack commands."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@packs.command("list")
+def packs_list():
+    """List all available workflow packs."""
+    from openshard.workflow_packs.packs import load_packs
+
+    packs_ = load_packs()
+    col_id = 32
+    col_title = 40
+    for p in packs_:
+        pid = p.id if len(p.id) <= col_id else p.id[: col_id - 1] + "..."
+        ptitle = p.title if len(p.title) <= col_title else p.title[: col_title - 1] + "..."
+        click.echo(f"  {pid:<{col_id}}  {ptitle:<{col_title}}  {p.category}")
+
+
+@packs.command("show")
+@click.argument("pack_id")
+def packs_show(pack_id: str):
+    """Show full metadata for a workflow pack."""
+    from openshard.workflow_packs.packs import get_pack, load_packs
+
+    try:
+        p = get_pack(pack_id)
+    except KeyError:
+        available = ", ".join(p.id for p in load_packs())
+        raise click.ClickException(f"Unknown pack {pack_id!r}. Available: {available}")
+
+    click.echo(f"ID:                    {p.id}")
+    click.echo(f"Title:                 {p.title}")
+    click.echo(f"Category:              {p.category}")
+    click.echo(f"Summary:               {p.summary}")
+    click.echo(f"Recommended context:   {p.recommended_context}")
+    click.echo(f"Expected receipt value:{p.expected_receipt_value}")
+    click.echo(f"Safety notes:          {p.safety_notes}")
+    click.echo(f"Tags:                  {', '.join(p.tags)}")
+
+
+@packs.command("prompt")
+@click.argument("pack_id")
+def packs_prompt(pack_id: str):
+    """Print only the prompt text for a workflow pack (ready to copy or run)."""
+    from openshard.workflow_packs.packs import get_pack, load_packs
+
+    try:
+        p = get_pack(pack_id)
+    except KeyError:
+        available = ", ".join(p.id for p in load_packs())
+        raise click.ClickException(f"Unknown pack {pack_id!r}. Available: {available}")
+
+    click.echo(p.prompt)
+
+
 if __name__ == "__main__":
     cli()
