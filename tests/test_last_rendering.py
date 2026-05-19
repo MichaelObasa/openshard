@@ -332,26 +332,26 @@ class TestLastNativeInspection(unittest.TestCase):
         self.assertNotIn("[native]", out)
         self.assertNotIn("[native summary]", out)
 
-    def test_default_shows_receipt_line(self):
+    def test_default_shows_receipt_block(self):
         out = _render(_native_entry(), detail="default")
-        self.assertIn("Receipt saved", out)
+        self.assertIn("RECEIPT —", out)
 
     def test_default_receipt_files_count(self):
         out = _render(_native_entry(), detail="default")
-        self.assertIn("2 files changed", out)
+        self.assertIn("2 files", out)
 
-    def test_default_receipt_verification_passed(self):
+    def test_default_receipt_checks_passed(self):
         out = _render(_native_entry(), detail="default")
-        self.assertIn("Verification passed", out)
+        self.assertIn("1/1 passed", out)
 
-    def test_default_receipt_no_risky_writes(self):
+    def test_default_receipt_sandbox_off(self):
         out = _render(_native_entry(), detail="default")
-        self.assertIn("No risky writes", out)
+        self.assertIn("Off", out)
 
-    def test_default_receipt_not_shown_for_non_native(self):
+    def test_default_receipt_shown_for_all_runs(self):
         entry = {"task": "standard run", "workflow": "standard"}
         out = _render(entry, detail="default")
-        self.assertNotIn("Receipt saved", out)
+        self.assertIn("RECEIPT —", out)
 
     def test_non_native_entry_no_native_blocks(self):
         entry = {"task": "standard run", "workflow": "standard"}
@@ -1446,11 +1446,11 @@ class TestBaselineLineInLastDefault(unittest.TestCase):
         baseline_idx = out.index("Baseline estimate:")
         self.assertGreater(baseline_idx, time_idx)
 
-    def test_baseline_appears_before_receipt_line(self):
+    def test_receipt_block_appears_before_time_footer(self):
         out = _render(self._entry_with_tokens(1_000_000, 1_000_000), detail="default")
-        baseline_idx = out.index("Baseline estimate:")
-        receipt_idx = out.index("Receipt saved")
-        self.assertLess(baseline_idx, receipt_idx)
+        receipt_idx = out.index("RECEIPT —")
+        time_idx = out.index("Time:")
+        self.assertLess(receipt_idx, time_idx)
 
     def test_multiplier_shown_when_cost_present(self):
         out = _render(self._entry_with_tokens(1_000_000, 1_000_000, cost=0.01), detail="default")
