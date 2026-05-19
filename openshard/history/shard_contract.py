@@ -52,6 +52,81 @@ _SEP: str = "━" * 46
 _INDENT: str = "  "
 _COL: int = 12
 
+_SEVERITY_ORDER: list[str] = ["Critical", "High", "Medium", "Low", "Note"]
+
+_FINDING_ICONS: dict[str, str] = {
+    "Critical": "✖",
+    "High": "⚠",
+    "Medium": "~",
+    "Low": "✓",
+    "Note": "-",
+}
+
+
+@dataclass
+class ShardFinding:
+    severity: str
+    message: str
+    path: str | None = None
+    line: int | None = None
+
+
+def _safe_str_list(val: object) -> list[str]:
+    if not isinstance(val, list):
+        return []
+    return [item for item in val if isinstance(item, str)]
+
+
+def _coerce_finding_list(val: object, default_severity: str = "Note") -> list[ShardFinding]:
+    if not isinstance(val, list):
+        return []
+    out: list[ShardFinding] = []
+    for item in val:
+        if isinstance(item, dict) and "message" in item:
+            sev = item.get("severity") or default_severity
+            if sev not in _SEVERITY_ORDER:
+                sev = "Note"
+            line_val = item.get("line")
+            out.append(ShardFinding(
+                severity=sev,
+                message=str(item["message"]),
+                path=item.get("path") or None,
+                line=int(line_val) if line_val is not None else None,
+            ))
+        elif isinstance(item, str):
+            out.append(ShardFinding(severity=default_severity, message=item))
+    return out
+
+
+def _extract_findings(entry: dict) -> list[ShardFinding]:
+    findings: list[ShardFinding] = []
+
+    findings.extend(_coerce_finding_list(entry.get("findings")))
+
+    for note in _safe_str_list(entry.get("agent_notes")):
+        findings.append(ShardFinding(severity="Note", message=note))
+
+    fr = entry.get("final_report") or {}
+    findings.extend(_coerce_finding_list(fr.get("findings")))
+
+    for w in _safe_str_list(fr.get("warnings")):
+        findings.append(ShardFinding(severity="Note", message=w))
+
+    dr = entry.get("diff_review") or {}
+    for w in _safe_str_list(dr.get("warnings")):
+        findings.append(ShardFinding(severity="Note", message=w))
+
+    pl = entry.get("plan") or {}
+    for w in _safe_str_list(pl.get("warnings")):
+        findings.append(ShardFinding(severity="Note", message=w))
+
+    obs = entry.get("observation") or {}
+    for w in _safe_str_list(obs.get("warnings")):
+        findings.append(ShardFinding(severity="Note", message=w))
+
+    findings.sort(key=lambda f: _SEVERITY_ORDER.index(f.severity) if f.severity in _SEVERITY_ORDER else 99)
+    return findings
+
 
 def _display_model_name(slug: str) -> str:
     """Convert a provider/model slug to a user-friendly display name.
@@ -130,6 +205,8 @@ class ShardReceipt:
     cost_raw: Optional[float] = None
     # Each tuple is (friendly_stage_label, friendly_model_name).
     model_stages: list[tuple[str, str]] = field(default_factory=list)
+    findings: list[ShardFinding] = field(default_factory=list)
+    agent_notes: list[str] = field(default_factory=list)
 
 
 def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
@@ -269,6 +346,9 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     blocked_paths = list(command_policy.get("blocked_paths") or [])
     blocked_commands = list(command_policy.get("blocked_commands") or [])
 
+    findings = _extract_findings(entry)
+    agent_notes = _safe_str_list(entry.get("agent_notes"))
+
     return ShardReceipt(
         shard_id=_make_shard_id(timestamp, index),
         created_at=timestamp,
@@ -295,6 +375,8 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         allowed_paths=allowed_paths,
         blocked_paths=blocked_paths,
         blocked_commands=blocked_commands,
+        findings=findings,
+        agent_notes=agent_notes,
     )
 
 
@@ -331,6 +413,18 @@ def render_compact_shard_receipt(receipt: ShardReceipt) -> str:
         _row("Sandbox", receipt.sandbox),
         _row("Changed", file_str),
         _row("Checks", receipt.checks_display),
+    ]
+    if receipt.findings:
+        counts: dict[str, int] = {}
+        for f in receipt.findings:
+            counts[f.severity] = counts.get(f.severity, 0) + 1
+        summary_parts = [
+            f"{counts[sev]} {sev.lower()}"
+            for sev in _SEVERITY_ORDER
+            if sev in counts
+        ]
+        lines.append(_row("Findings", " / ".join(summary_parts)))
+    lines += [
         _row("Approval", receipt.approval),
         _row("Cost", receipt.cost_display),
         _row("Result", receipt.result),
@@ -409,6 +503,25 @@ def render_full_shard_receipt(receipt: ShardReceipt) -> str:
             lines.append(f"{_INDENT}  {cr}")
     else:
         lines.append(f"{_INDENT}{receipt.checks_display}")
+    lines.append("")
+
+    lines.append(f"{_INDENT}FINDINGS")
+    if receipt.findings:
+        current_severity: str | None = None
+        for finding in receipt.findings:
+            if finding.severity != current_severity:
+                if current_severity is not None:
+                    lines.append("")
+                lines.append(f"{_INDENT}{finding.severity.upper()}")
+                current_severity = finding.severity
+            icon = _FINDING_ICONS.get(finding.severity, "-")
+            msg = finding.message
+            if finding.path:
+                loc = f"{finding.path}:{finding.line}" if finding.line is not None else finding.path
+                msg = f"{msg}  [{loc}]"
+            lines.append(f"{_INDENT}  {icon} {msg}")
+    else:
+        lines.append(f"{_INDENT}  No structured findings recorded.")
     lines.append("")
 
     lines.append(f"{_INDENT}CHANGES")
