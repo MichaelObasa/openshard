@@ -823,6 +823,19 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
         if _fb_note:
             click.echo(f"  Note: {_fb_note}")
 
+    # Feedback Signals v0 (--more / --full)
+    if detail != "default" and index is not None:
+        from openshard.history.feedback import load_feedback_for_shard
+        from openshard.history.shard_contract import _make_shard_id
+        _shard_id = _make_shard_id(entry.get("timestamp", ""), index)
+        _fb_signals = load_feedback_for_shard(_shard_id)
+        if _fb_signals:
+            _fb = _fb_signals[-1]
+            click.echo("\nFEEDBACK")
+            click.echo(f"{'Outcome':<12}{_fb.outcome}")
+            if _fb.note:
+                click.echo(f"{'Note':<12}{_fb.note}")
+
     # Token / model detail (--more / --full)
     if detail != "default":
         full_model = entry.get("execution_model", "")
@@ -1239,9 +1252,17 @@ _ALLOWED_CORRECTION_REASONS = [
     "too-expensive", "too-slow", "unsafe-command", "unclear-output",
     "hallucinated", "manual-edit", "other",
 ]
+_ALLOWED_OUTCOMES_V0 = ["accepted", "rejected", "partial", "useful", "wrong", "needs-retry"]
 
 
 @cli.command()
+@click.option("--last", "target_last", is_flag=True, default=False, help="Target the most recent run (currently the only supported target).")
+@click.option(
+    "--outcome",
+    type=click.Choice(_ALLOWED_OUTCOMES_V0, case_sensitive=False),
+    default=None,
+    help="Outcome signal for this run: accepted, rejected, partial, useful, wrong, or needs-retry.",
+)
 @click.option(
     "--rating",
     type=click.Choice(["good", "bad", "mixed"], case_sensitive=False),
@@ -1261,8 +1282,25 @@ _ALLOWED_CORRECTION_REASONS = [
     help="Why you corrected or rejected the run.",
 )
 @click.option("--note", default="", help="Optional free-text note about this run.")
-def feedback(rating: str | None, action: str | None, reason: str | None, note: str) -> None:
+def feedback(target_last: bool, outcome: str | None, rating: str | None, action: str | None, reason: str | None, note: str) -> None:
     """Attach developer feedback to the most recent run."""
+    # Outcome-based path (Feedback Signals v0) — append-only, separate feedback.jsonl
+    if outcome is not None:
+        from openshard.history.feedback import build_feedback_record, log_feedback_record
+        log_path = Path.cwd() / _LOG_PATH
+        entries = _load_run_entries(log_path)
+        if not entries:
+            raise click.ClickException("No run history found. Run an OpenShard task before saving feedback.")
+        run_index = len(entries) - 1
+        record = build_feedback_record(entries[-1], run_index, outcome.lower(), note)
+        log_feedback_record(record)
+        click.echo("Feedback saved.")
+        click.echo(f"Shard:    {record.shard_id}")
+        click.echo(f"Outcome:  {record.outcome}")
+        if note:
+            click.echo(f"Note:     {note}")
+        return
+
     if not rating and not action and not reason and not note:
         raise click.ClickException("Provide at least one of --rating, --action, --reason, or --note.")
     log_path = Path.cwd() / _LOG_PATH
