@@ -6,7 +6,9 @@ import click
 from click.testing import CliRunner
 
 from openshard.history.shard_contract import (
+    ShardFinding,
     ShardReceipt,
+    _extract_findings,
     build_shard_receipt,
     render_compact_shard_receipt,
     render_full_shard_receipt,
@@ -732,3 +734,232 @@ class TestReceiptAppearsBeforeTimeFoooter(unittest.TestCase):
         receipt_idx = out.index("RECEIPT —")
         time_idx = out.index("Time:")
         self.assertLess(receipt_idx, time_idx)
+
+
+class TestShardFindings(unittest.TestCase):
+    """Agent Notes / Findings v0: contract, extraction, and rendering."""
+
+    # ------------------------------------------------------------------ #
+    # Test 1: Structured finding dicts convert to ShardFinding objects    #
+    # ------------------------------------------------------------------ #
+    def test_structured_finding_dicts_convert(self):
+        entry = {
+            "findings": [
+                {"severity": "Critical", "message": "Database public IP enabled", "path": "main.tf", "line": 42},
+                {"severity": "High", "message": "Bucket ACLs enabled"},
+            ]
+        }
+        findings = _extract_findings(entry)
+        self.assertEqual(len(findings), 2)
+        self.assertIsInstance(findings[0], ShardFinding)
+        self.assertEqual(findings[0].severity, "Critical")
+        self.assertEqual(findings[0].message, "Database public IP enabled")
+        self.assertEqual(findings[0].path, "main.tf")
+        self.assertEqual(findings[0].line, 42)
+        self.assertEqual(findings[1].severity, "High")
+        self.assertIsNone(findings[1].path)
+
+    # ------------------------------------------------------------------ #
+    # Test 2: Missing findings does not crash                              #
+    # ------------------------------------------------------------------ #
+    def test_missing_findings_no_crash(self):
+        entry = {"task": "add feature", "timestamp": "2026-04-13T00:00:00Z"}
+        findings = _extract_findings(entry)
+        self.assertEqual(findings, [])
+
+    # ------------------------------------------------------------------ #
+    # Test 3: final_report.findings renders in full SHARD receipt         #
+    # ------------------------------------------------------------------ #
+    def test_final_report_findings_render_in_full_receipt(self):
+        entry = {
+            "task": "IaC review",
+            "timestamp": "2026-05-01T00:00:00Z",
+            "final_report": {
+                "findings": [
+                    {"severity": "High", "message": "Bucket ACLs enabled"},
+                ],
+                "warnings": [],
+            },
+        }
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("FINDINGS", out)
+        self.assertIn("Bucket ACLs enabled", out)
+
+    # ------------------------------------------------------------------ #
+    # Test 4: final_report.warnings render as Note findings               #
+    # ------------------------------------------------------------------ #
+    def test_final_report_warnings_render_as_note(self):
+        entry = {
+            "task": "review",
+            "timestamp": "2026-05-01T00:00:00Z",
+            "final_report": {
+                "warnings": ["Missing lifecycle rules on storage buckets"],
+            },
+        }
+        findings = _extract_findings(entry)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].severity, "Note")
+        self.assertEqual(findings[0].message, "Missing lifecycle rules on storage buckets")
+
+    # ------------------------------------------------------------------ #
+    # Test 5: Findings appear after CHECKS and before CHANGES             #
+    # ------------------------------------------------------------------ #
+    def test_findings_section_position_in_full_receipt(self):
+        entry = {
+            "task": "IaC review",
+            "timestamp": "2026-05-01T00:00:00Z",
+            "findings": [{"severity": "Medium", "message": "Missing tags"}],
+        }
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        checks_idx = out.index("CHECKS")
+        findings_idx = out.index("FINDINGS")
+        changes_idx = out.index("CHANGES")
+        self.assertLess(checks_idx, findings_idx)
+        self.assertLess(findings_idx, changes_idx)
+
+    # ------------------------------------------------------------------ #
+    # Test 6: Findings grouped in severity order (Critical before High)   #
+    # ------------------------------------------------------------------ #
+    def test_findings_grouped_by_severity_order(self):
+        entry = {
+            "task": "review",
+            "timestamp": "2026-05-01T00:00:00Z",
+            "findings": [
+                {"severity": "Medium", "message": "Missing tags"},
+                {"severity": "Critical", "message": "Public IP enabled"},
+                {"severity": "High", "message": "Bucket ACLs"},
+            ],
+        }
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        critical_idx = out.index("CRITICAL")
+        high_idx = out.index("HIGH")
+        medium_idx = out.index("MEDIUM")
+        self.assertLess(critical_idx, high_idx)
+        self.assertLess(high_idx, medium_idx)
+
+    # ------------------------------------------------------------------ #
+    # Test 7: Severity icons — Critical ✖, High ⚠, Medium ~              #
+    # ------------------------------------------------------------------ #
+    def test_severity_icons_present(self):
+        entry = {
+            "task": "review",
+            "timestamp": "2026-05-01T00:00:00Z",
+            "findings": [
+                {"severity": "Critical", "message": "Public IP"},
+                {"severity": "High", "message": "ACLs"},
+                {"severity": "Medium", "message": "Tags"},
+            ],
+        }
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("✖", out)
+        self.assertIn("⚠", out)
+        self.assertIn("~", out)
+
+    # ------------------------------------------------------------------ #
+    # Test 8: No fake findings rendered when entry has none               #
+    # ------------------------------------------------------------------ #
+    def test_no_fake_findings_when_entry_has_none(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("FINDINGS", out)
+        self.assertIn("No structured findings recorded.", out)
+        self.assertNotIn("✖", out)
+        self.assertNotIn("⚠", out)
+
+    # ------------------------------------------------------------------ #
+    # Test 9: Raw internal terms not introduced in findings output        #
+    # ------------------------------------------------------------------ #
+    def test_no_internal_terms_in_findings_output(self):
+        entry = {
+            "task": "review",
+            "timestamp": "2026-05-01T00:00:00Z",
+            "findings": [{"severity": "High", "message": "Open port found"}],
+        }
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        forbidden = (
+            "candidate",
+            "routing advisory",
+            "verification loop",
+            "plan ledger",
+            "internal form factor",
+        )
+        for term in forbidden:
+            self.assertNotIn(term, out.lower(), f"Found forbidden term: {term!r}")
+
+    # ------------------------------------------------------------------ #
+    # Test 10: Compact receipt still renders correctly with findings      #
+    # ------------------------------------------------------------------ #
+    def test_compact_receipt_renders_with_findings(self):
+        entry = {
+            "task": "IaC audit",
+            "timestamp": "2026-05-01T00:00:00Z",
+            "findings": [
+                {"severity": "Critical", "message": "Public IP enabled"},
+                {"severity": "High", "message": "Bucket ACLs"},
+                {"severity": "High", "message": "Logging disabled"},
+            ],
+        }
+        receipt = build_shard_receipt(entry)
+        out = render_compact_shard_receipt(receipt)
+        self.assertIn("RECEIPT", out)
+        self.assertIn("Findings", out)
+        self.assertIn("1 critical", out)
+        self.assertIn("2 high", out)
+
+    # ------------------------------------------------------------------ #
+    # Test 11: Full receipt uses polished separator style                 #
+    # ------------------------------------------------------------------ #
+    def test_full_receipt_separator_style_unchanged(self):
+        receipt = build_shard_receipt(_rich_native_entry(), index=0)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("━", out)
+        self.assertIn("  SHARD —", out)
+        self.assertIn("  RECEIPT", out)
+
+    # ------------------------------------------------------------------ #
+    # Test 12: Old run-history entries still render                       #
+    # ------------------------------------------------------------------ #
+    def test_old_entries_render_without_crash(self):
+        old_entry = {
+            "task": "legacy run from v0.1",
+            "timestamp": "2025-01-01T00:00:00Z",
+            "execution_model": "anthropic/claude-3-opus",
+            "summary": "Completed.",
+        }
+        receipt = build_shard_receipt(old_entry, index=0)
+        compact = render_compact_shard_receipt(receipt)
+        full = render_full_shard_receipt(receipt)
+        self.assertIn("RECEIPT", compact)
+        self.assertIn("SHARD", full)
+        self.assertIn("No structured findings recorded.", full)
+        self.assertEqual(receipt.findings, [])
+        self.assertEqual(receipt.agent_notes, [])
+
+    # ------------------------------------------------------------------ #
+    # Bonus: agent_notes preserved separately from findings               #
+    # ------------------------------------------------------------------ #
+    def test_agent_notes_preserved_on_receipt(self):
+        entry = {
+            "task": "review",
+            "timestamp": "2026-05-01T00:00:00Z",
+            "agent_notes": ["Observed elevated network activity", "Terraform plan generated successfully"],
+        }
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.agent_notes, ["Observed elevated network activity", "Terraform plan generated successfully"])
+        self.assertEqual(len(receipt.findings), 2)
+        self.assertTrue(all(f.severity == "Note" for f in receipt.findings))
+
+    def test_plan_warnings_render_as_note_not_medium(self):
+        entry = {
+            "task": "review",
+            "timestamp": "2026-05-01T00:00:00Z",
+            "plan": {"intent": "implementation", "risk": "medium", "suggested_steps": [], "warnings": ["Large change scope detected"]},
+        }
+        findings = _extract_findings(entry)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].severity, "Note")
