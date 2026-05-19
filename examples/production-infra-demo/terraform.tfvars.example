@@ -1,0 +1,7 @@
+# Copy this file to terraform.tfvars and replace all placeholder values.
+# Never commit terraform.tfvars to source control — it is listed in .gitignore.
+
+project_id  = "your-gcp-project-id"
+region      = "europe-west2"
+environment = "dev"
+db_password = "REPLACE_WITH_SECURE_PASSWORD"

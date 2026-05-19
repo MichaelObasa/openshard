@@ -1,0 +1,90 @@
+[
+  {
+    "name": "Explain repo",
+    "category": "repo_explanation",
+    "where": "tui",
+    "input": "explain this repo",
+    "expected": "OpenShard summarises the repo structure and records a read-only run receipt",
+    "safety_note": "Read-only. No files are written. Safe to run on any public repo."
+  },
+  {
+    "name": "Production IaC hardening review",
+    "category": "production_iac_hardening",
+    "where": "tui",
+    "input": "Review and harden this deliberately flawed Terraform codebase. Assess it through three lenses: security and compliance posture for a bank-facing product, operability for a 2am incident with no infrastructure specialist on call, and developer experience for a 5-10 person engineering team that is not infrastructure-specialist. Identify critical, high, and medium risks. Explain trade-offs. Propose safe hardening changes. Prioritise ruthlessly. Do not apply changes directly without review.",
+    "expected": "OpenShard reviews the Terraform codebase, identifies prioritised infrastructure risks across security, operability, and developer experience, records a run receipt, and proposes changes reviewable with openshard last --more",
+    "safety_note": "Use the DocuVault example in examples/production-infra-demo/ or a sanitised copy. No real project IDs, accounts, IPs, or secrets."
+  },
+  {
+    "name": "Terraform networking review",
+    "category": "terraform_networking_review",
+    "where": "tui",
+    "input": "Review this Terraform networking configuration and identify risky firewall rules, overly broad ingress, missing egress controls, and subnet design issues before apply.",
+    "expected": "OpenShard identifies open ingress rules, missing VPC service controls, and subnet risks, then records a run receipt",
+    "safety_note": "Use sanitised Terraform with fake CIDRs and no real account IDs."
+  },
+  {
+    "name": "IAM policy security review",
+    "category": "iam_security_review",
+    "where": "tui",
+    "input": "Review this IAM configuration and identify privilege escalation risks, overly broad roles, wildcard permissions, and missing least-privilege controls.",
+    "expected": "OpenShard flags roles/editor usage, missing conditions, and overly broad service account bindings, then records a run receipt",
+    "safety_note": "Use sanitised IAM resources with fake project IDs and no real service account emails."
+  },
+  {
+    "name": "Secrets hygiene review",
+    "category": "secrets_review",
+    "where": "tui",
+    "input": "Review how secrets are managed in this Terraform codebase and identify any hard-coded values, insecure references, or missing rotation controls.",
+    "expected": "OpenShard identifies hard-coded secret values, insecure placeholder patterns, and missing lifecycle policies, then records a run receipt",
+    "safety_note": "Use sanitised secrets.tf with placeholder values only. Never include real secrets in the demo."
+  },
+  {
+    "name": "Observability and alerting review",
+    "category": "observability_review",
+    "where": "tui",
+    "input": "Review the monitoring and alerting configuration in this Terraform codebase and identify alert fatigue risks, missing uptime checks, and gaps in incident visibility.",
+    "expected": "OpenShard identifies threshold-at-zero alert policies, missing notification channels, and absent uptime checks, then records a run receipt",
+    "safety_note": "Read-only analysis. No real monitoring config or production data."
+  },
+  {
+    "name": "CI/CD pipeline safety review",
+    "category": "cicd_pipeline_review",
+    "where": "tui",
+    "input": "Review this CI/CD pipeline configuration and identify unguarded production deploys, missing approval gates, exposed secrets in environment variables, and risky automation patterns.",
+    "expected": "OpenShard identifies unsafe deploy patterns, missing manual approval steps, and secret exposure risks, then records a run receipt",
+    "safety_note": "Use a sanitised pipeline file with fake org names and no real tokens or environment configs."
+  },
+  {
+    "name": "State management review",
+    "category": "state_management_review",
+    "where": "tui",
+    "input": "Review the Terraform state configuration in this codebase and identify risks from hard-coded backend settings, missing state locking, and insecure state access patterns.",
+    "expected": "OpenShard identifies hard-coded bucket names, missing state locking, and insecure state access, then records a run receipt",
+    "safety_note": "Read-only analysis. No real state files or backend credentials."
+  },
+  {
+    "name": "Inspect recent run",
+    "category": "receipt_inspection",
+    "where": "shell",
+    "input": "openshard last",
+    "expected": "Shows the most recent run receipt: task, model, cost, status, and check results",
+    "safety_note": "Read-only command. Shows local run history only."
+  },
+  {
+    "name": "Preview latest diff",
+    "category": "diff_preview",
+    "where": "shell",
+    "input": "openshard diff-last",
+    "expected": "Shows a unified diff of the files the last run proposed to change, before any apply",
+    "safety_note": "Read-only. No changes made to disk."
+  },
+  {
+    "name": "Dry-run apply latest changes",
+    "category": "dry_run_apply",
+    "where": "shell",
+    "input": "openshard apply-last --dry-run",
+    "expected": "Previews which files would be written to disk without making any actual changes",
+    "safety_note": "Dry run only. No files are written."
+  }
+]
