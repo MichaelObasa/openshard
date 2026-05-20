@@ -963,3 +963,158 @@ class TestShardFindings(unittest.TestCase):
         findings = _extract_findings(entry)
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].severity, "Note")
+
+
+class TestContextProvenancePolish(unittest.TestCase):
+    def test_minimal_entry_context_not_recorded(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("CONTEXT", out)
+        self.assertIsNone(receipt.repo)
+        self.assertIsNone(receipt.branch)
+        self.assertIsNone(receipt.context_quality)
+        self.assertIsNone(receipt.files_read_count)
+        self.assertEqual(receipt.inspected_files, [])
+        self.assertIn("Not recorded", out)
+
+    def test_context_quality_level_mapping(self):
+        for level, expected in [("good", "Good"), ("strong", "Good"), ("fair", "Partial"), ("weak", "Weak")]:
+            entry = dict(_minimal_entry())
+            entry["context_quality_score"] = {"level": level}
+            receipt = build_shard_receipt(entry)
+            self.assertEqual(receipt.context_quality, expected, f"level={level!r}")
+
+    def test_context_quality_unknown_gives_not_recorded(self):
+        for level in ("unknown", "", None):
+            entry = dict(_minimal_entry())
+            entry["context_quality_score"] = {"level": level}
+            receipt = build_shard_receipt(entry)
+            out = render_full_shard_receipt(receipt)
+            self.assertIsNone(receipt.context_quality, f"level={level!r}")
+            quality_line = next(ln for ln in out.splitlines() if "Quality" in ln)
+            self.assertIn("Not recorded", quality_line)
+
+    def test_inspected_files_from_file_context_paths(self):
+        entry = dict(_minimal_entry())
+        entry["file_context"] = {"files_read": 2, "paths": ["openshard/cli/main.py", "tests/test_shard_contract.py"]}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("INSPECTED FILES", out)
+        self.assertIn("openshard/cli/main.py", out)
+        self.assertIn("tests/test_shard_contract.py", out)
+
+    def test_inspected_files_capped_at_10(self):
+        entry = dict(_minimal_entry())
+        paths = [f"file_{i}.py" for i in range(15)]
+        entry["file_context"] = {"files_read": 15, "paths": paths}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("(+5 more)", out)
+        self.assertIn("file_0.py", out)
+        self.assertNotIn("file_10.py", out)
+
+    def test_diff_review_changed_files_not_in_inspected_files(self):
+        entry = dict(_minimal_entry())
+        entry["diff_review"] = {"changed_files": ["a.py", "b.py"]}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertEqual(receipt.inspected_files, [])
+        inspected_idx = out.index("INSPECTED FILES")
+        policy_idx = out.index("POLICY")
+        inspected_block = out[inspected_idx:policy_idx]
+        self.assertNotIn("a.py", inspected_block)
+        self.assertIn("Not recorded", inspected_block)
+
+    def test_diff_review_used_as_touched_fallback(self):
+        entry = dict(_minimal_entry())
+        entry["diff_review"] = {"changed_files": ["x.py", "y.py"]}
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.files_touched, ["x.py", "y.py"])
+        out = render_full_shard_receipt(receipt)
+        touched_line = next(ln for ln in out.splitlines() if "Touched" in ln)
+        self.assertIn("2 files", touched_line)
+
+    def test_touched_renders_as_count(self):
+        receipt = build_shard_receipt(_rich_native_entry())
+        out = render_full_shard_receipt(receipt)
+        touched_line = next(ln for ln in out.splitlines() if "Touched" in ln)
+        self.assertIn("3 files", touched_line)
+        self.assertNotIn(",", touched_line)
+
+    def test_repo_set_from_workspace_path(self):
+        entry = dict(_minimal_entry())
+        entry["workspace_path"] = r"C:\Users\Michael\openshard"
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.repo, r"C:\Users\Michael\openshard")
+        out = render_full_shard_receipt(receipt)
+        self.assertIn(r"C:\Users\Michael\openshard", out)
+
+    def test_git_state_from_observation(self):
+        for dirty, expected in [(True, "Changes pending"), (False, "Clean")]:
+            entry = dict(_minimal_entry())
+            entry["observation"] = {"dirty_diff_present": dirty}
+            receipt = build_shard_receipt(entry)
+            self.assertEqual(receipt.git_state, expected, f"dirty={dirty!r}")
+            out = render_full_shard_receipt(receipt)
+            git_state_line = next(ln for ln in out.splitlines() if "Git state" in ln)
+            self.assertIn(expected, git_state_line)
+
+    def test_git_state_absent_gives_not_recorded(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        git_state_line = next(ln for ln in out.splitlines() if "Git state" in ln)
+        self.assertIn("Not recorded", git_state_line)
+
+    def test_no_internal_terms_in_context_rendering(self):
+        entry = dict(_rich_native_entry())
+        entry["workspace_path"] = r"C:\Users\Michael\openshard"
+        entry["context_quality_score"] = {"level": "good"}
+        entry["observation"] = {"dirty_diff_present": True}
+        entry["file_context"] = {"files_read": 3, "paths": ["a.py", "b.py", "c.py"]}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        forbidden = (
+            "routing advisory",
+            "plan ledger",
+            "context_quality_score",
+            "dirty_diff_present",
+            "snippet_files",
+            "file_context",
+            "native context packet",
+        )
+        for term in forbidden:
+            self.assertNotIn(term, out.lower(), f"Found forbidden term: {term!r}")
+
+    def test_compact_receipt_unchanged(self):
+        receipt = build_shard_receipt(_rich_native_entry())
+        out = render_compact_shard_receipt(receipt)
+        self.assertNotIn("CONTEXT", out)
+        self.assertNotIn("INSPECTED FILES", out)
+        self.assertIn("RECEIPT", out)
+
+    def test_findings_and_inspected_files_coexist(self):
+        entry = dict(_rich_native_entry())
+        entry["findings"] = [{"severity": "High", "message": "Exposed credentials"}]
+        entry["file_context"] = {"files_read": 1, "paths": ["secrets.py"]}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("FINDINGS", out)
+        self.assertIn("Exposed credentials", out)
+        self.assertIn("CONTEXT", out)
+        self.assertIn("INSPECTED FILES", out)
+        self.assertIn("secrets.py", out)
+
+    def test_section_order_in_full_receipt(self):
+        entry = dict(_rich_native_entry())
+        entry["workspace_path"] = r"C:\Users\Michael\openshard"
+        entry["context_quality_score"] = {"level": "good"}
+        entry["observation"] = {"dirty_diff_present": True}
+        entry["file_context"] = {"files_read": 2, "paths": ["a.py", "b.py"]}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        idx = {s: out.index(s) for s in ["CONTEXT", "INSPECTED FILES", "POLICY", "CHECKS", "FINDINGS", "CHANGES"]}
+        self.assertLess(idx["CONTEXT"], idx["INSPECTED FILES"])
+        self.assertLess(idx["INSPECTED FILES"], idx["POLICY"])
+        self.assertLess(idx["POLICY"], idx["CHECKS"])
+        self.assertLess(idx["CHECKS"], idx["FINDINGS"])
+        self.assertLess(idx["FINDINGS"], idx["CHANGES"])

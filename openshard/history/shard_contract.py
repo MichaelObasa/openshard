@@ -194,6 +194,9 @@ class ShardReceipt:
     repo: Optional[str] = None
     branch: Optional[str] = None
     git_state: Optional[str] = None
+    context_quality: Optional[str] = None
+    files_read_count: Optional[int] = None
+    inspected_files: list[str] = field(default_factory=list)
     files_touched: list[str] = field(default_factory=list)
     files_detail: list[dict] = field(default_factory=list)
     allowed_paths: list[str] = field(default_factory=list)
@@ -318,6 +321,10 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     files_touched = [f["path"] for f in files_detail_raw if isinstance(f, dict) and "path" in f]
 
     diff_review = entry.get("diff_review") or {}
+    if not files_touched:
+        _dr_changed = diff_review.get("changed_files")
+        if isinstance(_dr_changed, list):
+            files_touched = [f for f in _dr_changed if isinstance(f, str)]
     diff_added = diff_review.get("added_lines")
     diff_removed = diff_review.get("removed_lines")
     if diff_added is None:
@@ -349,6 +356,39 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     findings = _extract_findings(entry)
     agent_notes = _safe_str_list(entry.get("agent_notes"))
 
+    repo = entry.get("workspace_path") or None
+
+    obs = entry.get("observation") or {}
+    _dirty = obs.get("dirty_diff_present")
+    if _dirty is True:
+        git_state = "Changes pending"
+    elif _dirty is False:
+        git_state = "Clean"
+    else:
+        git_state = None
+
+    cqs = entry.get("context_quality_score") or {}
+    _cqs_level = cqs.get("level") if isinstance(cqs, dict) else None
+    if _cqs_level in ("good", "strong"):
+        context_quality: Optional[str] = "Good"
+    elif _cqs_level == "fair":
+        context_quality = "Partial"
+    elif _cqs_level == "weak":
+        context_quality = "Weak"
+    else:
+        context_quality = None
+
+    _fc = entry.get("file_context") or {}
+    _fc_read = _fc.get("files_read")
+    _fc_paths = _fc.get("paths")
+    if type(_fc_read) is int:
+        files_read_count: Optional[int] = _fc_read
+    else:
+        _fr2 = entry.get("final_report") or {}
+        _snip = _fr2.get("snippet_files")
+        files_read_count = _snip if type(_snip) is int else None
+    inspected_files = [p for p in _fc_paths if isinstance(p, str)] if isinstance(_fc_paths, list) else []
+
     return ShardReceipt(
         shard_id=_make_shard_id(timestamp, index),
         created_at=timestamp,
@@ -366,6 +406,12 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         result=result,
         status=status,
         duration_seconds=entry.get("duration_seconds"),
+        repo=repo,
+        branch=None,
+        git_state=git_state,
+        context_quality=context_quality,
+        files_read_count=files_read_count,
+        inspected_files=inspected_files,
         files_detail=files_detail_raw,
         files_touched=files_touched,
         diff_added=diff_added,
@@ -473,16 +519,29 @@ def render_full_shard_receipt(receipt: ShardReceipt) -> str:
     lines.append("")
 
     lines.append(f"{_INDENT}CONTEXT")
-    lines.append(_row("Repo", receipt.repo or "-"))
-    lines.append(_row("Branch", receipt.branch or "-"))
-    lines.append(_row("Git state", receipt.git_state or "-"))
-    if receipt.files_touched:
-        touched_str = ", ".join(receipt.files_touched[:5])
-        if len(receipt.files_touched) > 5:
-            touched_str += f" (+{len(receipt.files_touched) - 5} more)"
-        lines.append(_row("Touched", touched_str))
+    lines.append(_row("Repo", receipt.repo or "Not recorded"))
+    lines.append(_row("Branch", receipt.branch or "Not recorded"))
+    lines.append(_row("Git state", receipt.git_state or "Not recorded"))
+    lines.append(_row("Quality", receipt.context_quality or "Not recorded"))
+    if receipt.files_read_count is not None:
+        lines.append(_row("Read", f"{receipt.files_read_count} file{'s' if receipt.files_read_count != 1 else ''}"))
+    else:
+        lines.append(_row("Read", "Not recorded"))
+    touched_count = len(receipt.files_touched)
+    if touched_count > 0:
+        lines.append(_row("Touched", f"{touched_count} file{'s' if touched_count != 1 else ''}"))
     else:
         lines.append(_row("Touched", "-"))
+    lines.append("")
+
+    lines.append(f"{_INDENT}INSPECTED FILES")
+    if receipt.inspected_files:
+        for f in receipt.inspected_files[:10]:
+            lines.append(f"{_INDENT}  {f}")
+        if len(receipt.inspected_files) > 10:
+            lines.append(f"{_INDENT}  (+{len(receipt.inspected_files) - 10} more)")
+    else:
+        lines.append(f"{_INDENT}  Not recorded")
     lines.append("")
 
     lines.append(f"{_INDENT}POLICY")
