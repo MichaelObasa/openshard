@@ -1,15 +1,14 @@
 # OpenShard 60-Second Demo Script
 
-A tight script for recording or presenting a quick OpenShard demo. Uses the OpenShard repo itself — no additional setup required.
+A tight script for recording or presenting a quick OpenShard demo. Uses the DocuVault production-infra demo folder so the pack context is clear to the viewer.
 
-## Pre-roll checklist
+## Pre-recording checklist
 
-Before recording:
-
-- [ ] OpenShard installed: `pip install openshard`
-- [ ] In the openshard repo directory
-- [ ] Terminal window visible, clean, no TUI open yet
-- [ ] Font size large, contrast high
+- [ ] Clean terminal — no open TUI, no previous output visible
+- [ ] Zoom level: large font, high contrast (viewer must read terminal output)
+- [ ] Working directory: `examples/production-infra-demo` (not repo root — the IaC pack is strongest from here)
+- [ ] No secrets visible in shell history, env, or `.openshard/` output — check before recording
+- [ ] Use an existing recorded run for `openshard last --more` — avoid triggering another $0.30 model run
 
 ---
 
@@ -18,70 +17,70 @@ Before recording:
 ### Beat 1 — Hook (~12 seconds)
 
 **Say:**
-> "AI agents can write code and run commands. But do you know what changed? Was it safe? What did it cost? And is there a receipt you can audit later?"
+> "AI agents can write code and run commands. But do you know what changed, what it cost, or whether it was safe? OpenShard is the control layer for that."
 
 **Viewer sees:** Empty terminal prompt.
 
 ---
 
-### Beat 2 — Launch (~12 seconds)
+### Beat 2 — Navigate and launch (~12 seconds)
 
 **Say:**
-> "This is OpenShard. Let me show you. I'll launch the TUI and give it a natural-language task."
+> "This is the TUI. It ships with workflow packs — pre-built tasks for production-grade engineering work."
 
 **Do:**
 ```bash
+cd examples/production-infra-demo
 openshard tui
 ```
 
-Type in the TUI input: `explain this repo`
+In the TUI, type `/packs` and press Enter.
 
-Press Enter.
-
-**Viewer sees:** TUI launches. Task input visible. Task submitted.
+**Viewer sees:** TUI home screen, then the packs list (six packs rendered cleanly).
 
 ---
 
-### Beat 3 — Run (~12 seconds)
+### Beat 3 — Pack detail (~12 seconds)
+
+**Do in TUI:** `/pack production-iac-hardening`
 
 **Say:**
-> "OpenShard runs this through its controlled workflow, routes it to the right model, and records everything — the task, the model, the steps, the cost."
+> "Each pack is a controlled, reviewable task. OpenShard wraps the AI work with controls and receipts — you know what ran, what context was recorded, and what changed."
 
-**Viewer sees:** TUI shows the run in progress. Recent activity panel updates.
+**Viewer sees:** Pack title, summary, tags, and recommended context.
 
 ---
 
 ### Beat 4 — Receipt (~12 seconds)
 
 **Say:**
-> "Now I'll check the receipt."
+> "Here's the Shard receipt from the last run."
 
-**Do in TUI:** `/last more`
-
-Or from the shell after exiting the TUI:
+**Do:** Exit TUI. In shell:
 
 ```bash
 openshard last --more
 ```
 
 **Say:**
-> "Here it is: the task, the model that ran it, the cost, the checks, the outcome. Every run has one."
+> "Model used. Context, when recorded. Changes. Findings, when structured findings exist. Cost. Feedback. Every run leaves one of these."
 
-**Viewer sees:** Run receipt with task, model, cost, check results, status.
+**Viewer sees:** Full SHARD block — Task, Execution, Context, Findings, Changes, Cost.
 
 ---
 
 ### Beat 5 — Close (~12 seconds)
 
 **Say:**
-> "Every AI action, tracked and auditable. You know what ran. You know what it cost. You can inspect it before anything touches your codebase. That's OpenShard."
+> "OpenShard is the control layer for AI coding agents."
 
-**Viewer sees:** Receipt on screen.
+**Viewer sees:** Receipt still on screen.
 
 ---
 
 ## Notes
 
-- Do not say "runs in a sandbox" for a read-only explain task. Use sandbox and dry-run language only for write and apply tasks.
-- If the run completes quickly, pause briefly before showing the receipt — let the viewer absorb the TUI output.
-- If anything goes wrong mid-recording, `openshard last --more` still shows the full receipt from a previous run.
+- Do not say "runs in a sandbox" for a read-only pack. Sandbox language applies only to write/apply tasks.
+- Context and Findings may show "Not recorded" depending on run type — that is honest, not a bug.
+- If `openshard last --more` is slow to render, cut to it pre-queued.
+- If anything goes wrong mid-recording, `openshard last --more` still shows the receipt from the prior run.

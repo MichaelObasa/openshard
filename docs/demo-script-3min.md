@@ -2,129 +2,109 @@
 
 A deeper demo showing OpenShard on production-shaped engineering work. Uses the DocuVault fictional IaC hardening scenario from `examples/production-infra-demo/`.
 
-## Pre-roll checklist
+## Pre-recording checklist
 
-Before recording:
-
-- [ ] OpenShard installed: `pip install openshard`
-- [ ] In the openshard repo root (so the path below resolves)
-- [ ] Terminal window visible, clean, no TUI open yet
-- [ ] `examples/production-infra-demo/demo-task.md` open and ready to copy
-- [ ] Font size large, contrast high
+- [ ] Clean terminal — no open TUI, no previous output visible
+- [ ] Zoom level: large font, high contrast (viewer must read Shard output)
+- [ ] Start from repo root, then `cd` to the demo folder as part of the recording
+- [ ] No secrets visible in shell history, env, or `.openshard/` output — check before recording
+- [ ] Confirm `.openshard/` run output is public-safe: no real project IDs, real IPs, or company names
+- [ ] Use the existing recorded run for the receipt — do not rerun the $0.30 DocuVault model task unless explicitly approved
 
 ---
 
-## Act 1 — The TUI (30 seconds)
+## Act 1 — Install (~20 seconds)
 
 **Say:**
-> "Let me show you OpenShard. This is the TUI — the control layer that sits in front of your AI agent."
+> "OpenShard installs in one command. No hosted infrastructure — it runs locally."
+
+**Do:**
+```bash
+pipx install git+https://github.com/MichaelObasa/openshard.git
+```
+
+**Say:**
+> "For local development you'd clone and use `pip install -e .` — but for a standard install, pipx is the right path."
+
+**Viewer sees:** Install output. Single command, no package registry dependency.
+
+---
+
+## Act 2 — Navigate to demo and show the pack prompt (~30 seconds)
 
 **Do:**
 ```bash
 cd examples/production-infra-demo
-openshard tui
+openshard packs prompt production-iac-hardening
 ```
 
 **Say:**
-> "You've got a task input, run controls, and a recent activity panel that tracks everything that's run. OpenShard isn't the AI — it's what wraps the AI and makes sure you know what happened."
+> "This is the production-iac-hardening pack. DocuVault is a fictional document-processing platform — entirely public-safe. No real secrets, no real company. The Terraform is deliberately flawed so we get real findings."
 
-**Viewer sees:** TUI home screen. Task input at top, recent activity panel, run controls visible.
+**Viewer sees:** Raw pack prompt text printed to the terminal.
 
 ---
 
-## Act 2 — Running a production-shaped task (45 seconds)
+## Act 3 — Show existing run output (~30 seconds)
 
-**Say:**
-> "I'm going to give it a real engineering task. Not a toy example. This is a hardening review of a deliberately flawed Terraform codebase — a fictional document-processing platform called DocuVault."
-
-**Do:** Paste the task from `examples/production-infra-demo/demo-task.md` into the TUI input:
-
-```
-Review and harden this deliberately flawed Terraform codebase.
-Assess it through three lenses: security and compliance posture
-for a bank-facing product, operability for a 2am incident with
-no infrastructure specialist on call, and developer experience
-for a 5–10 person engineering team. Identify critical, high,
-and medium risks. Explain trade-offs. Propose safe hardening
-changes. Prioritise ruthlessly. Do not apply without review.
+**Do:**
+```bash
+openshard last
 ```
 
-Press Enter.
-
 **Say:**
-> "OpenShard routes this to the right model and runs the task through its controlled workflow. Three lenses: security for a bank-facing product, 2am operability, and developer experience for a small team."
+> "Here's the most recent run against the DocuVault Terraform. I'm using the existing recorded output rather than running the model again."
 
-**Viewer sees:** Task submitted. TUI shows run in progress. Model visible in activity.
+**Viewer sees:** Compact receipt block — task summary, model, cost, result.
 
 ---
 
-## Act 3 — Recent activity (30 seconds)
+## Act 4 — Walk through the full Shard receipt (~60 seconds)
 
-**Say:**
-> "While it runs — you can see the recent activity panel. Every previous run is here: timestamped, costed, with its outcome. This is your audit trail."
-
-**Do in TUI:** `/last`
-
-**Say:**
-> "Here's the previous run. Task, model, duration, cost, and whether it passed checks."
-
-**Viewer sees:** Recent activity panel. `/last` shows the last run receipt inline.
-
----
-
-## Act 4 — The receipt (30 seconds)
-
-**Do:** Exit TUI. Run in shell:
-
+**Do:**
 ```bash
 openshard last --more
 ```
 
-**Say:**
-> "This is the full receipt. Task, model, tokens, cost, checks, verification outcome, files proposed. Every AI-assisted action goes through OpenShard and leaves a record you can audit — not just output you hope was right."
+Walk each section by name as it appears on screen:
 
-**Viewer sees:** Full run receipt in terminal. Model, cost, check results, proposed files listed.
-
----
-
-## Act 5 — Diff and safety (30 seconds)
-
-**Say:**
-> "Before anything touches your repo, inspect the diff."
-
-**Do:**
-```bash
-openshard diff-last
-```
-
-**Say:**
-> "Here are the exact changes it proposed. Now I'll run a dry-run apply — previews what would happen with no changes to disk."
-
-**Do:**
-```bash
-openshard apply-last --dry-run
-```
-
-**Say:**
-> "Dry run complete. It tells you exactly what would be written if you applied it. You decide whether to proceed."
-
-**Viewer sees:** Unified diff. Then dry-run output listing files that would be written.
+- **TASK** — The exact task text that was sent to the model. Nothing paraphrased.
+- **EXECUTION** — Agent, strategy, model used, duration, and final status.
+- **CONTEXT** — Repo, branch, git state, files read, files touched. May show "Not recorded" for non-native run types — that is honest, not a gap.
+- **INSPECTED FILES** — The specific files recorded as inspected, when that provenance exists.
+- **POLICY** — Risk level, sandbox state, allowed and blocked paths.
+- **CHECKS** — Post-task verification checks. Shows result per check or "Not run."
+- **FINDINGS** — Structured findings grouped by severity: Critical, High, Medium, Low, Note. Only renders when the run produced structured findings.
+- **CHANGES** — Files changed with diff line counts. The model proposed these; you decide whether to apply.
+- **COST** — Exact cost for this run in dollars.
+- **FEEDBACK** — Appears here if you ran `openshard feedback` after the task.
 
 ---
 
-## Close (15 seconds)
+## Act 5 — Honest gaps and value close (~30 seconds)
 
 **Say:**
-> "Terraform changes, IAM policies, deployment scripts — AI can help with all of it. OpenShard makes sure you know what happened, whether it was safe, and what it cost. Before it touches production. That's the receipt. That's OpenShard."
+> "A few things worth being clear about."
+>
+> "Findings only appear when the run produced structured findings. Not every task does — and we do not fabricate them."
+>
+> "Context may show Not recorded if the run type didn't collect it. That's intentional honesty, not a missing feature."
+>
+> "There's no hosted product, no cloud sync, no team dashboard yet. This is a local tool."
 
-**Viewer sees:** Terminal with last command output.
+**Pause.**
+
+**Say:**
+> "AI agents can generate code. OpenShard records, controls, and reviews the work before you trust it."
+
+**Viewer sees:** Terminal with last Shard output still visible.
 
 ---
 
 ## Notes
 
-- Use `examples/production-infra-demo/` as the demo repo, or a sanitised equivalent.
-- Do not include real project IDs, real IPs, real secrets, or real company names.
-- Pause after each command — let the viewer read the output before continuing.
-- If the task runs longer than expected, continue talking through Act 3 while it finishes.
-- The DocuVault Terraform is deliberately flawed — OpenShard will have real findings to show.
+- Pause after each command — let the viewer read before continuing.
+- DocuVault Terraform is deliberately flawed, but the Findings section only shows structured findings when the run records them. Otherwise it will honestly say no structured findings were recorded.
+- If the task is unexpectedly re-run and takes longer than expected, use `openshard last --more` to show the prior run's receipt while waiting.
+- Do not include real project IDs, real IPs, real secrets, or real company names in any visible output.
+- Do not claim PyPI, Homebrew, cloud sync, or external adapter support (Claude Code, Codex, OpenCode) unless implemented.
