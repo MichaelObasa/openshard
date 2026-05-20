@@ -1,11 +1,11 @@
 # OpenShard
 
 <p align="center">
-  <strong>The control layer for AI coding agents.</strong>
+  <strong>A local-first control layer and native coding agent for AI-assisted engineering work.</strong>
 </p>
 
 <p align="center">
-  Route work across models and agents. Gate risky actions. Verify results. Keep an execution record.
+  AI coding agents can write code, but serious developers still need control: what ran, what changed, what context was used, whether checks passed, what it cost, and whether there is a receipt. OpenShard wraps AI coding work with routing, sandboxing, checks, receipts, findings, and feedback.
 </p>
 
 <p align="center">
@@ -17,329 +17,173 @@
 
 ---
 
-OpenShard is a CLI-first developer tool that sits above model APIs and coding agents. It inspects a repo, classifies the task, routes work across models or workflows, applies approval gates, runs verification where appropriate, compares cost, and records what happened.
+## What OpenShard does
 
-Most coding tools make you choose the model, decide when to approve writes, remember what happened, and manually compare whether a cheaper or stronger model would have done better. OpenShard turns that into an explicit control layer:
-
-- **Route** work by risk, complexity, repo context, model capability, and cost.
-- **Gate** high-cost, risky-path, unsafe-command, and stack-mismatch actions.
-- **Verify** generated changes when verification is enabled, using detected or configured test commands.
-- **Record** model choice, cost, duration, changed files, verification status, retries, profiles, and matched skills.
-- **Adjust routing optionally** from local run history and eval results when `--history-scoring` or `--eval-scoring` is enabled.
-
-OpenShard is not trying to replace every coding agent. It is the layer above them: the place where routing, policy, verification, and execution records become inspectable.
+- Runs AI-assisted engineering tasks through OpenShard Native
+- Routes work to the right model where available (Model: Auto)
+- Records each run as a Shard receipt
+- Shows context provenance, files touched, checks, cost, findings, and feedback
+- Supports workflow packs for repeatable engineering reviews
+- Runs locally first
 
 ---
 
-## Demo
+## Quick install
 
-### Running a task
+**Recommended (pipx):**
 
-<p align="center">
-  <img src="demos/Openshard_Final_Demo_Full.gif" alt="OpenShard Demo" width="800"/>
-</p>
-
-### Inspecting the result
-
-<p align="center">
-  <img src="demos/openshard_last_--more.gif" alt="OpenShard Last --more" width="800"/>
-</p>
-
----
-
-## Install
-
-**pip** (once published on PyPI):
 ```bash
-pip install openshard
+pipx install git+https://github.com/MichaelObasa/openshard.git
 ```
 
-**pipx** (isolated, recommended for CLI tools):
+Run:
+
 ```bash
-pipx install openshard
+openshard tui
 ```
 
-**uv** (fast, modern):
+**Alternative (uv):**
+
 ```bash
-uv tool install openshard
+uv tool install git+https://github.com/MichaelObasa/openshard.git
 ```
 
-**Local dev install** (from a clone):
+**Local development:**
+
 ```bash
 git clone https://github.com/MichaelObasa/openshard.git
 cd openshard
 pip install -e .
 ```
 
-Set a provider key. OpenRouter is the default provider:
-
-```bash
-export OPENROUTER_API_KEY=your_key_here
-```
-
-Direct Anthropic and OpenAI providers are also available:
-
-```bash
-export ANTHROPIC_API_KEY=your_key_here
-export OPENAI_API_KEY=your_key_here
-```
-
-Verify the CLI:
-
-```bash
-openshard --help
-```
+See [docs/install.md](docs/install.md) for upgrade instructions and notes.
 
 ---
 
-## Quick Start
+## 60-second demo
 
-Plan a task:
+<p align="center">
+  <img src="demos/Openshard_Final_Demo_Full.gif" alt="OpenShard Demo" width="800"/>
+</p>
 
-```bash
-openshard plan "build a FastAPI CRUD service with tests"
-```
-
-Run it and allow file writes:
+Launch the TUI:
 
 ```bash
-openshard run "build a FastAPI CRUD service with tests" --write
+openshard tui
 ```
 
-Review what happened:
+Inside the TUI, browse and load a workflow pack:
+
+```
+/packs
+/pack production-iac-hardening
+```
+
+Copy the prompt and run it, or run directly from the shell:
+
+```bash
+openshard run "Review and harden this deliberately flawed Terraform codebase..."
+```
+
+Inspect the Shard receipt for the latest run:
 
 ```bash
 openshard last --more
-openshard metrics
 ```
 
-For safer execution, ask for an explicit plan before running and verify after writing:
+<p align="center">
+  <img src="demos/openshard_last_--more.gif" alt="OpenShard Last --more" width="800"/>
+</p>
+
+Leave feedback:
 
 ```bash
-openshard run "add auth middleware with tests" --write --verify --plan
+openshard feedback --outcome accepted --note "Useful review"
 ```
 
 ---
 
-## Commands
+## Production-infra demo
 
-Core workflow:
+The `examples/production-infra-demo/` directory contains a fictional GCP workload called **DocuVault** — a sanitised demo scenario for OpenShard.
+
+The infrastructure is intentionally production-shaped: networking, IAM, Cloud SQL, Cloud Run, storage, secrets, monitoring, and logging. It is **deliberately flawed** to serve as the input for an IaC hardening review.
+
+All names, project IDs, resource IDs, CIDRs, and accounts are fake and public-safe. No employer or customer details. Designed to show a serious IaC review, not a toy example.
+
+See [`examples/production-infra-demo/README.md`](examples/production-infra-demo/README.md) and [`examples/production-infra-demo/demo-task.md`](examples/production-infra-demo/demo-task.md).
+
+---
+
+## Shard receipts
+
+A Shard is the durable receipt for an AI engineering run. A Shard can show:
+
+- Task and agent
+- Model(s) used
+- Strategy
+- Context provenance
+- Inspected files
+- Changed and touched files
+- Checks and their outcomes
+- Findings (when structured findings exist)
+- Cost
+- Feedback
 
 ```bash
-openshard plan "<task>"          # produce a structured execution plan
-openshard run "<task>"           # route and execute a task
-openshard last                   # show the most recent run
-openshard last --more            # include files, routing, profile, tokens, and notes
-openshard last --full            # include full stored details
-openshard metrics                # aggregate run-history metrics
-openshard report                 # summarize recent executions
-openshard explain "<task>"       # explain routing/category choice
+openshard last --more    # expanded receipt for the latest run
+openshard last --full    # full stored details
 ```
 
-Model, profile, and skill history:
+---
+
+## Workflow packs
+
+Workflow packs are pre-built prompts for repeatable engineering reviews.
 
 ```bash
-openshard models                 # list cached models and capabilities
-openshard models --refresh       # refresh provider model metadata
-openshard models stats           # per-model performance from run history
-openshard profiles stats         # per-profile cost, retry, and pass-rate metrics
-openshard skills stats           # per-skill usage and performance metrics
+openshard packs list
+openshard packs show production-iac-hardening
+openshard packs prompt production-iac-hardening
 ```
 
-Demo and History:
+Built-in packs include: `repo-explanation`, `production-iac-hardening`, `terraform-networking-review`, `iam-security-review`, `cicd-safety-review`, and `powershell-automation-review`.
+
+---
+
+## What is built today
+
+- OpenShard Native agent/harness
+- TUI (`openshard tui`)
+- Workflow packs
+- Shard receipts with full run metadata
+- Findings rendering when structured findings exist
+- Feedback signals (`openshard feedback`)
+- Context provenance
+- Sandbox, diff, apply, and receipts where implemented
+- Local-first run history
+
+---
+
+## What is not built yet
+
+- No hosted team platform yet
+- Not a full Claude Code or Codex replacement
+- External harness adapters (OpenCode and others) are experimental, not guaranteed
+- No PyPI or Homebrew release yet — install from GitHub
+- No cloud sync yet
+
+---
+
+## Developer setup
 
 ```bash
-openshard demo-run               # show a deterministic demo run without provider calls
-openshard export-runs            # export local run history as JSONL
-openshard export-runs --preview  # preview exported run history
+git clone https://github.com/MichaelObasa/openshard.git
+cd openshard
+pip install -e .
+python -m pytest -q
+python -m ruff check .
 ```
-
-Eval harness:
-
-```bash
-openshard eval list              # list eval tasks in the default suite
-openshard eval validate          # validate eval task fixtures
-openshard eval run               # run the default eval suite
-openshard eval report            # summarize recorded eval runs
-openshard eval compare --models modelA,modelB
-openshard eval stats             # grouped pass/fail stats from eval history
-```
-
-Important `run` flags:
-
-- `--write` writes generated files to disk.
-- `--verify` runs verification after writing and enables retry on verification failure.
-- `--dry-run` previews generated changes without writing.
-- `--plan` shows an execution plan and prompts before running.
-- `--workflow [auto|direct|staged|native|opencode]` chooses the execution workflow.
-- `--approval [auto|smart|ask]` controls approval gates.
-- `--provider [openrouter|anthropic|openai]` overrides the API provider.
-- `--history-scoring` applies local run-history bonuses or penalties to model scoring.
-- `--eval-scoring` applies local eval-result bonuses or penalties to model scoring.
-- `--more` and `--full` expand run output.
-
-`--executor` is deprecated. Use `--workflow` instead.
-
----
-
-## Workflows
-
-OpenShard separates routing decisions from execution shape.
-
-| Workflow | Status | Notes |
-|---|---:|---|
-| `auto` | available | Selects a workflow from task category, repo risk, verification setting, and routing signals. |
-| `direct` | available | Uses a single provider/model call for simple work and Ask-style tasks. |
-| `staged` | available | Uses planning followed by implementation. |
-| `native` | active | OpenShard-owned execution path with repo context, approval gates, verification, run receipts, and native metadata. |
-| `opencode` | experimental | Delegates execution to the local OpenCode CLI. Requires `opencode` on PATH. |
-| `claude-code` | experimental/reserved | Planned external executor mode for Claude Code workflows. |
-| `codex` | experimental/reserved | Planned external executor mode for Codex workflows. |
-
-Execution profiles add another signal for how much effort to spend:
-
-- `native_light` is selected for simpler, lower-risk tasks.
-- `native_deep` is selected for security, complex, risky-path, or long tasks.
-- `native_swarm` is an explicit experimental profile and is never auto-selected.
-
----
-
-## Safety And Verification
-
-OpenShard is built around the idea that model output should be controlled, not blindly trusted.
-
-Approval gates can prompt before:
-
-- writing files,
-- touching risky paths,
-- running unknown or unsafe shell commands,
-- accepting high estimated cost,
-- applying changes that do not match the detected repo stack.
-
-Verification uses a configured command when present, or a detected command such as `python -m pytest` or `npm test` when available. Commands are classified before execution, and safe verification runs without invoking a shell.
-
-When `--verify` is enabled and verification fails, OpenShard can retry generation with a stronger model. General API or generation failures are surfaced as errors with details available in `openshard last --more` or `openshard last --full`.
-
----
-
-## Routing Evidence
-
-OpenShard starts with task and repo signals:
-
-- risk areas such as auth, payments, migrations, and security-sensitive files,
-- task complexity and likely verification strength,
-- detected languages, package files, framework, tests, risky paths, and changed files,
-- provider inventory, model capabilities, context window, and cost metadata.
-
-Local evidence is opt-in:
-
-- `--history-scoring` uses previous run outcomes, cost, duration, retries, and verification status.
-- `--eval-scoring` uses recorded eval outcomes from `.openshard/eval-runs.jsonl`.
-
-This keeps the default behavior simple while allowing teams to route from evidence collected in their own repos.
-
----
-
-## Evals
-
-The bundled eval harness gives you small, repeatable tasks for checking model behavior.
-
-```bash
-openshard eval list --suite basic
-openshard eval validate --suite basic
-openshard eval run --suite basic --model anthropic/claude-haiku-4-5-20251001
-openshard eval compare --suite basic --models modelA,modelB
-openshard eval report
-openshard eval stats
-```
-
-Eval runs write structured records under `.openshard/eval-runs.jsonl`. Reports show pass/fail rates, duration, token averages when available, and unsafe file attempts. Those results can become routing signals when `--eval-scoring` is enabled.
-
----
-
-## Local Skills
-
-Skills let you add repo-local guidance without changing OpenShard code.
-
-```text
-.openshard/skills/<slug>/SKILL.md
-```
-
-Each skill can define frontmatter such as:
-
-| Field | Required | Description |
-|---|---:|---|
-| `name` | yes | Human-readable skill name shown in logs. |
-| `description` | no | One-line summary. |
-| `category` | no | Broad category such as `security`, `infrastructure`, or `performance`. |
-| `keywords` | no | Terms matched against the task text. |
-| `languages` | no | Languages such as `python` or `typescript`. |
-| `framework` | no | Framework matched against detected repo stack. |
-
-A skill can match by category, keyword, framework, or language plus category. Up to five matched skills are included per run. Skill names, categories, descriptions, and match reasons are surfaced as prompt context; scripts inside `SKILL.md` are never executed.
-
-See [`examples/skills/`](examples/skills/) for starters.
-
----
-
-## Configuration
-
-OpenShard reads `config.yml` from the repo root. Minimal example matching the public config shape:
-
-```yaml
-model_tiers:
-  - name: fast
-    model: anthropic/claude-haiku-4.5
-    max_tokens: 1024
-  - name: balanced
-    model: anthropic/claude-sonnet-4.6
-    max_tokens: 4096
-  - name: powerful
-    model: anthropic/claude-opus-4.6
-    max_tokens: 8192
-
-planning_model: anthropic/claude-sonnet-4.6
-execution_model: anthropic/claude-sonnet-4.6
-fixer_model: anthropic/claude-sonnet-4.6
-
-workflow: auto
-approval_mode: smart
-cost_gate_threshold: 0.10
-```
-
-You can also set `verification_command` in config when auto-detection is not enough.
-
----
-
-## Where It Fits
-
-OpenShard sits above model APIs and coding agents:
-
-| Layer | Examples |
-|---|---|
-| Models | OpenAI, Anthropic, and models exposed through OpenRouter |
-| Access | OpenRouter or direct provider keys |
-| Execution | Direct provider calls, OpenShard Native, and experimental OpenCode delegation |
-| Control | OpenShard routing, gates, verification, history, evals, and metrics |
-
-Use OpenShard when you want a local, inspectable CLI for model choice, approval policy, verification, and run records across real repo work.
-
-It is less useful if you only need occasional one-off chat edits, do not care which model handles a task, or do not want a CLI-first workflow.
-
----
-
-## Roadmap
-
-High-level areas under active exploration:
-
-- correction reason capture and accept/reject/edit/retry signals,
-- tool/search provenance for better context engineering,
-- feedback-informed routing,
-- real repo demo packs and stronger public benchmarks,
-- deeper native OSN loop behind explicit safety flags,
-- deeper integrations with OpenCode, Claude Code, and Codex,
-- team policies, hosted run history, and dashboards,
-- longer-term agent control plane with orchestration, permissions, audit trails, and observability.
 
 ---
 
