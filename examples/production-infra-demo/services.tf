@@ -1,16 +1,16 @@
 resource "google_cloud_run_v2_service" "api" {
-  name     = "docuvault-api"
+  name     = "harbourdocs-api"
   location = var.region
 
   template {
     service_account = google_service_account.api_sa.email
 
     containers {
-      image = "europe-west2-docker.pkg.dev/docuvault-dev-000000/docuvault/api:latest"
+      image = "europe-west2-docker.pkg.dev/harbourdocs-dev-000000/harbourdocs/api:latest"
 
       env {
         name  = "DB_HOST"
-        value = google_sql_database_instance.docuvault_db.public_ip_address
+        value = google_sql_database_instance.harbourdocs_db.public_ip_address
       }
 
       env {
@@ -35,18 +35,18 @@ resource "google_cloud_run_v2_service" "api" {
 }
 
 resource "google_cloud_run_v2_service" "processor" {
-  name     = "docuvault-processor"
+  name     = "harbourdocs-processor"
   location = var.region
 
   template {
     service_account = google_service_account.processor_sa.email
 
     containers {
-      image = "europe-west2-docker.pkg.dev/docuvault-dev-000000/docuvault/processor:latest"
+      image = "europe-west2-docker.pkg.dev/harbourdocs-dev-000000/harbourdocs/processor:latest"
 
       env {
         name  = "DB_HOST"
-        value = google_sql_database_instance.docuvault_db.public_ip_address
+        value = google_sql_database_instance.harbourdocs_db.public_ip_address
       }
     }
 

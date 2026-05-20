@@ -1,5 +1,5 @@
 resource "google_secret_manager_secret" "db_password" {
-  secret_id = "docuvault-db-password"
+  secret_id = "harbourdocs-db-password"
 
   replication {
     auto {}
@@ -14,7 +14,7 @@ resource "google_secret_manager_secret_version" "db_password" {
 }
 
 resource "google_secret_manager_secret" "api_key" {
-  secret_id = "docuvault-api-key"
+  secret_id = "harbourdocs-api-key"
 
   replication {
     auto {}

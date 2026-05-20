@@ -1,11 +1,11 @@
 resource "google_logging_project_sink" "audit_sink" {
-  name        = "docuvault-audit-sink"
+  name        = "harbourdocs-audit-sink"
   destination = "storage.googleapis.com/${google_storage_bucket.exports.name}"
   filter      = "resource.type = \"cloud_run_revision\""
 }
 
 resource "google_monitoring_alert_policy" "error_rate" {
-  display_name = "DocuVault API Error Rate"
+  display_name = "HarbourDocs API Error Rate"
   combiner     = "OR"
 
   conditions {

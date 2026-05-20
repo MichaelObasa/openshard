@@ -1,12 +1,32 @@
 # OpenShard 60-Second Demo Script
 
-A tight script for recording or presenting a quick OpenShard demo. Uses the DocuVault production-infra demo folder so the pack context is clear to the viewer.
+A tight script for recording or presenting a quick OpenShard demo. Uses the HarbourDocs infrastructure repo so the pack context is clear to the viewer.
+
+## Pre-recording repo setup
+
+The recording runs from a copy of `examples/production-infra-demo` placed **outside** the
+OpenShard repo. This prevents `openshard tui` from detecting the OpenShard git root instead
+of the HarbourDocs infrastructure repo.
+
+Run once before recording (PowerShell):
+
+```powershell
+robocopy examples\production-infra-demo `
+    C:\Users\Michael\HarbourDocs\harbourdocs-infra /E /NP
+```
+
+Then for all recording commands below, start from that directory:
+
+```powershell
+cd C:\Users\Michael\HarbourDocs\harbourdocs-infra
+```
 
 ## Pre-recording checklist
 
+- [ ] Repo copy is in place: `C:\Users\Michael\HarbourDocs\harbourdocs-infra`
 - [ ] Clean terminal — no open TUI, no previous output visible
 - [ ] Zoom level: large font, high contrast (viewer must read terminal output)
-- [ ] Working directory: `examples/production-infra-demo` (not repo root — the IaC pack is strongest from here)
+- [ ] Working directory: `C:\Users\Michael\HarbourDocs\harbourdocs-infra`
 - [ ] No secrets visible in shell history, env, or `.openshard/` output — check before recording
 - [ ] Use an existing recorded run for `openshard last --more` — avoid triggering another $0.30 model run
 
@@ -29,8 +49,8 @@ A tight script for recording or presenting a quick OpenShard demo. Uses the Docu
 > "This is the TUI. It ships with workflow packs — pre-built tasks for production-grade engineering work."
 
 **Do:**
-```bash
-cd examples/production-infra-demo
+```powershell
+cd C:\Users\Michael\HarbourDocs\harbourdocs-infra
 openshard tui
 ```
 

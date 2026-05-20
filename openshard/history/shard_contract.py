@@ -472,22 +472,39 @@ def render_compact_shard_receipt(receipt: ShardReceipt) -> str:
         _row("Changed", file_str),
         _row("Checks", receipt.checks_display),
     ]
+
+    # Findings grouped by severity in priority order (critical first)
     if receipt.findings:
-        counts: dict[str, int] = {}
-        for f in receipt.findings:
-            counts[f.severity] = counts.get(f.severity, 0) + 1
-        summary_parts = [
-            f"{counts[sev]} {sev.lower()}"
-            for sev in _SEVERITY_ORDER
-            if sev in counts
-        ]
-        lines.append(_row("Findings", " / ".join(summary_parts)))
+        sorted_findings = sorted(
+            receipt.findings,
+            key=lambda f: _SEVERITY_ORDER.index(f.severity) if f.severity in _SEVERITY_ORDER else len(_SEVERITY_ORDER),
+        )
+        lines.append(_row("Findings", ""))
+        current_sev: str | None = None
+        for f in sorted_findings:
+            if f.severity != current_sev:
+                lines.append(f"{_INDENT}  {f.severity.upper()}")
+                current_sev = f.severity
+            icon = _FINDING_ICONS.get(f.severity, "-")
+            msg = f.message[:80]
+            lines.append(f"{_INDENT}    {icon} {msg}")
+
     lines += [
         _row("Approval", receipt.approval),
         _row("Cost", receipt.cost_display),
         _row("Result", receipt.result),
-        _SEP,
     ]
+
+    # Warning line: only shown when a note contains an explicit blocker keyword
+    _WARNING_KEYWORDS = ("DO NOT RUN", "WARNING:", "BLOCKER:", "DANGER:", "DO NOT APPLY")
+    warning_note = next(
+        (n for n in receipt.agent_notes if any(kw in n.upper() for kw in _WARNING_KEYWORDS)),
+        None,
+    )
+    if warning_note:
+        lines += [_SEP, f"{_INDENT}{warning_note}"]
+
+    lines.append(_SEP)
     return "\n".join(lines)
 
 

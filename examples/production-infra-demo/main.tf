@@ -10,7 +10,7 @@ terraform {
 
   backend "gcs" {
     # Deliberate flaw: hard-coded bucket name — should use a variable or workspace prefix
-    bucket = "docuvault-tf-state-000000"
+    bucket = "harbourdocs-tf-state-000000"
     prefix = "terraform/state"
   }
 }
@@ -22,6 +22,6 @@ provider "google" {
 }
 
 locals {
-  service_name = "docuvault"
+  service_name = "harbourdocs"
   environment  = var.environment
 }

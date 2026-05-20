@@ -1,10 +1,10 @@
-# DocuVault — Production-Infra Demo
+# HarbourDocs — Production-Infra Demo
 
-**DocuVault** is a fictional document-processing platform used as a sanitised demo scenario for OpenShard.
+**HarbourDocs** is a fictional document-processing platform used as a sanitised demo scenario for OpenShard.
 
 The infrastructure provisions a GCP workload with:
-- Two Cloud Run services (`docuvault-api`, `docuvault-processor`)
-- Cloud SQL PostgreSQL (`docuvault-db`)
+- Two Cloud Run services (`harbourdocs-api`, `harbourdocs-processor`)
+- Cloud SQL PostgreSQL (`harbourdocs-db`)
 - Service accounts and IAM bindings
 - Secret Manager secrets
 - Networking (VPC, subnets, Cloud NAT, firewall rules)
@@ -24,11 +24,11 @@ All names, project IDs, resource IDs, CIDRs, and accounts are fake and public-sa
 
 | Field | Value |
 |---|---|
-| Project ID | `docuvault-dev-000000` |
+| Project ID | `harbourdocs-dev-000000` |
 | Region | `europe-west2` |
-| State bucket | `docuvault-tf-state-000000` |
-| Services | `docuvault-api`, `docuvault-processor` |
-| Database | `docuvault-db` |
+| State bucket | `harbourdocs-tf-state-000000` |
+| Services | `harbourdocs-api`, `harbourdocs-processor` |
+| Database | `harbourdocs-db` |
 | IP ranges | RFC 1918 private ranges (`10.x.x.x`) |
 | Secrets | Placeholder values only (`REPLACE_ME`) |
 

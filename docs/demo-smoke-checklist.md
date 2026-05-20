@@ -1,4 +1,4 @@
-# DocuVault Demo Smoke Checklist
+# HarbourDocs Demo Smoke Checklist
 
 Validates the OpenShard public demo flow end-to-end.
 Run from repo root unless noted. Last validated: 2026-05-20.
@@ -19,12 +19,16 @@ openshard packs prompt production-iac-hardening
 
 ---
 
-## 2. TUI (from `examples/production-infra-demo`)
+## 2. TUI (from `C:\Users\Michael\HarbourDocs\harbourdocs-infra`)
 
 **Manual test - cannot be driven non-interactively.**
 
-```bash
-cd examples/production-infra-demo
+Copy the fixture outside the OpenShard repo first (prevents git root detection):
+
+```powershell
+robocopy examples\production-infra-demo `
+    C:\Users\Michael\HarbourDocs\harbourdocs-infra /E /NP
+cd C:\Users\Michael\HarbourDocs\harbourdocs-infra
 openshard tui
 ```
 
@@ -42,7 +46,7 @@ Inside TUI:
 
 ---
 
-## 3. Run (from `examples/production-infra-demo`)
+## 3. Run (from `C:\Users\Michael\HarbourDocs\harbourdocs-infra`)
 
 ```bash
 openshard run "Review and harden this deliberately flawed Terraform codebase. Assess it through security/compliance posture, 2am operability, and developer experience for a 5-10 person engineering team. Identify critical, high, and medium risks. Explain trade-offs. Do not apply changes directly without review."
