@@ -187,6 +187,17 @@ python -m ruff check .
 
 ---
 
+## Advanced: evals
+
+OpenShard also includes a local eval harness for checking routing and workflow behaviour.
+
+```bash
+openshard eval list
+openshard eval validate --suite basic
+```
+
+---
+
 ## Why Open Source?
 
 Routing decisions should be inspectable. If a tool decides which model touches security-sensitive code, developers should be able to see why.
