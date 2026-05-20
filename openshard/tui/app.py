@@ -16,8 +16,20 @@ from openshard.tui.commands import TuiCommand, parse_tui_input
 BRAND = "✦ OpenShard"
 TAGLINE = "The control layer for AI coding agents."
 
-# 2-line monochrome wordmark shown on wide terminals (≥90 cols)
-_WORDMARK = (
+_WORDMARK_WIDE_MIN_WIDTH = 140
+
+# 6-line ANSI Shadow wordmark for wide terminals (≥140 cols)
+_WORDMARK_WIDE = (
+    "██████╗ ██████╗ ███████╗███╗   ██╗███████╗██╗  ██╗ █████╗ ██████╗ ██████╗\n"
+    "██╔═══██╗██╔══██╗██╔════╝████╗  ██║██╔════╝██║  ██║██╔══██╗██╔══██╗██╔══██╗\n"
+    "██║   ██║██████╔╝█████╗  ██╔██╗ ██║███████╗███████║███████║██████╔╝██║  ██║\n"
+    "██║   ██║██╔═══╝ ██╔══╝  ██║╚██╗██║╚════██║██╔══██║██╔══██║██╔══██╗██║  ██║\n"
+    "╚██████╔╝██║     ███████╗██║ ╚████║███████║██║  ██║██║  ██║██║  ██║██████╔╝\n"
+    " ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝"
+)
+
+# 2-line compact wordmark for medium terminals (90–139 cols)
+_WORDMARK_NARROW = (
     "█▀█ █▀█ █▀▀ █▄ █ █▀ █ █ ▄▀█ █▀█ █▀▄\n"
     "█▄█ █▀▀ ██▄ █ ▀█ ▄█ █▀█ █▀█ █▀▄ █▄▀"
 )
@@ -197,21 +209,31 @@ class OpenShardTui(App):
         self._refresh_widgets()
 
     def on_resize(self, event) -> None:
+        self._update_for_width(event.size.width)
+
+    def _update_for_width(self, width: int) -> None:
+        """Swap wordmark, brand visibility, column widths, and hero height by terminal width."""
+        is_wide = width >= _WORDMARK_WIDE_MIN_WIDTH
         try:
             self.query_one("#wordmark", Static).update(
-                _WORDMARK if event.size.width >= 90 else ""
+                _WORDMARK_WIDE if is_wide else (_WORDMARK_NARROW if width >= 90 else "")
             )
+            self.query_one("#hero-brand", Static).update("" if is_wide else BRAND)
+            hero = self.query_one("#hero", Horizontal)
+            hero.styles.height = 18 if is_wide else 15
+            hero_left = self.query_one("#hero-left", Vertical)
+            hero_right = self.query_one("#hero-right", Vertical)
+            if is_wide:
+                hero_left.styles.width = "3fr"
+                hero_right.styles.width = "2fr"
+            else:
+                hero_left.styles.width = "2fr"
+                hero_right.styles.width = "3fr"
         except Exception:
             pass
 
     def _refresh_widgets(self) -> None:
-        # Conditional wordmark based on current terminal width
-        try:
-            self.query_one("#wordmark", Static).update(
-                _WORDMARK if self.size.width >= 90 else ""
-            )
-        except Exception:
-            pass
+        self._update_for_width(self.size.width)
 
         gi = self._git_info
         state_label = _GIT_STATE_LABELS.get(gi.get("state", "unknown"), "Unknown")

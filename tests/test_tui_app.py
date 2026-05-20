@@ -35,6 +35,30 @@ async def test_hero_brand_contains_openshard(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_wide_wordmark_shown_at_140_cols(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=(140, 55)) as _:
+        wm = _text(app.query_one("#wordmark", Static))
+        assert "██████" in wm
+
+
+@pytest.mark.asyncio
+async def test_wide_wordmark_hides_brand(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=(140, 55)) as _:
+        assert _text(app.query_one("#hero-brand", Static)).strip() == ""
+
+
+@pytest.mark.asyncio
+async def test_narrow_wordmark_shows_brand(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as _:
+        assert "OpenShard" in _text(app.query_one("#hero-brand", Static))
+        wm = _text(app.query_one("#wordmark", Static))
+        assert "██████" not in wm
+
+
+@pytest.mark.asyncio
 async def test_hero_tagline_contains_expected_text(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:

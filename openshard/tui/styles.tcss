@@ -24,7 +24,6 @@ Screen {
 #wordmark {
     color: #4A4A54;
     height: auto;
-    padding-bottom: 1;
 }
 
 #hero-brand {
