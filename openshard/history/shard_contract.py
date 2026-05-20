@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -48,17 +49,28 @@ _MODEL_FRIENDLY_NAMES: dict[str, str] = {
 # Words rendered in ALL CAPS in model names (abbreviations and well-known initialisms).
 _ABBREV_WORDS: frozenset[str] = frozenset({"gpt", "llm", "ai", "api", "url", "id", "ui", "ml", "glm"})
 
-_SEP: str = "━" * 46
+def _stdout_supports_unicode() -> bool:
+    try:
+        enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+        "━—✖⚠✓".encode(enc)
+        return True
+    except (UnicodeEncodeError, LookupError):
+        return False
+
+
+_UNICODE_OK: bool = _stdout_supports_unicode()
+_SEP: str = ("━" if _UNICODE_OK else "-") * 46
+_EM: str = "—" if _UNICODE_OK else "-"
 _INDENT: str = "  "
 _COL: int = 12
 
 _SEVERITY_ORDER: list[str] = ["Critical", "High", "Medium", "Low", "Note"]
 
 _FINDING_ICONS: dict[str, str] = {
-    "Critical": "✖",
-    "High": "⚠",
+    "Critical": "✖" if _UNICODE_OK else "X",
+    "High": "⚠" if _UNICODE_OK else "!",
     "Medium": "~",
-    "Low": "✓",
+    "Low": "✓" if _UNICODE_OK else "+",
     "Note": "-",
 }
 
@@ -225,7 +237,7 @@ def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
 def _trunc(s: str, n: int) -> str:
     if not s or len(s) <= n:
         return s or ""
-    return s[: n - 1] + "…"
+    return s[: n - 1] + ("…" if _UNICODE_OK else ".")
 
 
 def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceipt:
@@ -449,7 +461,7 @@ def render_compact_shard_receipt(receipt: ShardReceipt) -> str:
 
     lines = [
         _SEP,
-        f"{_INDENT}RECEIPT — {receipt.shard_id}",
+        f"{_INDENT}RECEIPT {_EM} {receipt.shard_id}",
         _SEP,
         _row("Task", receipt.task_short),
         _row("Agent", receipt.agent),
@@ -493,7 +505,7 @@ def render_full_shard_receipt(receipt: ShardReceipt) -> str:
     """Render a full structured SHARD block with consistent separator style. Pure, no I/O."""
     lines: list[str] = []
 
-    lines += [_SEP, f"{_INDENT}SHARD — {receipt.shard_id}", _SEP, ""]
+    lines += [_SEP, f"{_INDENT}SHARD {_EM} {receipt.shard_id}", _SEP, ""]
 
     lines += [f"{_INDENT}TASK", f"{_INDENT}{receipt.task_full}", ""]
 
