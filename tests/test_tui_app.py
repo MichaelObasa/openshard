@@ -330,3 +330,141 @@ async def test_recent_activity_refreshes_after_run(tmp_path):
                     await pilot.press("enter")
                     await pilot.pause(delay=0.3)
                 mock_load.assert_called()
+
+
+# ── Workflow packs commands ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_packs_command_shows_workflow_packs_heading(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        inp = app.query_one("#task-input", Input)
+        inp.focus()
+        inp.value = "/packs"
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert "Workflow packs" in text
+
+
+@pytest.mark.asyncio
+async def test_packs_command_shows_known_pack_ids(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        inp = app.query_one("#task-input", Input)
+        inp.focus()
+        inp.value = "/packs"
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert "production-iac-hardening" in text
+        assert "repo-explanation" in text
+
+
+@pytest.mark.asyncio
+async def test_packs_command_shows_usage_hint(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        inp = app.query_one("#task-input", Input)
+        inp.focus()
+        inp.value = "/packs"
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert "/pack <pack-id>" in text
+
+
+@pytest.mark.asyncio
+async def test_pack_show_renders_title(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        inp = app.query_one("#task-input", Input)
+        inp.focus()
+        inp.value = "/pack production-iac-hardening"
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert "Production IaC hardening review" in text
+
+
+@pytest.mark.asyncio
+async def test_pack_show_renders_category(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        inp = app.query_one("#task-input", Input)
+        inp.focus()
+        inp.value = "/pack production-iac-hardening"
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert "infrastructure" in text
+
+
+@pytest.mark.asyncio
+async def test_pack_show_renders_prompt(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        inp = app.query_one("#task-input", Input)
+        inp.focus()
+        inp.value = "/pack production-iac-hardening"
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert "Terraform" in text
+
+
+@pytest.mark.asyncio
+async def test_pack_show_unknown_id_shows_error(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        inp = app.query_one("#task-input", Input)
+        inp.focus()
+        inp.value = "/pack unknown-xyz"
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert "Unknown pack" in text
+        assert "repo-explanation" in text
+
+
+@pytest.mark.asyncio
+async def test_pack_no_id_shows_usage(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        inp = app.query_one("#task-input", Input)
+        inp.focus()
+        inp.value = "/pack"
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert "Usage: /pack" in text
+
+
+@pytest.mark.asyncio
+async def test_packs_command_does_not_invoke_cli_runner(tmp_path):
+    app = _make_app(tmp_path)
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        async with app.run_test(size=_SIZE) as pilot:
+            inp = app.query_one("#task-input", Input)
+            inp.focus()
+            inp.value = "/packs"
+            await pilot.press("enter")
+        mock_runner_cls.return_value.invoke.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pack_show_does_not_invoke_cli_runner(tmp_path):
+    app = _make_app(tmp_path)
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        async with app.run_test(size=_SIZE) as pilot:
+            inp = app.query_one("#task-input", Input)
+            inp.focus()
+            inp.value = "/pack production-iac-hardening"
+            await pilot.press("enter")
+        mock_runner_cls.return_value.invoke.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_packs_output_no_forbidden_strings(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        inp = app.query_one("#task-input", Input)
+        inp.focus()
+        inp.value = "/packs"
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        for forbidden in ("Tunic Pay", "Mercury", "Volant", "AKIA"):
+            assert forbidden not in text

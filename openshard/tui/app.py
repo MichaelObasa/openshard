@@ -50,13 +50,56 @@ _BELOW_COMMANDS = [
 
 _HELP_TEXT = (
     "Supported commands:\n"
-    "  /help       Show this help\n"
-    "  /last       Show most recent run\n"
-    "  /last more  Show more details of most recent run\n"
-    "  /clear      Clear output area\n"
-    "  /quit       Exit the TUI\n"
-    "  (plain text) Run as openshard task"
+    "  /help           Show this help\n"
+    "  /last           Show most recent run\n"
+    "  /last more      Show more details of most recent run\n"
+    "  /clear          Clear output area\n"
+    "  /quit           Exit the TUI\n"
+    "  /packs          List available workflow packs\n"
+    "  /pack <id>      Show a workflow pack prompt\n"
+    "  (plain text)    Run as openshard task"
 )
+
+
+def _render_packs_list() -> str:
+    from openshard.workflow_packs.packs import load_packs
+
+    packs = load_packs()
+    col = 32
+    lines = ["Workflow packs", ""]
+    for p in packs:
+        lines.append(f"{p.id:<{col}}{p.title}")
+    lines += ["", "Use:", "  /pack <pack-id>"]
+    return "\n".join(lines)
+
+
+def _render_pack_detail(pack_id: str | None) -> str:
+    from openshard.workflow_packs.packs import get_pack, load_packs
+
+    if pack_id is None:
+        ids = "\n".join(f"  {p.id}" for p in load_packs())
+        return f"Usage: /pack <pack-id>\n\nAvailable packs:\n{ids}"
+    try:
+        p = get_pack(pack_id)
+    except KeyError:
+        ids = "\n".join(f"  {p.id}" for p in load_packs())
+        return f'Unknown pack: "{pack_id}"\n\nAvailable packs:\n{ids}'
+    return "\n".join([
+        f"Workflow pack: {p.title}",
+        "",
+        "Category:",
+        p.category,
+        "",
+        "Summary:",
+        p.summary,
+        "",
+        "Prompt:",
+        p.prompt,
+        "",
+        "How to run:",
+        "Copy the prompt above into the input, or run:",
+        '  openshard run "<paste prompt here>"',
+    ])
 
 
 class OpenShardTui(App):
@@ -167,6 +210,10 @@ class OpenShardTui(App):
         elif parsed.cmd == TuiCommand.RUN_TASK:
             self._append_output(f"> {raw}\nRunning...")
             self._run_cli_async(["run", parsed.task], refresh_after=True)
+        elif parsed.cmd == TuiCommand.PACKS:
+            self._append_output(_render_packs_list())
+        elif parsed.cmd == TuiCommand.PACK_SHOW:
+            self._append_output(_render_pack_detail(parsed.pack_id))
         else:
             self._append_output(f"Unknown command: {raw}\nType /help for supported commands.")
 

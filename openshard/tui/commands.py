@@ -12,6 +12,8 @@ class TuiCommand(Enum):
     HELP = "help"
     CLEAR = "clear"
     QUIT = "quit"
+    PACKS = "packs"
+    PACK_SHOW = "pack_show"
     UNKNOWN = "unknown"
 
 
@@ -19,6 +21,7 @@ class TuiCommand(Enum):
 class ParsedCommand:
     cmd: TuiCommand
     task: str | None = None
+    pack_id: str | None = None
 
 
 def parse_tui_input(text: str) -> ParsedCommand:
@@ -27,7 +30,15 @@ def parse_tui_input(text: str) -> ParsedCommand:
         return ParsedCommand(TuiCommand.UNKNOWN)
 
     if text.startswith("/"):
-        match text.lower():
+        lower = text.lower()
+        if lower == "/packs":
+            return ParsedCommand(TuiCommand.PACKS)
+        if lower == "/pack":
+            return ParsedCommand(TuiCommand.PACK_SHOW, pack_id=None)
+        if lower.startswith("/pack "):
+            pack_id = text[6:].strip().lower()
+            return ParsedCommand(TuiCommand.PACK_SHOW, pack_id=pack_id or None)
+        match lower:
             case "/help":
                 return ParsedCommand(TuiCommand.HELP)
             case "/last more":
