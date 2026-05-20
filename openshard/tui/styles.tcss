@@ -98,8 +98,8 @@ Screen {
 #task-input {
     margin: 1 2 0 2;
     border: round #3A3A44;
-    min-height: 4;
-    max-height: 8;
+    min-height: 6;
+    max-height: 10;
     height: auto;
 }
 

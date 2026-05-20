@@ -6,7 +6,7 @@ import pytest
 from textual.containers import ScrollableContainer
 from textual.widgets import Label, Static
 
-from openshard.tui.app import OpenShardTui, TaskInput
+from openshard.tui.app import OpenShardTui, TaskInput, _extract_receipt_block
 from openshard.tui.state import get_guardrails
 
 _SIZE = (120, 55)
@@ -482,3 +482,74 @@ async def test_pack_show_preloads_prompt_into_composer(tmp_path):
         await pilot.press("enter")
         # Pack prompt should be preloaded into the composer
         assert "Terraform" in ta.text
+
+
+# ── Below-commands compact hint ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_below_commands_shows_compact_hint(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as _:
+        text = _text(app.query_one("#below-commands", Static))
+        assert "OpenShard ready" in text
+        assert "Try these inside the TUI" not in text
+
+
+# ── _extract_receipt_block() unit tests ───────────────────────────────────
+
+
+def test_extract_receipt_separator_format():
+    output = (
+        "Planning - mapping out implementation approach...\n"
+        "Executing - Sonnet 4.6 handling logic...\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "RECEIPT — shard-20260520-0001\n"
+        "1 file changed. Verification passed. Receipt saved.\n"
+    )
+    result = _extract_receipt_block(output)
+    assert result is not None
+    assert "RECEIPT" in result
+    assert "1 file changed" in result
+    # separator line is included
+    assert "━" in result
+    # noisy lines are excluded
+    assert "Planning" not in result
+
+
+def test_extract_receipt_rich_box_format():
+    output = (
+        "Planning - mapping out...\n"
+        "Executing - step 1...\n"
+        "╭─ OpenShard Receipt ────────────────────────────╮\n"
+        "│ 2 files changed. Verification passed.          │\n"
+        "╰────────────────────────────────────────────────╯\n"
+    )
+    result = _extract_receipt_block(output)
+    assert result is not None
+    assert "╭─ OpenShard Receipt" in result
+    assert "2 files changed" in result
+    assert "Planning" not in result
+
+
+def test_extract_receipt_neither_returns_none():
+    output = (
+        "Planning - mapping out implementation approach...\n"
+        "Executing - Sonnet 4.6 handling logic...\n"
+        "Some other output line.\n"
+    )
+    assert _extract_receipt_block(output) is None
+
+
+def test_extract_receipt_separator_preferred_over_rich_box():
+    output = (
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "RECEIPT — shard-20260520-0002\n"
+        "Receipt saved.\n"
+        "╭─ OpenShard Receipt ──╮\n"
+        "│ also here            │\n"
+        "╰──────────────────────╯\n"
+    )
+    result = _extract_receipt_block(output)
+    assert result is not None
+    assert result.startswith("━")

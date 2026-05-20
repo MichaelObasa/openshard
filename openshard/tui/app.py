@@ -48,14 +48,6 @@ _HERO_QUICKSTART = [
     "/last more",
 ]
 
-# Full try list shown below the hero box
-_BELOW_COMMANDS = [
-    "explain this repo",
-    "/last",
-    "/last more",
-    "/help",
-]
-
 _HELP_TEXT = (
     "Supported commands:\n"
     "  /help           Show this help\n"
@@ -117,23 +109,26 @@ def _render_pack_detail(pack_id: str | None) -> str:
 
 
 def _extract_receipt_block(output: str) -> str | None:
-    """Return the RECEIPT separator block from CLI output if present.
+    """Return the receipt block from CLI output, or None if not found.
 
-    Looks for the text marker 'RECEIPT' rather than separator characters,
-    to avoid brittle ASCII-art parsing.
+    Tries two formats in order:
+    1. Separator receipt: a line where the stripped text starts with "RECEIPT"
+       and contains "—" or "-" (e.g. "RECEIPT — shard-20260520-0001").
+       Walks back one line to include the preceding separator rule.
+    2. Rich box receipt: a line containing "╭─ OpenShard Receipt".
     """
-    # Find the line containing "RECEIPT —" or "RECEIPT -" (compact receipt header)
     lines = output.splitlines()
-    receipt_start: int | None = None
+
     for i, line in enumerate(lines):
         stripped = line.strip()
         if stripped.startswith("RECEIPT") and ("—" in stripped or "-" in stripped):
-            # Walk back to include the separator line before RECEIPT
-            receipt_start = max(0, i - 1)
-            break
-    if receipt_start is None:
-        return None
-    return "\n".join(lines[receipt_start:])
+            return "\n".join(lines[max(0, i - 1):])
+
+    for i, line in enumerate(lines):
+        if "╭─ OpenShard Receipt" in line:
+            return "\n".join(lines[i:])
+
+    return None
 
 
 class TaskInput(TextArea):
@@ -254,14 +249,11 @@ class OpenShardTui(App):
             activity = "[dim]No recent activity[/dim]"
         self.query_one("#hero-activity", Static).update(activity)
 
-        self.query_one("#prompt-line", Static).update(
-            "[dim]> OpenShard ready. What would you like to build?[/dim]"
-        )
+        self.query_one("#prompt-line", Static).update("")
 
-        below_text = "[dim]Try these inside the TUI:[/dim]\n" + "\n".join(
-            f"[dim]> {cmd}[/dim]" for cmd in _BELOW_COMMANDS
+        self.query_one("#below-commands", Static).update(
+            "[dim]OpenShard ready · /help · /packs · /last more[/dim]"
         )
-        self.query_one("#below-commands", Static).update(below_text)
 
     def on_task_input_submit(self, event: TaskInput.Submit) -> None:
         raw = event.text.strip()
@@ -340,7 +332,11 @@ class OpenShardTui(App):
 
         if is_run:
             receipt_block = _extract_receipt_block(output)
-            display = (receipt_block or output).rstrip("\n") + "\n" + status
+            if receipt_block is not None:
+                display = receipt_block.rstrip("\n") + "\n" + status
+            else:
+                tail = "\n".join(output.splitlines()[-30:])
+                display = tail.rstrip("\n") + "\n" + status
         else:
             display = output.rstrip("\n") + "\n" + status
 
