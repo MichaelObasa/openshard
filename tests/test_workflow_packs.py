@@ -79,6 +79,11 @@ class TestWorkflowPacksCLI(unittest.TestCase):
         result = CliRunner().invoke(cli, ["packs", "show", "bad-id"])
         self.assertIn("repo-explanation", result.output)
 
+    def test_packs_prompt_includes_run_note(self):
+        result = CliRunner().invoke(cli, ["packs", "prompt", "production-iac-hardening"])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("This command only prints the prompt", result.output)
+
 
 class TestWorkflowPacksSafety(unittest.TestCase):
 

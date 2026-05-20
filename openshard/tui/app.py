@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from click.testing import CliRunner
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, ScrollableContainer, Vertical
-from textual.widgets import Input, Label, Static
+from textual.events import Key
+from textual.message import Message
+from textual.widgets import Label, Static, TextArea
 
 from openshard.tui.commands import TuiCommand, parse_tui_input
 
 BRAND = "✦ OpenShard"
 TAGLINE = "The control layer for AI coding agents."
-PLACEHOLDER = "Type a task or /help"
+
+# 2-line monochrome wordmark shown on wide terminals (≥90 cols)
+_WORDMARK = (
+    "█▀█ █▀█ █▀▀ █▄ █ █▀ █ █ ▄▀█ █▀█ █▀▄\n"
+    "█▄█ █▀▀ ██▄ █ ▀█ ▄█ █▀█ █▀█ █▀▄ █▄▀"
+)
 
 _GIT_STATE_LABELS = {
     "clean": "Clean",
@@ -57,7 +65,12 @@ _HELP_TEXT = (
     "  /quit           Exit the TUI\n"
     "  /packs          List available workflow packs\n"
     "  /pack <id>      Show a workflow pack prompt\n"
-    "  (plain text)    Run as openshard task"
+    "  (plain text)    Run as openshard task\n"
+    "\n"
+    "Composer keys:\n"
+    "  Enter           Submit task\n"
+    "  Ctrl+J          Insert newline\n"
+    "  Shift+Enter     Insert newline (if terminal supports it)"
 )
 
 
@@ -96,10 +109,50 @@ def _render_pack_detail(pack_id: str | None) -> str:
         "Prompt:",
         p.prompt,
         "",
-        "How to run:",
-        "Copy the prompt above into the input, or run:",
-        '  openshard run "<paste prompt here>"',
+        "Next step:",
+        "  The prompt above has been loaded into the composer.",
+        "  Edit it if needed, then press Enter to run.",
+        "  Or run from the shell: openshard run \"<paste prompt>\"",
     ])
+
+
+def _extract_receipt_block(output: str) -> str | None:
+    """Return the RECEIPT separator block from CLI output if present.
+
+    Looks for the text marker 'RECEIPT' rather than separator characters,
+    to avoid brittle ASCII-art parsing.
+    """
+    # Find the line containing "RECEIPT —" or "RECEIPT -" (compact receipt header)
+    lines = output.splitlines()
+    receipt_start: int | None = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("RECEIPT") and ("—" in stripped or "-" in stripped):
+            # Walk back to include the separator line before RECEIPT
+            receipt_start = max(0, i - 1)
+            break
+    if receipt_start is None:
+        return None
+    return "\n".join(lines[receipt_start:])
+
+
+class TaskInput(TextArea):
+    """Multi-line task composer. Enter submits; Ctrl+J / Shift+Enter insert newline."""
+
+    BORDER_TITLE = "Type a task or /help"
+
+    class Submit(Message):
+        def __init__(self, text: str) -> None:
+            self.text = text
+            super().__init__()
+
+    def on_key(self, event: Key) -> None:
+        if event.key == "enter":
+            event.prevent_default()
+            self.post_message(self.Submit(self.text))
+        elif event.key in ("ctrl+j", "shift+enter"):
+            event.prevent_default()
+            self.insert("\n")
 
 
 class OpenShardTui(App):
@@ -112,10 +165,13 @@ class OpenShardTui(App):
         self._recent_runs: list[dict] | None = None
         self._guardrails: dict = {}
         self._output_lines: list[str] = []
+        self._run_in_progress: bool = False
+        self._run_start: float = 0.0
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="hero"):
             with Vertical(id="hero-left"):
+                yield Static("", id="wordmark")
                 yield Static(BRAND, id="hero-brand")
                 yield Static(TAGLINE, id="hero-tagline")
                 yield Static("", id="hero-project")
@@ -129,7 +185,8 @@ class OpenShardTui(App):
         yield Static("", id="prompt-line")
         yield Static("", id="below-commands")
         yield ScrollableContainer(Static("", id="output-content"), id="output-panel")
-        yield Input(placeholder=PLACEHOLDER, id="task-input")
+        yield Static("", id="run-status")
+        yield TaskInput(id="task-input")
         yield Label("", id="status-msg")
 
     def on_mount(self) -> None:
@@ -144,7 +201,23 @@ class OpenShardTui(App):
 
         self._refresh_widgets()
 
+    def on_resize(self, event) -> None:
+        try:
+            self.query_one("#wordmark", Static).update(
+                _WORDMARK if event.size.width >= 90 else ""
+            )
+        except Exception:
+            pass
+
     def _refresh_widgets(self) -> None:
+        # Conditional wordmark based on current terminal width
+        try:
+            self.query_one("#wordmark", Static).update(
+                _WORDMARK if self.size.width >= 90 else ""
+            )
+        except Exception:
+            pass
+
         gi = self._git_info
         state_label = _GIT_STATE_LABELS.get(gi.get("state", "unknown"), "Unknown")
         project_text = (
@@ -190,11 +263,11 @@ class OpenShardTui(App):
         )
         self.query_one("#below-commands", Static).update(below_text)
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        raw = event.value.strip()
+    def on_task_input_submit(self, event: TaskInput.Submit) -> None:
+        raw = event.text.strip()
         if not raw:
             return
-        self.query_one("#task-input", Input).clear()
+        self.query_one("#task-input", TaskInput).load_text("")
         parsed = parse_tui_input(raw)
 
         if parsed.cmd == TuiCommand.HELP:
@@ -208,17 +281,47 @@ class OpenShardTui(App):
         elif parsed.cmd == TuiCommand.LAST_MORE:
             self._run_cli_async(["last", "--more"])
         elif parsed.cmd == TuiCommand.RUN_TASK:
-            self._append_output(f"> {raw}\nRunning...")
-            self._run_cli_async(["run", parsed.task], refresh_after=True)
+            self._append_output(f"> {raw}")
+            self._start_run_status(raw)
+            self._run_cli_async(["run", parsed.task], refresh_after=True, is_run=True)
         elif parsed.cmd == TuiCommand.PACKS:
             self._append_output(_render_packs_list())
         elif parsed.cmd == TuiCommand.PACK_SHOW:
             self._append_output(_render_pack_detail(parsed.pack_id))
+            if parsed.pack_id:
+                try:
+                    from openshard.workflow_packs.packs import get_pack
+                    p = get_pack(parsed.pack_id)
+                    self.query_one("#task-input", TaskInput).load_text(p.prompt)
+                except KeyError:
+                    pass
         else:
             self._append_output(f"Unknown command: {raw}\nType /help for supported commands.")
 
+    def _start_run_status(self, task_text: str) -> None:
+        self._run_in_progress = True
+        self._run_start = time.monotonic()
+        short = task_text[:60].rstrip()
+        if len(task_text) > 60:
+            short += "…"
+        self.query_one("#run-status", Static).update(
+            f"[dim]  ● Executing: {short}  (0s)[/dim]"
+        )
+        self.set_timer(1.0, self._tick_run_status)
+
+    def _tick_run_status(self) -> None:
+        if not self._run_in_progress:
+            return
+        elapsed = int(time.monotonic() - self._run_start)
+        self.query_one("#run-status", Static).update(
+            f"[dim]  ● Executing  {elapsed}s  — /last more for full output[/dim]"
+        )
+        self.set_timer(1.0, self._tick_run_status)
+
     @work(thread=True)
-    def _run_cli_async(self, args: list[str], refresh_after: bool = False) -> None:
+    def _run_cli_async(
+        self, args: list[str], refresh_after: bool = False, is_run: bool = False
+    ) -> None:
         # Temporary v0 bridge: routes TUI input through existing Click commands via
         # CliRunner so we avoid shell=True and stay within supported code paths.
         from openshard.cli.main import cli as openshard_cli
@@ -227,10 +330,22 @@ class OpenShardTui(App):
         result = runner.invoke(openshard_cli, args, input="", catch_exceptions=True)
         output = result.output or (str(result.exception) if result.exception else "")
         status = "Done." if result.exit_code == 0 else f"Failed (exit {result.exit_code})."
-        self.call_from_thread(self._on_cli_result, output, status, refresh_after)
+        self.call_from_thread(self._on_cli_result, output, status, refresh_after, is_run)
 
-    def _on_cli_result(self, output: str, status: str, refresh_after: bool) -> None:
-        self._append_output(output.rstrip("\n") + "\n" + status)
+    def _on_cli_result(
+        self, output: str, status: str, refresh_after: bool, is_run: bool = False
+    ) -> None:
+        self._run_in_progress = False
+        self.query_one("#run-status", Static).update("")
+
+        if is_run:
+            receipt_block = _extract_receipt_block(output)
+            display = (receipt_block or output).rstrip("\n") + "\n" + status
+        else:
+            display = output.rstrip("\n") + "\n" + status
+
+        self._append_output(display)
+
         if refresh_after:
             from openshard.tui.state import load_recent_runs
 

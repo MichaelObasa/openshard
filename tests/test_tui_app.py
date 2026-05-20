@@ -4,9 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from textual.containers import ScrollableContainer
-from textual.widgets import Input, Label, Static
+from textual.widgets import Label, Static
 
-from openshard.tui.app import OpenShardTui
+from openshard.tui.app import OpenShardTui, TaskInput
 from openshard.tui.state import get_guardrails
 
 _SIZE = (120, 55)
@@ -128,21 +128,23 @@ async def test_recent_activity_shows_title_case_status(tmp_path):
         assert "Read-only" in text
 
 
-# ── Input behaviour ────────────────────────────────────────────────────────
+# ── Task composer ──────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_input_has_placeholder(tmp_path):
+async def test_task_input_is_multiline_composer(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        assert app.query_one("#task-input", Input).placeholder == "Type a task or /help"
+        ta = app.query_one("#task-input", TaskInput)
+        assert ta is not None
+        assert ta.BORDER_TITLE == "Type a task or /help"
 
 
 @pytest.mark.asyncio
 async def test_empty_input_does_not_set_status(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        app.query_one("#task-input", Input).focus()
+        app.query_one("#task-input", TaskInput).focus()
         await pilot.press("enter")
         assert _text(app.query_one("#status-msg", Label)).strip() == ""
 
@@ -151,11 +153,11 @@ async def test_empty_input_does_not_set_status(tmp_path):
 async def test_enter_clears_input(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = "some task"
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("some task")
         await pilot.press("enter")
-        assert inp.value == ""
+        assert ta.text == ""
 
 
 # ── Forbidden terms ────────────────────────────────────────────────────────
@@ -194,9 +196,9 @@ async def test_output_panel_is_present(tmp_path):
 async def test_help_command_shows_help_in_panel(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = "/help"
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/help")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
         assert "Supported commands" in text
@@ -208,9 +210,9 @@ async def test_help_command_shows_help_in_panel(tmp_path):
 async def test_unknown_slash_command_shows_error(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = "/badcommand"
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/badcommand")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
         assert "Unknown command" in text
@@ -220,13 +222,13 @@ async def test_unknown_slash_command_shows_error(tmp_path):
 async def test_clear_command_empties_panel(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
         # First populate the panel via /help
-        inp.value = "/help"
+        ta.load_text("/help")
         await pilot.press("enter")
         # Then clear it
-        inp.value = "/clear"
+        ta.load_text("/clear")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
         assert text.strip() == ""
@@ -237,9 +239,9 @@ async def test_quit_command_exits_app(tmp_path):
     app = _make_app(tmp_path)
     with patch.object(app, "exit") as mock_exit:
         async with app.run_test(size=_SIZE) as pilot:
-            inp = app.query_one("#task-input", Input)
-            inp.focus()
-            inp.value = "/quit"
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/quit")
             await pilot.press("enter")
         mock_exit.assert_called_once()
 
@@ -255,9 +257,9 @@ async def test_plain_task_invokes_cli_runner(tmp_path):
     with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
         mock_runner_cls.return_value.invoke.return_value = mock_result
         async with app.run_test(size=_SIZE) as pilot:
-            inp = app.query_one("#task-input", Input)
-            inp.focus()
-            inp.value = "explain this repo"
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("explain this repo")
             await pilot.press("enter")
             await pilot.pause(delay=0.3)
 
@@ -279,9 +281,9 @@ async def test_run_output_appears_in_panel(tmp_path):
     with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
         mock_runner_cls.return_value.invoke.return_value = mock_result
         async with app.run_test(size=_SIZE) as pilot:
-            inp = app.query_one("#task-input", Input)
-            inp.focus()
-            inp.value = "explain this repo"
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("explain this repo")
             await pilot.press("enter")
             await pilot.pause(delay=0.3)
             text = _text(app.query_one("#output-content", Static))
@@ -300,9 +302,9 @@ async def test_failed_run_shows_failure_status(tmp_path):
     with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
         mock_runner_cls.return_value.invoke.return_value = mock_result
         async with app.run_test(size=_SIZE) as pilot:
-            inp = app.query_one("#task-input", Input)
-            inp.focus()
-            inp.value = "break something"
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("break something")
             await pilot.press("enter")
             await pilot.pause(delay=0.3)
             text = _text(app.query_one("#output-content", Static))
@@ -324,9 +326,9 @@ async def test_recent_activity_refreshes_after_run(tmp_path):
         with patch("openshard.tui.app.OpenShardTui._on_cli_result", wraps=app._on_cli_result):
             with patch("openshard.tui.state.load_recent_runs", return_value=new_runs) as mock_load:
                 async with app.run_test(size=_SIZE) as pilot:
-                    inp = app.query_one("#task-input", Input)
-                    inp.focus()
-                    inp.value = "explain this repo"
+                    ta = app.query_one("#task-input", TaskInput)
+                    ta.focus()
+                    ta.load_text("explain this repo")
                     await pilot.press("enter")
                     await pilot.pause(delay=0.3)
                 mock_load.assert_called()
@@ -339,9 +341,9 @@ async def test_recent_activity_refreshes_after_run(tmp_path):
 async def test_packs_command_shows_workflow_packs_heading(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = "/packs"
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/packs")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
         assert "Workflow packs" in text
@@ -351,9 +353,9 @@ async def test_packs_command_shows_workflow_packs_heading(tmp_path):
 async def test_packs_command_shows_known_pack_ids(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = "/packs"
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/packs")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
         assert "production-iac-hardening" in text
@@ -364,9 +366,9 @@ async def test_packs_command_shows_known_pack_ids(tmp_path):
 async def test_packs_command_shows_usage_hint(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = "/packs"
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/packs")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
         assert "/pack <pack-id>" in text
@@ -376,9 +378,9 @@ async def test_packs_command_shows_usage_hint(tmp_path):
 async def test_pack_show_renders_title(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = "/pack production-iac-hardening"
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/pack production-iac-hardening")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
         assert "Production IaC hardening review" in text
@@ -388,9 +390,9 @@ async def test_pack_show_renders_title(tmp_path):
 async def test_pack_show_renders_category(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = "/pack production-iac-hardening"
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/pack production-iac-hardening")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
         assert "infrastructure" in text
@@ -400,9 +402,9 @@ async def test_pack_show_renders_category(tmp_path):
 async def test_pack_show_renders_prompt(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = "/pack production-iac-hardening"
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/pack production-iac-hardening")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
         assert "Terraform" in text
@@ -412,9 +414,9 @@ async def test_pack_show_renders_prompt(tmp_path):
 async def test_pack_show_unknown_id_shows_error(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = "/pack unknown-xyz"
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/pack unknown-xyz")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
         assert "Unknown pack" in text
@@ -425,9 +427,9 @@ async def test_pack_show_unknown_id_shows_error(tmp_path):
 async def test_pack_no_id_shows_usage(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = "/pack"
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/pack")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
         assert "Usage: /pack" in text
@@ -438,9 +440,9 @@ async def test_packs_command_does_not_invoke_cli_runner(tmp_path):
     app = _make_app(tmp_path)
     with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
         async with app.run_test(size=_SIZE) as pilot:
-            inp = app.query_one("#task-input", Input)
-            inp.focus()
-            inp.value = "/packs"
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/packs")
             await pilot.press("enter")
         mock_runner_cls.return_value.invoke.assert_not_called()
 
@@ -450,9 +452,9 @@ async def test_pack_show_does_not_invoke_cli_runner(tmp_path):
     app = _make_app(tmp_path)
     with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
         async with app.run_test(size=_SIZE) as pilot:
-            inp = app.query_one("#task-input", Input)
-            inp.focus()
-            inp.value = "/pack production-iac-hardening"
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/pack production-iac-hardening")
             await pilot.press("enter")
         mock_runner_cls.return_value.invoke.assert_not_called()
 
@@ -461,10 +463,22 @@ async def test_pack_show_does_not_invoke_cli_runner(tmp_path):
 async def test_packs_output_no_forbidden_strings(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
-        inp = app.query_one("#task-input", Input)
-        inp.focus()
-        inp.value = "/packs"
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/packs")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
         for forbidden in ("Tunic Pay", "Mercury", "Volant", "AKIA"):
             assert forbidden not in text
+
+
+@pytest.mark.asyncio
+async def test_pack_show_preloads_prompt_into_composer(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/pack production-iac-hardening")
+        await pilot.press("enter")
+        # Pack prompt should be preloaded into the composer
+        assert "Terraform" in ta.text

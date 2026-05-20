@@ -1,4 +1,4 @@
-# DocuVault — Flagship Demo Task
+# HarbourDocs — Flagship Demo Task
 
 Paste the text below into the OpenShard TUI input field and press Enter.
 

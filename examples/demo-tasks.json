@@ -13,7 +13,7 @@
     "where": "tui",
     "input": "Review and harden this deliberately flawed Terraform codebase. Assess it through three lenses: security and compliance posture for a bank-facing product, operability for a 2am incident with no infrastructure specialist on call, and developer experience for a 5-10 person engineering team that is not infrastructure-specialist. Identify critical, high, and medium risks. Explain trade-offs. Propose safe hardening changes. Prioritise ruthlessly. Do not apply changes directly without review.",
     "expected": "OpenShard reviews the Terraform codebase, identifies prioritised infrastructure risks across security, operability, and developer experience, records a run receipt, and proposes changes reviewable with openshard last --more",
-    "safety_note": "Use the DocuVault example in examples/production-infra-demo/ or a sanitised copy. No real project IDs, accounts, IPs, or secrets."
+    "safety_note": "Use the HarbourDocs example in examples/production-infra-demo/ or a sanitised copy. No real project IDs, accounts, IPs, or secrets."
   },
   {
     "name": "Terraform networking review",

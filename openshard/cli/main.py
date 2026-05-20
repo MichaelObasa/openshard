@@ -2325,6 +2325,11 @@ def packs_prompt(pack_id: str):
         raise click.ClickException(f"Unknown pack {pack_id!r}. Available: {available}")
 
     click.echo(p.prompt)
+    click.echo("")
+    click.echo(
+        "This command only prints the prompt. "
+        "To run it, cd into the target repo and use `openshard tui` or `openshard run`."
+    )
 
 
 if __name__ == "__main__":

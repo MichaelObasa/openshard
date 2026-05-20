@@ -21,6 +21,12 @@ Screen {
     border-left: solid #3A3A44;
 }
 
+#wordmark {
+    color: #4A4A54;
+    height: auto;
+    padding-bottom: 1;
+}
+
 #hero-brand {
     color: #E6E6E6;
     text-style: bold;
@@ -87,13 +93,26 @@ Screen {
     height: auto;
 }
 
+/* ── Task composer ────────────────────────────────────────── */
+
 #task-input {
-    margin: 1 2;
+    margin: 1 2 0 2;
     border: round #3A3A44;
+    min-height: 4;
+    max-height: 8;
+    height: auto;
 }
 
-Input:focus {
+TaskInput:focus {
     border: round #8B7CF6;
+}
+
+/* ── Run status ───────────────────────────────────────────── */
+
+#run-status {
+    color: #9A9AA3;
+    padding: 0 2;
+    height: auto;
 }
 
 #status-msg {

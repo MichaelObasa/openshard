@@ -892,7 +892,7 @@ class TestShardFindings(unittest.TestCase):
             self.assertNotIn(term, out.lower(), f"Found forbidden term: {term!r}")
 
     # ------------------------------------------------------------------ #
-    # Test 10: Compact receipt still renders correctly with findings      #
+    # Test 10: Compact receipt renders findings grouped by severity       #
     # ------------------------------------------------------------------ #
     def test_compact_receipt_renders_with_findings(self):
         entry = {
@@ -908,8 +908,12 @@ class TestShardFindings(unittest.TestCase):
         out = render_compact_shard_receipt(receipt)
         self.assertIn("RECEIPT", out)
         self.assertIn("Findings", out)
-        self.assertIn("1 critical", out)
-        self.assertIn("2 high", out)
+        self.assertIn("CRITICAL", out)
+        self.assertIn("Public IP enabled", out)
+        self.assertIn("HIGH", out)
+        self.assertIn("Bucket ACLs", out)
+        # Critical must appear before High
+        self.assertLess(out.index("CRITICAL"), out.index("HIGH"))
 
     # ------------------------------------------------------------------ #
     # Test 11: Full receipt uses polished separator style                 #
@@ -1118,3 +1122,52 @@ class TestContextProvenancePolish(unittest.TestCase):
         self.assertLess(idx["POLICY"], idx["CHECKS"])
         self.assertLess(idx["CHECKS"], idx["FINDINGS"])
         self.assertLess(idx["FINDINGS"], idx["CHANGES"])
+
+
+class TestCompactReceiptFindingsGrouped(unittest.TestCase):
+    """Compact receipt shows findings grouped by severity, not a count summary."""
+
+    def test_findings_shown_by_severity_with_headers(self):
+        entry = dict(_rich_native_entry())
+        entry["findings"] = [
+            {"severity": "High", "message": "Exposed port 22"},
+            {"severity": "Critical", "message": "Root access enabled"},
+        ]
+        receipt = build_shard_receipt(entry)
+        out = render_compact_shard_receipt(receipt)
+        self.assertIn("CRITICAL", out)
+        self.assertIn("HIGH", out)
+        self.assertIn("Root access enabled", out)
+        self.assertIn("Exposed port 22", out)
+        # Critical must appear before High (sorted by severity priority)
+        self.assertLess(out.index("CRITICAL"), out.index("HIGH"))
+
+    def test_no_findings_row_when_empty(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_compact_shard_receipt(receipt)
+        self.assertNotIn("Findings", out)
+        self.assertNotIn("No structured findings", out)
+
+
+class TestCompactReceiptWarningLine(unittest.TestCase):
+    """Compact receipt shows a warning line only for explicit blocker keywords."""
+
+    def test_warning_line_shown_for_do_not_run_note(self):
+        entry = dict(_rich_native_entry())
+        entry["agent_notes"] = ["DO NOT RUN terraform apply — destructive changes detected"]
+        receipt = build_shard_receipt(entry)
+        out = render_compact_shard_receipt(receipt)
+        self.assertIn("DO NOT RUN", out)
+
+    def test_warning_line_absent_for_normal_note(self):
+        entry = dict(_rich_native_entry())
+        entry["agent_notes"] = ["Review recommended before applying changes"]
+        receipt = build_shard_receipt(entry)
+        out = render_compact_shard_receipt(receipt)
+        # Normal note appears in Findings section (as Note-severity finding) but
+        # must NOT appear as a standalone warning block after the Result row.
+        lines = out.split("\n")
+        result_idx = next((i for i, ln in enumerate(lines) if "Result" in ln), None)
+        self.assertIsNotNone(result_idx, "Result row should be in compact receipt")
+        after_result = "\n".join(lines[result_idx + 1:])
+        self.assertNotIn("Review recommended", after_result)

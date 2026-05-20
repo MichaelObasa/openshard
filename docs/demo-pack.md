@@ -18,10 +18,14 @@ Install:
 pip install openshard
 ```
 
-To be ready for a demo:
+For the flagship HarbourDocs infrastructure demo, copy the fixture outside the OpenShard
+repo before recording. This prevents `openshard tui` from resolving to the OpenShard git
+root instead of the HarbourDocs infrastructure repo:
 
-```bash
-cd your-repo
+```powershell
+robocopy examples\production-infra-demo `
+    C:\Users\Michael\HarbourDocs\harbourdocs-infra /E /NP
+cd C:\Users\Michael\HarbourDocs\harbourdocs-infra
 openshard tui
 ```
 
@@ -51,16 +55,16 @@ See: [demo-script-60s.md](demo-script-60s.md)
 
 ## Layer B — Flagship production-infra demo
 
-Based on DocuVault: a fictional document-processing platform with a deliberately flawed GCP Terraform codebase. Designed to show OpenShard on serious engineering work — not a toy repo.
+Based on HarbourDocs: a fictional document-processing platform with a deliberately flawed GCP Terraform codebase. Designed to show OpenShard on serious engineering work — not a toy repo.
 
 This demo is based on a sanitised IaC hardening scenario, not a toy repo. It covers Terraform networking, IAM, secrets, Cloud SQL, Cloud Run, storage, monitoring, state management, CI/CD readiness, and safe review before apply. The three review lenses — security for a bank-facing product, 2am operability, and developer experience for a small engineering team — make the demo relevant to real teams.
 
 The demo repo is at [`examples/production-infra-demo/`](../examples/production-infra-demo/). The flagship task is in [`examples/production-infra-demo/demo-task.md`](../examples/production-infra-demo/demo-task.md).
 
-To start the flagship demo, run from the openshard repo root:
+To start the flagship demo, run from the HarbourDocs infrastructure repo (copy it first — see Setup above):
 
-```bash
-cd examples/production-infra-demo
+```powershell
+cd C:\Users\Michael\HarbourDocs\harbourdocs-infra
 openshard tui
 ```
 
@@ -76,7 +80,7 @@ See: [demo-script-3min.md](demo-script-3min.md)
 
 ## Public demo note
 
-Use fake names, fake resource IDs, fake IPs, and fake account IDs. Do not demo private customer, employer, production, or confidential infrastructure code unless it has been fully sanitised. The DocuVault example in `examples/production-infra-demo/` uses entirely fictional identifiers and is safe to share publicly.
+Use fake names, fake resource IDs, fake IPs, and fake account IDs. Do not demo private customer, employer, production, or confidential infrastructure code unless it has been fully sanitised. The HarbourDocs example in `examples/production-infra-demo/` uses entirely fictional identifiers and is safe to share publicly.
 
 ## Demo task library
 

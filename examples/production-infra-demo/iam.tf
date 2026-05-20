@@ -1,11 +1,11 @@
 resource "google_service_account" "api_sa" {
-  account_id   = "docuvault-api-sa"
-  display_name = "DocuVault API Service Account"
+  account_id   = "harbourdocs-api-sa"
+  display_name = "HarbourDocs API Service Account"
 }
 
 resource "google_service_account" "processor_sa" {
-  account_id   = "docuvault-processor-sa"
-  display_name = "DocuVault Processor Service Account"
+  account_id   = "harbourdocs-processor-sa"
+  display_name = "HarbourDocs Processor Service Account"
 }
 
 # Deliberate flaw: roles/editor is far too broad for a service account
