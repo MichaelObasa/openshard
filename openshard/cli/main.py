@@ -2307,7 +2307,7 @@ def packs_show(pack_id: str):
     click.echo(f"Category:              {p.category}")
     click.echo(f"Summary:               {p.summary}")
     click.echo(f"Recommended context:   {p.recommended_context}")
-    click.echo(f"Expected receipt value:{p.expected_receipt_value}")
+    click.echo(f"Expected receipt value: {p.expected_receipt_value}")
     click.echo(f"Safety notes:          {p.safety_notes}")
     click.echo(f"Tags:                  {', '.join(p.tags)}")
 
