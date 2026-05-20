@@ -41,6 +41,9 @@ openshard = "openshard.cli.main:cli"
 where = ["."]
 include = ["openshard*"]
 
+[tool.setuptools.package-data]
+"openshard.tui" = ["*.tcss"]
+
 [tool.ruff]
 line-length = 100
 
