@@ -100,3 +100,46 @@ def test_unknown_slash_command_does_not_return_run_task():
     result = parse_tui_input("/shell rm -rf /")
     assert result.cmd == TuiCommand.UNKNOWN
     assert result.task is None
+
+
+# ── Workflow pack commands ─────────────────────────────────────────────────
+
+
+def test_slash_packs_parses_as_packs():
+    result = parse_tui_input("/packs")
+    assert result.cmd == TuiCommand.PACKS
+    assert result.pack_id is None
+
+
+def test_slash_packs_uppercase_parses_as_packs():
+    result = parse_tui_input("/PACKS")
+    assert result.cmd == TuiCommand.PACKS
+
+
+def test_slash_packs_with_whitespace_parses_as_packs():
+    result = parse_tui_input("  /packs  ")
+    assert result.cmd == TuiCommand.PACKS
+
+
+def test_slash_pack_with_id_parses_as_pack_show():
+    result = parse_tui_input("/pack production-iac-hardening")
+    assert result.cmd == TuiCommand.PACK_SHOW
+    assert result.pack_id == "production-iac-hardening"
+
+
+def test_slash_pack_uppercase_id_is_lowercased():
+    result = parse_tui_input("/PACK Production-IaC-Hardening")
+    assert result.cmd == TuiCommand.PACK_SHOW
+    assert result.pack_id == "production-iac-hardening"
+
+
+def test_slash_pack_no_id_parses_as_pack_show_without_id():
+    result = parse_tui_input("/pack")
+    assert result.cmd == TuiCommand.PACK_SHOW
+    assert result.pack_id is None
+
+
+def test_slash_pack_trailing_spaces_only_has_no_id():
+    result = parse_tui_input("/pack   ")
+    assert result.cmd == TuiCommand.PACK_SHOW
+    assert result.pack_id is None
