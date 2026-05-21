@@ -33,6 +33,9 @@ def parse_tui_input(text: str) -> ParsedCommand:
         lower = text.lower()
         if lower == "/packs":
             return ParsedCommand(TuiCommand.PACKS)
+        if lower.startswith("/packs "):
+            pack_id = text[7:].strip().lower()
+            return ParsedCommand(TuiCommand.PACK_SHOW, pack_id=pack_id or None)
         if lower == "/pack":
             return ParsedCommand(TuiCommand.PACK_SHOW, pack_id=None)
         if lower.startswith("/pack "):

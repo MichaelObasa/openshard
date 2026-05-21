@@ -143,3 +143,21 @@ def test_slash_pack_trailing_spaces_only_has_no_id():
     result = parse_tui_input("/pack   ")
     assert result.cmd == TuiCommand.PACK_SHOW
     assert result.pack_id is None
+
+
+def test_slash_packs_with_id_parses_as_pack_show():
+    result = parse_tui_input("/packs production-iac-hardening")
+    assert result.cmd == TuiCommand.PACK_SHOW
+    assert result.pack_id == "production-iac-hardening"
+
+
+def test_slash_packs_with_id_uppercase_is_lowercased():
+    result = parse_tui_input("/PACKS Production-IaC-Hardening")
+    assert result.cmd == TuiCommand.PACK_SHOW
+    assert result.pack_id == "production-iac-hardening"
+
+
+def test_slash_packs_alone_still_lists_packs():
+    result = parse_tui_input("/packs")
+    assert result.cmd == TuiCommand.PACKS
+    assert result.pack_id is None
