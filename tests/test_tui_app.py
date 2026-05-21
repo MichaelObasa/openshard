@@ -24,132 +24,90 @@ def _text(widget) -> str:
     return str(widget.content)
 
 
-# ── Hero box: left column ──────────────────────────────────────────────────
+# ── Compact header ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_hero_brand_contains_openshard(tmp_path):
+async def test_header_brand_contains_openshard(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        assert "OpenShard" in _text(app.query_one("#hero-brand", Static))
+        assert "OpenShard" in _text(app.query_one("#header-brand", Static))
 
 
 @pytest.mark.asyncio
-async def test_wide_wordmark_shown_at_140_cols(tmp_path):
-    app = _make_app(tmp_path)
-    async with app.run_test(size=(140, 55)) as _:
-        wm = _text(app.query_one("#wordmark", Static))
-        assert "██████" in wm
-
-
-@pytest.mark.asyncio
-async def test_wide_wordmark_hides_brand(tmp_path):
-    app = _make_app(tmp_path)
-    async with app.run_test(size=(140, 55)) as _:
-        assert _text(app.query_one("#hero-brand", Static)).strip() == ""
-
-
-@pytest.mark.asyncio
-async def test_narrow_wordmark_shows_brand(tmp_path):
+async def test_header_tagline_contains_expected_text(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        assert "OpenShard" in _text(app.query_one("#hero-brand", Static))
-        wm = _text(app.query_one("#wordmark", Static))
-        assert "██████" not in wm
+        assert "control layer for AI" in _text(app.query_one("#header-tagline", Static))
 
 
 @pytest.mark.asyncio
-async def test_hero_tagline_contains_expected_text(tmp_path):
+async def test_header_project_shows_project_name(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        assert "control layer for AI" in _text(app.query_one("#hero-tagline", Static))
+        assert "test-project" in _text(app.query_one("#header-project", Static))
 
 
 @pytest.mark.asyncio
-async def test_hero_project_shows_project_name(tmp_path):
+async def test_header_project_shows_branch(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        assert "test-project" in _text(app.query_one("#hero-project", Static))
+        assert "main" in _text(app.query_one("#header-project", Static))
 
 
 @pytest.mark.asyncio
-async def test_hero_project_shows_branch(tmp_path):
+async def test_header_project_shows_clean_state(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        assert "main" in _text(app.query_one("#hero-project", Static))
-
-
-@pytest.mark.asyncio
-async def test_hero_project_shows_clean_state(tmp_path):
-    app = _make_app(tmp_path)
-    async with app.run_test(size=_SIZE) as _:
-        assert "Clean" in _text(app.query_one("#hero-project", Static))
+        assert "Clean" in _text(app.query_one("#header-project", Static))
 
 
 @pytest.mark.asyncio
 async def test_dirty_state_renders_as_changes_pending(tmp_path):
     app = _make_app(tmp_path, git_info={"project_name": "p", "branch": "main", "state": "dirty"})
     async with app.run_test(size=_SIZE) as _:
-        text = _text(app.query_one("#hero-project", Static))
+        text = _text(app.query_one("#header-project", Static))
         assert "Changes pending" in text
         assert "dirty" not in text
 
 
-# ── Hero box: right column ─────────────────────────────────────────────────
+# ── Control strip ──────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_hero_controls_heading_says_run_controls(tmp_path):
+async def test_control_strip_shows_all_guardrail_keys(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        assert "Run Controls" in _text(app.query_one("#hero-controls-heading", Label))
-
-
-@pytest.mark.asyncio
-async def test_hero_controls_shows_all_guardrail_keys(tmp_path):
-    app = _make_app(tmp_path)
-    async with app.run_test(size=_SIZE) as _:
-        text = _text(app.query_one("#hero-controls", Static))
+        text = _text(app.query_one("#control-strip", Static))
         for key in ("Agent", "Model", "Sandbox", "Approval", "Checks", "Receipts"):
             assert key in text
 
 
 @pytest.mark.asyncio
-async def test_hero_controls_shows_guardrail_values(tmp_path):
+async def test_control_strip_shows_guardrail_values(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        text = _text(app.query_one("#hero-controls", Static))
+        text = _text(app.query_one("#control-strip", Static))
         assert "OpenShard Native" in text
         assert "Smart" in text
 
 
 @pytest.mark.asyncio
-async def test_recent_activity_shows_only_latest_run(tmp_path):
-    runs = [
-        {"task": "new task", "timestamp": "2026-01-02T00:00", "status": "passed", "duration": "1.0s"},
-        {"task": "old task", "timestamp": "2026-01-01T00:00", "status": "failed", "duration": "3.0s"},
-    ]
-    app = _make_app(tmp_path, recent_runs=runs)
+async def test_control_strip_shows_help_hint(tmp_path):
+    app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        text = _text(app.query_one("#hero-activity", Static))
-        assert "new task" in text
-        assert "old task" not in text
+        text = _text(app.query_one("#control-strip", Static))
+        assert "/help" in text
 
 
 @pytest.mark.asyncio
-async def test_recent_activity_no_runs_fallback(tmp_path):
-    app = _make_app(tmp_path, recent_runs=[])
+async def test_no_forbidden_terms_in_control_strip(tmp_path):
+    app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        assert "No recent activity" in _text(app.query_one("#hero-activity", Static))
-
-
-@pytest.mark.asyncio
-async def test_recent_activity_shows_title_case_status(tmp_path):
-    runs = [{"task": "t", "timestamp": "2026-01-01T00:00", "status": "read-only", "duration": "0.1s"}]
-    app = _make_app(tmp_path, recent_runs=runs)
-    async with app.run_test(size=_SIZE) as _:
-        text = _text(app.query_one("#hero-activity", Static))
-        assert "Read-only" in text
+        text = _text(app.query_one("#control-strip", Static)).lower()
+        for forbidden in ("routing advisory", "verification loop", "plan ledger"):
+            assert forbidden not in text, f"Found '{forbidden}' in #control-strip"
+        assert "candidate" not in text, "Found 'candidate' in #control-strip"
 
 
 # ── Task composer ──────────────────────────────────────────────────────────
@@ -182,27 +140,6 @@ async def test_enter_clears_input(tmp_path):
         ta.load_text("some task")
         await pilot.press("enter")
         assert ta.text == ""
-
-
-# ── Forbidden terms ────────────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_no_forbidden_terms_in_hero(tmp_path):
-    app = _make_app(tmp_path)
-    async with app.run_test(size=_SIZE) as _:
-        owned = {
-            "#hero-controls": Static,
-            "#hero-activity": Static,
-            "#hero-quickstart": Static,
-            "#hero-controls-heading": Label,
-            "#hero-activity-heading": Label,
-        }
-        for widget_id, widget_type in owned.items():
-            text = _text(app.query_one(widget_id, widget_type)).lower()
-            for forbidden in ("routing advisory", "verification loop", "plan ledger"):
-                assert forbidden not in text, f"Found '{forbidden}' in {widget_id}"
-            assert "candidate" not in text, f"Found 'candidate' in {widget_id}"
 
 
 # ── Output panel ───────────────────────────────────────────────────────────
@@ -411,7 +348,7 @@ async def test_pack_show_renders_title(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_pack_show_renders_category(tmp_path):
+async def test_pack_show_renders_summary(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
         ta = app.query_one("#task-input", TaskInput)
@@ -419,11 +356,11 @@ async def test_pack_show_renders_category(tmp_path):
         ta.load_text("/pack production-iac-hardening")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
-        assert "infrastructure" in text
+        assert "Hardens" in text
 
 
 @pytest.mark.asyncio
-async def test_pack_show_renders_prompt(tmp_path):
+async def test_pack_show_renders_compact_cta(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
         ta = app.query_one("#task-input", TaskInput)
@@ -431,7 +368,7 @@ async def test_pack_show_renders_prompt(tmp_path):
         ta.load_text("/pack production-iac-hardening")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
-        assert "Terraform" in text
+        assert "Prompt loaded into composer" in text
 
 
 @pytest.mark.asyncio
@@ -506,18 +443,6 @@ async def test_pack_show_preloads_prompt_into_composer(tmp_path):
         await pilot.press("enter")
         # Pack prompt should be preloaded into the composer
         assert "Terraform" in ta.text
-
-
-# ── Below-commands compact hint ────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_below_commands_shows_compact_hint(tmp_path):
-    app = _make_app(tmp_path)
-    async with app.run_test(size=_SIZE) as _:
-        text = _text(app.query_one("#below-commands", Static))
-        assert "OpenShard ready" in text
-        assert "Try these inside the TUI" not in text
 
 
 # ── _extract_receipt_block() unit tests ───────────────────────────────────

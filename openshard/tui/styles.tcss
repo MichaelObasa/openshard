@@ -2,93 +2,50 @@ Screen {
     background: #0E0F11;
 }
 
-/* ── Hero box ─────────────────────────────────────────────── */
+/* ── Compact header (brand + tagline + project, ~3 lines) ── */
 
-#hero {
-    border: round #3A3A44;
-    height: 15;
+#header {
+    height: auto;
     margin: 1 1 0 1;
+    padding: 0 1;
 }
 
-#hero-left {
-    width: 2fr;
-    padding: 1 2;
-}
-
-#hero-right {
-    width: 3fr;
-    padding: 1 2;
-    border-left: solid #3A3A44;
-}
-
-#wordmark {
-    color: #4A4A54;
-    height: auto;
-}
-
-#hero-brand {
+#header-brand {
     color: #E6E6E6;
     text-style: bold;
     height: auto;
 }
 
-#hero-tagline {
+#header-tagline {
+    color: #9A9AA3;
+    height: auto;
+}
+
+#header-project {
     color: #9A9AA3;
     height: auto;
     padding-bottom: 1;
 }
 
-#hero-project {
+/* ── Output panel ─────────────────────────────────────────── */
+
+#output-panel {
+    height: 1fr;
+    margin: 0 2 0 2;
+    overflow-y: auto;
+}
+
+#output-content {
     color: #E6E6E6;
+    padding: 0 1;
     height: auto;
 }
 
-#hero-controls-heading {
-    color: #8B7CF6;
-    text-style: bold;
-    height: auto;
-}
+/* ── Control strip (guardrail summary + run status) ───────── */
 
-#hero-controls {
-    color: #E6E6E6;
-    height: auto;
-    padding-bottom: 1;
-}
-
-#hero-quickstart-heading {
-    color: #8B7CF6;
-    text-style: bold;
-    height: auto;
-}
-
-#hero-quickstart {
+#control-strip {
     color: #9A9AA3;
-    height: auto;
-    padding-bottom: 1;
-}
-
-#hero-activity-heading {
-    color: #8B7CF6;
-    text-style: bold;
-    height: auto;
-}
-
-#hero-activity {
-    color: #E6E6E6;
-    height: auto;
-}
-
-/* ── Below hero ───────────────────────────────────────────── */
-
-#prompt-line {
-    color: #9A9AA3;
-    padding: 1 2 0 2;
-    height: auto;
-}
-
-#below-commands {
-    color: #9A9AA3;
-    padding: 0 2 1 2;
+    padding: 0 2;
     height: auto;
 }
 
@@ -106,30 +63,10 @@ TaskInput:focus {
     border: round #8B7CF6;
 }
 
-/* ── Run status ───────────────────────────────────────────── */
-
-#run-status {
-    color: #9A9AA3;
-    padding: 0 2;
-    height: auto;
-}
+/* ── Status label ─────────────────────────────────────────── */
 
 #status-msg {
     color: #9A9AA3;
     padding: 0 2;
     height: 1;
-}
-
-/* ── Output panel ─────────────────────────────────────────── */
-
-#output-panel {
-    height: 1fr;
-    margin: 1 2 0 2;
-    overflow-y: auto;
-}
-
-#output-content {
-    color: #E6E6E6;
-    padding: 0 1;
-    height: auto;
 }
