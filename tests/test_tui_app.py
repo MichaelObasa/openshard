@@ -38,7 +38,7 @@ async def test_header_brand_contains_openshard(tmp_path):
 async def test_header_tagline_contains_expected_text(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        assert "control layer for AI" in _text(app.query_one("#header-tagline", Static))
+        assert "layer for AI coding agents" in _text(app.query_one("#header-tagline", Static))
 
 
 @pytest.mark.asyncio
@@ -71,43 +71,74 @@ async def test_dirty_state_renders_as_changes_pending(tmp_path):
         assert "dirty" not in text
 
 
-# ── Control strip ──────────────────────────────────────────────────────────
+# ── Status strip ───────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_control_strip_shows_all_guardrail_keys(tmp_path):
+async def test_status_strip_shows_expected_content(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        text = _text(app.query_one("#control-strip", Static))
-        for key in ("Agent", "Model", "Sandbox", "Approval", "Checks", "Receipts"):
-            assert key in text
+        text = _text(app.query_one("#status-strip", Static))
+        for term in ("Sandbox On", "Approval Smart", "Checks Auto", "Receipts On"):
+            assert term in text
 
 
 @pytest.mark.asyncio
-async def test_control_strip_shows_guardrail_values(tmp_path):
+async def test_no_forbidden_terms_in_status_strip(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        text = _text(app.query_one("#control-strip", Static))
-        assert "OpenShard Native" in text
-        assert "Smart" in text
-
-
-@pytest.mark.asyncio
-async def test_control_strip_shows_help_hint(tmp_path):
-    app = _make_app(tmp_path)
-    async with app.run_test(size=_SIZE) as _:
-        text = _text(app.query_one("#control-strip", Static))
-        assert "/help" in text
-
-
-@pytest.mark.asyncio
-async def test_no_forbidden_terms_in_control_strip(tmp_path):
-    app = _make_app(tmp_path)
-    async with app.run_test(size=_SIZE) as _:
-        text = _text(app.query_one("#control-strip", Static)).lower()
+        text = _text(app.query_one("#status-strip", Static)).lower()
         for forbidden in ("routing advisory", "verification loop", "plan ledger"):
-            assert forbidden not in text, f"Found '{forbidden}' in #control-strip"
-        assert "candidate" not in text, "Found 'candidate' in #control-strip"
+            assert forbidden not in text, f"Found '{forbidden}' in #status-strip"
+        assert "candidate" not in text, "Found 'candidate' in #status-strip"
+
+
+# ── Mode strip ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mode_strip_shows_mode_and_executor(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as _:
+        left = _text(app.query_one("#mode-strip-left", Static))
+        right = _text(app.query_one("#mode-strip-right", Static))
+        assert "Auto mode" in left
+        assert "OpenShard Native" in right
+
+
+# ── Slash command menu ─────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_slash_menu_hidden_when_composer_empty(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as _:
+        slash_menu = app.query_one("#slash-menu", Static)
+        assert slash_menu.display is False
+
+
+@pytest.mark.asyncio
+async def test_slash_menu_shows_when_text_starts_with_slash(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.load_text("/")
+        await pilot.pause()
+        slash_menu = app.query_one("#slash-menu", Static)
+        assert slash_menu.display is True
+
+
+@pytest.mark.asyncio
+async def test_slash_menu_hides_after_submit(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/help")
+        await pilot.press("enter")
+        await pilot.pause()
+        slash_menu = app.query_one("#slash-menu", Static)
+        assert slash_menu.display is False
 
 
 # ── Task composer ──────────────────────────────────────────────────────────
@@ -119,7 +150,7 @@ async def test_task_input_is_multiline_composer(tmp_path):
     async with app.run_test(size=_SIZE) as _:
         ta = app.query_one("#task-input", TaskInput)
         assert ta is not None
-        assert ta.BORDER_TITLE == "Type a task or /help"
+        assert ta.BORDER_TITLE == "Type a task or / for commands"
 
 
 @pytest.mark.asyncio
@@ -368,7 +399,19 @@ async def test_pack_show_renders_compact_cta(tmp_path):
         ta.load_text("/pack production-iac-hardening")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
-        assert "Prompt loaded into composer" in text
+        assert "Loaded into composer" in text
+
+
+@pytest.mark.asyncio
+async def test_pack_show_renders_prompt_text_in_panel(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/pack production-iac-hardening")
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert "Terraform" in text
 
 
 @pytest.mark.asyncio

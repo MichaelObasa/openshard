@@ -4,9 +4,9 @@ import time
 from pathlib import Path
 
 from click.testing import CliRunner
-from textual import work
+from textual import on, work
 from textual.app import App, ComposeResult
-from textual.containers import ScrollableContainer, Vertical
+from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.events import Key
 from textual.message import Message
 from textual.widgets import Label, Static, TextArea
@@ -14,7 +14,22 @@ from textual.widgets import Label, Static, TextArea
 from openshard.tui.commands import TuiCommand, parse_tui_input
 
 BRAND = "✦ OpenShard"
-TAGLINE = "The control layer for AI coding agents."
+TAGLINE = "Control layer for AI coding agents"
+
+_HEADER_RIGHT = "Executor OpenShard Native  ·  Model Auto  ·  Mode Auto"
+_MODE_STRIP_DEFAULT = "Auto mode — edits + read-only commands"
+_STATUS_STRIP = (
+    "OSN ✓  ·  Sandbox On  ·  Approval Smart  ·  Checks Auto  ·  Receipts On  ·  Cost tracked"
+)
+_SLASH_MENU_TEXT = (
+    "  /help          Show help\n"
+    "  /packs         List workflow packs\n"
+    "  /pack <id>     Load a workflow pack\n"
+    "  /last          Show most recent run\n"
+    "  /last more     Show more detail\n"
+    "  /clear         Clear output\n"
+    "  /quit          Exit"
+)
 
 _GIT_STATE_LABELS = {
     "clean": "Clean",
@@ -81,7 +96,10 @@ def _render_pack_detail(pack_id: str | None) -> str:
         f"Workflow pack: {p.title}",
         p.summary,
         "",
-        "Prompt loaded into composer. Press Enter to run.",
+        "Prompt:",
+        p.prompt,
+        "",
+        "Loaded into composer. Edit if needed, then press Enter to run.",
     ])
 
 
@@ -111,7 +129,7 @@ def _extract_receipt_block(output: str) -> str | None:
 class TaskInput(TextArea):
     """Multi-line task composer. Enter submits; Ctrl+J / Shift+Enter insert newline."""
 
-    BORDER_TITLE = "Type a task or /help"
+    BORDER_TITLE = "Type a task or / for commands"
 
     class Submit(Message):
         def __init__(self, text: str) -> None:
@@ -141,13 +159,19 @@ class OpenShardTui(App):
         self._run_start: float = 0.0
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="header"):
-            yield Static(BRAND, id="header-brand")
-            yield Static(TAGLINE, id="header-tagline")
-            yield Static("", id="header-project")
+        with Horizontal(id="header-card"):
+            with Vertical(id="header-left"):
+                yield Static(BRAND, id="header-brand")
+                yield Static(TAGLINE, id="header-tagline")
+                yield Static("", id="header-project")
+            yield Static(_HEADER_RIGHT, id="header-right")
         yield ScrollableContainer(Static("", id="output-content"), id="output-panel")
-        yield Static("", id="control-strip")
+        with Horizontal(id="mode-strip"):
+            yield Static(_MODE_STRIP_DEFAULT, id="mode-strip-left")
+            yield Static("OpenShard Native", id="mode-strip-right")
+        yield Static(_SLASH_MENU_TEXT, id="slash-menu")
         yield TaskInput(id="task-input")
+        yield Static(_STATUS_STRIP, id="status-strip")
         yield Label("", id="status-msg")
 
     def on_mount(self) -> None:
@@ -162,11 +186,6 @@ class OpenShardTui(App):
 
         self._refresh_widgets()
 
-    def _build_control_strip(self) -> str:
-        parts = [f"{k} {v}" for k, v in self._guardrails.items()]
-        parts.append("/help")
-        return "[dim]" + "  ·  ".join(parts) + "[/dim]"
-
     def _refresh_widgets(self) -> None:
         gi = self._git_info
         state_label = _GIT_STATE_LABELS.get(gi.get("state", "unknown"), "Unknown")
@@ -176,7 +195,10 @@ class OpenShardTui(App):
             f" · {state_label}"
         )
         self.query_one("#header-project", Static).update(project_text)
-        self.query_one("#control-strip", Static).update(self._build_control_strip())
+
+    @on(TextArea.Changed, "#task-input")
+    def _on_task_input_changed(self, event: TextArea.Changed) -> None:
+        self.query_one("#slash-menu").display = event.text_area.text.startswith("/")
 
     def on_task_input_submit(self, event: TaskInput.Submit) -> None:
         raw = event.text.strip()
@@ -219,7 +241,7 @@ class OpenShardTui(App):
         short = task_text[:60].rstrip()
         if len(task_text) > 60:
             short += "…"
-        self.query_one("#control-strip", Static).update(
+        self.query_one("#mode-strip-left", Static).update(
             f"[dim]  ● Executing: {short}  (0s)[/dim]"
         )
         self.set_timer(1.0, self._tick_run_status)
@@ -228,9 +250,12 @@ class OpenShardTui(App):
         if not self._run_in_progress:
             return
         elapsed = int(time.monotonic() - self._run_start)
-        self.query_one("#control-strip", Static).update(
-            f"[dim]  ● Executing  {elapsed}s  — /last more for full output[/dim]"
-        )
+        try:
+            self.query_one("#mode-strip-left", Static).update(
+                f"[dim]  ● Executing  {elapsed}s  — /last more for full output[/dim]"
+            )
+        except Exception:
+            return
         self.set_timer(1.0, self._tick_run_status)
 
     @work(thread=True)
@@ -251,7 +276,7 @@ class OpenShardTui(App):
         self, output: str, status: str, refresh_after: bool, is_run: bool = False
     ) -> None:
         self._run_in_progress = False
-        self.query_one("#control-strip", Static).update(self._build_control_strip())
+        self.query_one("#mode-strip-left", Static).update(_MODE_STRIP_DEFAULT)
 
         if is_run:
             receipt_block = _extract_receipt_block(output)
