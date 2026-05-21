@@ -2,12 +2,18 @@ Screen {
     background: #0E0F11;
 }
 
-/* ── Compact header (brand + tagline + project, ~3 lines) ── */
+/* ── Top card (identity + repo context) ── */
 
-#header {
+#header-card {
+    border: round #3A3A44;
     height: auto;
-    margin: 1 1 0 1;
+    margin: 1 2 0 2;
     padding: 0 1;
+}
+
+#header-left {
+    width: 1fr;
+    height: auto;
 }
 
 #header-brand {
@@ -24,7 +30,15 @@ Screen {
 #header-project {
     color: #9A9AA3;
     height: auto;
-    padding-bottom: 1;
+}
+
+#header-right {
+    width: auto;
+    color: #9A9AA3;
+    text-style: dim;
+    height: auto;
+    content-align: right middle;
+    padding: 0 1;
 }
 
 /* ── Output panel ─────────────────────────────────────────── */
@@ -41,20 +55,42 @@ Screen {
     height: auto;
 }
 
-/* ── Control strip (guardrail summary + run status) ───────── */
+/* ── Mode strip (1 line above composer) ── */
 
-#control-strip {
+#mode-strip {
+    height: 1;
+    margin: 1 2 0 2;
     color: #9A9AA3;
-    padding: 0 2;
+    text-style: dim;
+}
+
+#mode-strip-left {
+    width: 1fr;
+}
+
+#mode-strip-right {
+    width: auto;
+}
+
+/* ── Slash command menu (hidden until "/" typed) ── */
+
+#slash-menu {
+    display: none;
     height: auto;
+    margin: 0 2;
+    padding: 0 1;
+    color: #9A9AA3;
+    text-style: dim;
+    background: #16171A;
+    border: tall #3A3A44;
 }
 
 /* ── Task composer ────────────────────────────────────────── */
 
 #task-input {
-    margin: 1 2 0 2;
+    margin: 0 2 0 2;
     border: round #3A3A44;
-    min-height: 6;
+    min-height: 3;
     max-height: 10;
     height: auto;
 }
@@ -63,10 +99,17 @@ TaskInput:focus {
     border: round #8B7CF6;
 }
 
-/* ── Status label ─────────────────────────────────────────── */
+/* ── Status strip (OSN status line) ──────────────────────── */
 
-#status-msg {
+#status-strip {
     color: #9A9AA3;
+    text-style: dim;
     padding: 0 2;
     height: 1;
+}
+
+/* ── Status label (kept for test compat) ─────────────────── */
+
+#status-msg {
+    display: none;
 }
