@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -13,14 +14,26 @@ from textual.widgets import Label, Static, TextArea
 
 from openshard.tui.commands import TuiCommand, parse_tui_input
 
-BRAND = "✦ OpenShard"
-TAGLINE = "Control layer for AI coding agents"
-
-_HEADER_RIGHT = "Executor OpenShard Native  ·  Model Auto  ·  Mode Auto"
-_MODE_STRIP_DEFAULT = "Auto mode — edits + read-only commands"
-_STATUS_STRIP = (
-    "OSN ✓  ·  Sandbox On  ·  Approval Smart  ·  Checks Auto  ·  Receipts On  ·  Cost tracked"
+_BRAND_ANSI_SHADOW = (
+    "██████╗ ██████╗ ███████╗███╗   ██╗███████╗██╗  ██╗ █████╗ ██████╗ ██████╗\n"
+    "██╔═══██╗██╔══██╗██╔════╝████╗  ██║██╔════╝██║  ██║██╔══██╗██╔══██╗██╔══██╗\n"
+    "██║   ██║██████╔╝█████╗  ██╔██╗ ██║███████╗███████║███████║██████╔╝██║  ██║\n"
+    "██║   ██║██╔═══╝ ██╔══╝  ██║╚██╗██║╚════██║██╔══██║██╔══██║██╔══██╗██║  ██║\n"
+    "╚██████╔╝██║     ███████╗██║ ╚████║███████║██║  ██║██║  ██║██║  ██║██████╔╝\n"
+    " ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝"
 )
+_BRAND_FALLBACK = "✦ OpenShard"
+_BRAND_MIN_WIDTH = 100  # conservative threshold; avoids Windows Terminal wrapping/clipping
+
+try:
+    _VERSION = f"v{_pkg_version('openshard')}"
+except Exception:
+    _VERSION = "v0.1.0"
+
+TAGLINE = "The control layer for AI coding agents"
+
+_MODE_STRIP_DEFAULT = "Auto mode"
+_STATUS_STRIP = "↳ Sandbox [ON]     ↳ Receipts [ON]     ↳ Checks [AUTO]     ↳ Approval [SMART]"
 _SLASH_MENU_TEXT = (
     "  /help          Show help\n"
     "  /packs         List workflow packs\n"
@@ -92,15 +105,7 @@ def _render_pack_detail(pack_id: str | None) -> str:
     except KeyError:
         ids = "\n".join(f"  {p.id}" for p in load_packs())
         return f'Unknown pack: "{pack_id}"\n\nAvailable packs:\n{ids}'
-    return "\n".join([
-        f"Workflow pack: {p.title}",
-        p.summary,
-        "",
-        "Prompt:",
-        p.prompt,
-        "",
-        "Loaded into composer. Edit if needed, then press Enter to run.",
-    ])
+    return f"Workflow pack selected: {p.title}"
 
 
 def _extract_receipt_block(output: str) -> str | None:
@@ -161,17 +166,17 @@ class OpenShardTui(App):
     def compose(self) -> ComposeResult:
         with Horizontal(id="header-card"):
             with Vertical(id="header-left"):
-                yield Static(BRAND, id="header-brand")
+                yield Static("", id="header-brand")
                 yield Static(TAGLINE, id="header-tagline")
                 yield Static("", id="header-project")
-            yield Static(_HEADER_RIGHT, id="header-right")
+            yield Static(_VERSION, id="header-version")
         yield ScrollableContainer(Static("", id="output-content"), id="output-panel")
         with Horizontal(id="mode-strip"):
             yield Static(_MODE_STRIP_DEFAULT, id="mode-strip-left")
-            yield Static("OpenShard Native", id="mode-strip-right")
+            yield Static("Agent: OpenShard Native (OSN)", id="mode-strip-right")
         yield Static(_SLASH_MENU_TEXT, id="slash-menu")
         yield TaskInput(id="task-input")
-        yield Static(_STATUS_STRIP, id="status-strip")
+        yield Static(_STATUS_STRIP, id="status-strip", markup=False)
         yield Label("", id="status-msg")
 
     def on_mount(self) -> None:
@@ -185,20 +190,36 @@ class OpenShardTui(App):
             self._recent_runs = load_recent_runs(self._path)
 
         self._refresh_widgets()
+        self._update_brand()
+
+    def on_resize(self, event) -> None:
+        self._update_brand()
+
+    def _update_brand(self) -> None:
+        brand = _BRAND_ANSI_SHADOW if self.size.width >= _BRAND_MIN_WIDTH else _BRAND_FALLBACK
+        self.query_one("#header-brand", Static).update(brand)
 
     def _refresh_widgets(self) -> None:
         gi = self._git_info
-        state_label = _GIT_STATE_LABELS.get(gi.get("state", "unknown"), "Unknown")
-        project_text = (
-            f"{gi.get('project_name', 'unknown')}"
-            f" · {gi.get('branch', 'unknown')}"
-            f" · {state_label}"
+        state_key = gi.get("state", "unknown")
+        state_label = _GIT_STATE_LABELS.get(state_key, "Unknown")
+        col = 26
+        _repo_color = {"clean": "green", "dirty": "yellow", "unknown": "dim"}
+        color = _repo_color.get(state_key, "dim")
+        pname = gi.get("project_name", "unknown")
+        branch = gi.get("branch", "unknown")
+        labels = f"[dim]{'PROJECT':<{col}}{'BRANCH':<{col}}REPO[/dim]"
+        values = (
+            f"[white]{pname:<{col}}[/white]"
+            f"[white]{branch:<{col}}[/white]"
+            f"[{color}]{state_label}[/{color}]"
         )
-        self.query_one("#header-project", Static).update(project_text)
+        self.query_one("#header-project", Static).update(f"{labels}\n{values}")
 
     @on(TextArea.Changed, "#task-input")
     def _on_task_input_changed(self, event: TextArea.Changed) -> None:
-        self.query_one("#slash-menu").display = event.text_area.text.startswith("/")
+        text = event.text_area.text
+        self.query_one("#slash-menu").display = text.startswith("/") and " " not in text
 
     def on_task_input_submit(self, event: TaskInput.Submit) -> None:
         raw = event.text.strip()

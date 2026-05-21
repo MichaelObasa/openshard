@@ -16,9 +16,15 @@ Screen {
     height: auto;
 }
 
+#header-version {
+    width: auto;
+    color: #6E6E77;
+    text-style: dim;
+    padding: 0 1;
+}
+
 #header-brand {
-    color: #E6E6E6;
-    text-style: bold;
+    color: #6E6E77;
     height: auto;
 }
 
@@ -30,16 +36,9 @@ Screen {
 #header-project {
     color: #9A9AA3;
     height: auto;
+    margin-top: 1;
 }
 
-#header-right {
-    width: auto;
-    color: #9A9AA3;
-    text-style: dim;
-    height: auto;
-    content-align: right middle;
-    padding: 0 1;
-}
 
 /* ── Output panel ─────────────────────────────────────────── */
 

@@ -31,7 +31,8 @@ def _text(widget) -> str:
 async def test_header_brand_contains_openshard(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
-        assert "OpenShard" in _text(app.query_one("#header-brand", Static))
+        text = _text(app.query_one("#header-brand", Static))
+        assert "█" in text or "OpenShard" in text
 
 
 @pytest.mark.asyncio
@@ -39,6 +40,14 @@ async def test_header_tagline_contains_expected_text(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
         assert "layer for AI coding agents" in _text(app.query_one("#header-tagline", Static))
+
+
+@pytest.mark.asyncio
+async def test_header_version_is_displayed(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as _:
+        text = _text(app.query_one("#header-version", Static))
+        assert text.startswith("v")
 
 
 @pytest.mark.asyncio
@@ -71,6 +80,15 @@ async def test_dirty_state_renders_as_changes_pending(tmp_path):
         assert "dirty" not in text
 
 
+@pytest.mark.asyncio
+async def test_header_project_row_contains_column_labels(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as _:
+        text = _text(app.query_one("#header-project", Static))
+        for label in ("PROJECT", "BRANCH", "REPO"):
+            assert label in text
+
+
 # ── Status strip ───────────────────────────────────────────────────────────
 
 
@@ -79,7 +97,7 @@ async def test_status_strip_shows_expected_content(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
         text = _text(app.query_one("#status-strip", Static))
-        for term in ("Sandbox On", "Approval Smart", "Checks Auto", "Receipts On"):
+        for term in ("Sandbox [ON]", "Receipts [ON]", "Checks [AUTO]", "Approval [SMART]"):
             assert term in text
 
 
@@ -91,6 +109,17 @@ async def test_no_forbidden_terms_in_status_strip(tmp_path):
         for forbidden in ("routing advisory", "verification loop", "plan ledger"):
             assert forbidden not in text, f"Found '{forbidden}' in #status-strip"
         assert "candidate" not in text, "Found 'candidate' in #status-strip"
+
+
+@pytest.mark.asyncio
+async def test_status_strip_shows_bracketed_values_not_bare_labels(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as _:
+        text = _text(app.query_one("#status-strip", Static))
+        # Brackets must be present — bare labels without values are not acceptable
+        assert "[ON]" in text
+        assert "[AUTO]" in text
+        assert "[SMART]" in text
 
 
 # ── Mode strip ─────────────────────────────────────────────────────────────
@@ -139,6 +168,36 @@ async def test_slash_menu_hides_after_submit(tmp_path):
         await pilot.pause()
         slash_menu = app.query_one("#slash-menu", Static)
         assert slash_menu.display is False
+
+
+@pytest.mark.asyncio
+async def test_slash_menu_shows_for_partial_command(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.load_text("/p")
+        await pilot.pause()
+        assert app.query_one("#slash-menu", Static).display is True
+
+
+@pytest.mark.asyncio
+async def test_slash_menu_hidden_when_command_has_trailing_space(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.load_text("/pack ")
+        await pilot.pause()
+        assert app.query_one("#slash-menu", Static).display is False
+
+
+@pytest.mark.asyncio
+async def test_slash_menu_hidden_when_command_has_argument(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.load_text("/pack production-iac-hardening")
+        await pilot.pause()
+        assert app.query_one("#slash-menu", Static).display is False
 
 
 # ── Task composer ──────────────────────────────────────────────────────────
@@ -379,7 +438,7 @@ async def test_pack_show_renders_title(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_pack_show_renders_summary(tmp_path):
+async def test_pack_show_does_not_render_summary(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
         ta = app.query_one("#task-input", TaskInput)
@@ -387,11 +446,11 @@ async def test_pack_show_renders_summary(tmp_path):
         ta.load_text("/pack production-iac-hardening")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
-        assert "Hardens" in text
+        assert "Hardens" not in text
 
 
 @pytest.mark.asyncio
-async def test_pack_show_renders_compact_cta(tmp_path):
+async def test_pack_show_renders_compact_selected_message(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
         ta = app.query_one("#task-input", TaskInput)
@@ -399,11 +458,11 @@ async def test_pack_show_renders_compact_cta(tmp_path):
         ta.load_text("/pack production-iac-hardening")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
-        assert "Loaded into composer" in text
+        assert "Workflow pack selected:" in text
 
 
 @pytest.mark.asyncio
-async def test_pack_show_renders_prompt_text_in_panel(tmp_path):
+async def test_pack_prompt_text_not_in_output_panel(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as pilot:
         ta = app.query_one("#task-input", TaskInput)
@@ -411,7 +470,7 @@ async def test_pack_show_renders_prompt_text_in_panel(tmp_path):
         ta.load_text("/pack production-iac-hardening")
         await pilot.press("enter")
         text = _text(app.query_one("#output-content", Static))
-        assert "Terraform" in text
+        assert "Terraform" not in text
 
 
 @pytest.mark.asyncio
@@ -486,6 +545,42 @@ async def test_pack_show_preloads_prompt_into_composer(tmp_path):
         await pilot.press("enter")
         # Pack prompt should be preloaded into the composer
         assert "Terraform" in ta.text
+
+
+@pytest.mark.asyncio
+async def test_packs_with_id_shows_pack_selected_message(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/packs production-iac-hardening")
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert "Workflow pack selected:" in text
+        assert "Unknown command" not in text
+
+
+@pytest.mark.asyncio
+async def test_packs_with_id_loads_prompt_into_composer(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/packs production-iac-hardening")
+        await pilot.press("enter")
+        assert "Terraform" in ta.text
+
+
+@pytest.mark.asyncio
+async def test_packs_with_id_does_not_print_full_prompt_in_panel(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/packs production-iac-hardening")
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+        assert "Terraform" not in text
 
 
 # ── _extract_receipt_block() unit tests ───────────────────────────────────
