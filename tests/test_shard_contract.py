@@ -9,6 +9,8 @@ from openshard.history.shard_contract import (
     ShardFinding,
     ShardReceipt,
     _extract_findings,
+    _result_display,
+    build_live_run_receipt,
     build_shard_receipt,
     render_compact_shard_receipt,
     render_full_shard_receipt,
@@ -229,8 +231,8 @@ class TestCompactReceiptFields(unittest.TestCase):
     def test_agent_field(self):
         self.assertIn("Agent", self.out)
 
-    def test_strategy_field(self):
-        self.assertIn("Strategy", self.out)
+    def test_strategy_field_absent(self):
+        self.assertNotIn("Strategy", self.out)
 
     def test_model_field(self):
         self.assertIn("Model", self.out)
@@ -907,13 +909,11 @@ class TestShardFindings(unittest.TestCase):
         receipt = build_shard_receipt(entry)
         out = render_compact_shard_receipt(receipt)
         self.assertIn("RECEIPT", out)
-        self.assertIn("Findings", out)
-        self.assertIn("CRITICAL", out)
+        self.assertIn("FINDINGS", out)
         self.assertIn("Public IP enabled", out)
-        self.assertIn("HIGH", out)
         self.assertIn("Bucket ACLs", out)
-        # Critical must appear before High
-        self.assertLess(out.index("CRITICAL"), out.index("HIGH"))
+        # Critical (higher priority) must appear before High in the sorted output
+        self.assertLess(out.index("Public IP enabled"), out.index("Bucket ACLs"))
 
     # ------------------------------------------------------------------ #
     # Test 11: Full receipt uses polished separator style                 #
@@ -1125,9 +1125,9 @@ class TestContextProvenancePolish(unittest.TestCase):
 
 
 class TestCompactReceiptFindingsGrouped(unittest.TestCase):
-    """Compact receipt shows findings grouped by severity, not a count summary."""
+    """Compact receipt shows findings under FINDINGS section, sorted by severity."""
 
-    def test_findings_shown_by_severity_with_headers(self):
+    def test_findings_shown_in_findings_section(self):
         entry = dict(_rich_native_entry())
         entry["findings"] = [
             {"severity": "High", "message": "Exposed port 22"},
@@ -1135,12 +1135,11 @@ class TestCompactReceiptFindingsGrouped(unittest.TestCase):
         ]
         receipt = build_shard_receipt(entry)
         out = render_compact_shard_receipt(receipt)
-        self.assertIn("CRITICAL", out)
-        self.assertIn("HIGH", out)
+        self.assertIn("FINDINGS", out)
         self.assertIn("Root access enabled", out)
         self.assertIn("Exposed port 22", out)
         # Critical must appear before High (sorted by severity priority)
-        self.assertLess(out.index("CRITICAL"), out.index("HIGH"))
+        self.assertLess(out.index("Root access enabled"), out.index("Exposed port 22"))
 
     def test_no_findings_row_when_empty(self):
         receipt = build_shard_receipt(_minimal_entry())
@@ -1171,3 +1170,263 @@ class TestCompactReceiptWarningLine(unittest.TestCase):
         self.assertIsNotNone(result_idx, "Result row should be in compact receipt")
         after_result = "\n".join(lines[result_idx + 1:])
         self.assertNotIn("Review recommended", after_result)
+
+
+class TestCompactReceiptExactFormat(unittest.TestCase):
+    """Golden-format tests: exact separator width, field set, and FINDINGS section."""
+
+    _SEP = "━" * 40
+
+    def _make_receipt(self, **kwargs) -> ShardReceipt:
+        defaults = dict(
+            shard_id="shard-20260519-0042",
+            created_at="2026-05-19T00:00:00Z",
+            task_short="Review Terraform networking change",
+            task_full="Review Terraform networking change",
+            agent="OpenShard Native",
+            strategy="Not recorded",
+            model_display="claude-sonnet-4-5",
+            risk="High",
+            sandbox="On",
+            files_changed=0,
+            checks_display="3/3 passed",
+            approval="Required → Granted",
+            cost_display="$0.0041",
+            result="3 risks flagged",
+            status="Passed",
+            duration_seconds=None,
+        )
+        defaults.update(kwargs)
+        return ShardReceipt(**defaults)
+
+    def test_separator_width_is_40(self):
+        out = render_compact_shard_receipt(self._make_receipt())
+        sep_char = "━"
+        for line in out.splitlines():
+            stripped = line.strip()
+            if stripped and all(c == sep_char for c in stripped):
+                self.assertEqual(len(stripped), 40, f"Separator has wrong width: {stripped!r}")
+
+    def test_no_rich_box_title(self):
+        out = render_compact_shard_receipt(self._make_receipt())
+        self.assertNotIn("╭─ OpenShard Receipt", out)
+        self.assertNotIn("╰", out)
+
+    def test_strategy_absent(self):
+        out = render_compact_shard_receipt(self._make_receipt())
+        self.assertNotIn("Strategy", out)
+
+    def test_all_required_fields_present(self):
+        out = render_compact_shard_receipt(self._make_receipt())
+        for field in ("Task", "Agent", "Model", "Risk", "Sandbox",
+                      "Changed", "Checks", "Approval", "Cost", "Result"):
+            self.assertIn(field, out, f"Required field {field!r} missing from compact receipt")
+
+    def test_findings_section_rendered_when_present(self):
+        findings = [
+            ShardFinding(severity="High", message="Route table removes NAT gateway fallback"),
+            ShardFinding(severity="High", message="Security group opens 443 to 0.0.0.0/0"),
+        ]
+        out = render_compact_shard_receipt(self._make_receipt(findings=findings))
+        self.assertIn("FINDINGS", out)
+        self.assertIn("Route table removes NAT gateway fallback", out)
+        self.assertIn("Security group opens 443 to 0.0.0.0/0", out)
+
+    def test_findings_use_warning_icon(self):
+        findings = [ShardFinding(severity="High", message="some risk")]
+        out = render_compact_shard_receipt(self._make_receipt(findings=findings))
+        self.assertTrue("⚠" in out or "!" in out)
+
+    def test_findings_section_absent_when_empty(self):
+        out = render_compact_shard_receipt(self._make_receipt(findings=[]))
+        self.assertNotIn("FINDINGS", out)
+
+    def test_golden_snapshot(self):
+        """Full string comparison against the canonical sample receipt."""
+        findings = [
+            ShardFinding(severity="High", message="Route table removes NAT gateway fallback — connectivity risk"),
+            ShardFinding(severity="High", message="Security group opens 443 to 0.0.0.0/0 — scope to known CIDRs"),
+            ShardFinding(severity="High", message="Subnet CIDR overlaps existing range in variables.tf"),
+        ]
+        out = render_compact_shard_receipt(self._make_receipt(findings=findings))
+        sep = self._SEP
+        expected = "\n".join([
+            sep,
+            "  RECEIPT — shard-20260519-0042",
+            sep,
+            "  Task        Review Terraform networking change",
+            "  Agent       OpenShard Native",
+            "  Model       claude-sonnet-4-5",
+            "  Risk        High",
+            "  Sandbox     On",
+            "  Changed     0 files",
+            "  Checks      3/3 passed",
+            "  Approval    Required → Granted",
+            "  Cost        $0.0041",
+            "  Result      3 risks flagged",
+            sep,
+            "  FINDINGS",
+            "  ⚠  Route table removes NAT gateway fallback — connectivity risk",
+            "  ⚠  Security group opens 443 to 0.0.0.0/0 — scope to known CIDRs",
+            "  ⚠  Subnet CIDR overlaps existing range in variables.tf",
+            sep,
+        ])
+        self.assertEqual(out, expected)
+
+
+class TestBuildLiveRunReceipt(unittest.TestCase):
+    """Tests for the public build_live_run_receipt helper."""
+
+    def _build(self, **kwargs):
+        defaults = dict(
+            task="Review Terraform networking change",
+            run_id="2026-05-19T00:42:00Z",
+            run_index=41,
+            agent="OpenShard Native",
+            stage_runs=[],
+            routing_model="anthropic/claude-sonnet-4-6",
+            risk="High",
+            sandbox="On",
+            files_changed=0,
+            verification_attempted=True,
+            verification_passed=True,
+            approval="Required → Granted",
+            estimated_cost=0.0041,
+            result_summary="3 risks flagged",
+        )
+        defaults.update(kwargs)
+        return build_live_run_receipt(**defaults)
+
+    def test_shard_id_uses_run_index(self):
+        r = self._build(run_id="2026-05-19T00:00:00Z", run_index=41)
+        self.assertEqual(r.shard_id, "shard-20260519-0042")
+
+    def test_checks_passed(self):
+        r = self._build(verification_attempted=True, verification_passed=True)
+        self.assertEqual(r.checks_display, "1/1 passed")
+
+    def test_checks_failed(self):
+        r = self._build(verification_attempted=True, verification_passed=False)
+        self.assertEqual(r.checks_display, "0/1 passed")
+
+    def test_checks_not_run(self):
+        r = self._build(verification_attempted=False, verification_passed=None)
+        self.assertEqual(r.checks_display, "Not run")
+
+    def test_cost_display(self):
+        r = self._build(estimated_cost=0.0041)
+        self.assertEqual(r.cost_display, "$0.0041")
+
+    def test_cost_not_recorded_when_none(self):
+        r = self._build(estimated_cost=None)
+        self.assertEqual(r.cost_display, "Not recorded")
+
+    def test_renders_without_rich_box(self):
+        r = self._build()
+        out = render_compact_shard_receipt(r)
+        self.assertNotIn("╭─ OpenShard Receipt", out)
+        self.assertIn("RECEIPT", out)
+
+
+class TestResultDisplay(unittest.TestCase):
+    """Tests for _result_display: short, complete result lines, no mid-sentence truncation."""
+
+    def test_short_summary_returned_as_is(self):
+        self.assertEqual(_result_display("11 risks flagged."), "11 risks flagged.")
+
+    def test_short_summary_no_period_returned_as_is(self):
+        self.assertEqual(_result_display("Review completed"), "Review completed")
+
+    def test_empty_summary_returns_not_recorded(self):
+        self.assertEqual(_result_display(""), "Not recorded")
+
+    def test_none_equivalent_whitespace_returns_not_recorded(self):
+        self.assertEqual(_result_display("   "), "Not recorded")
+
+    def test_first_sentence_used_when_fits(self):
+        summary = "Review completed. 3 files changed in the network module."
+        result = _result_display(summary)
+        self.assertEqual(result, "Review completed.")
+
+    def test_semicolon_sentence_boundary(self):
+        summary = "Review completed; 1 file changed. Additional details follow."
+        result = _result_display(summary)
+        self.assertIn("Review completed", result)
+        self.assertNotIn("Additional details", result)
+
+    def test_long_summary_no_ellipsis(self):
+        long = (
+            "Produced a comprehensive Terraform hardening review document covering "
+            "security/compliance posture, operability, and risk findings."
+        )
+        result = _result_display(long)
+        self.assertFalse(result.endswith("…"), f"Result ends with ellipsis: {result!r}")
+        self.assertFalse(result.endswith("..."), f"Result ends with dots: {result!r}")
+
+    def test_long_summary_does_not_end_with_connective(self):
+        long = (
+            "Produced a comprehensive Terraform hardening review document covering "
+            "security/compliance posture, operability, and risk findings."
+        )
+        result = _result_display(long)
+        lower = result.lower().rstrip()
+        for bad_end in (" and", " or", " with", " for", " covering", " including", " a", " the"):
+            self.assertFalse(
+                lower.endswith(bad_end),
+                f"Result ends with connective {bad_end!r}: {result!r}",
+            )
+
+    def test_result_within_length_limit(self):
+        long = "A" * 200
+        result = _result_display(long)
+        self.assertLessEqual(len(result), 65)
+
+    def test_multiline_summary_uses_first_line_only(self):
+        summary = "Review completed.\nLine two is ignored."
+        result = _result_display(summary)
+        self.assertNotIn("Line two", result)
+
+    def test_result_not_empty_for_long_summary(self):
+        long = "word " * 30
+        result = _result_display(long)
+        self.assertTrue(len(result) > 0)
+
+    def test_compact_receipt_result_row_no_ellipsis(self):
+        """Result row in the rendered compact receipt never ends with …"""
+        long_summary = (
+            "Produced a comprehensive Terraform hardening review document covering "
+            "security/compliance posture, 2am operability, and risk findings."
+        )
+        entry = {
+            "task": "audit",
+            "timestamp": "2026-05-22T00:00:00Z",
+            "summary": long_summary,
+        }
+        receipt = build_shard_receipt(entry)
+        out = render_compact_shard_receipt(receipt)
+        result_line = next((ln for ln in out.splitlines() if "Result" in ln), None)
+        self.assertIsNotNone(result_line, "Result row missing from compact receipt")
+        self.assertFalse(result_line.rstrip().endswith("…"), f"Result row ends with ellipsis: {result_line!r}")
+        self.assertFalse(result_line.rstrip().endswith("..."), f"Result row ends with dots: {result_line!r}")
+
+    def test_compact_receipt_rich_box_absent(self):
+        receipt = build_shard_receipt({"task": "t", "timestamp": "2026-05-22T00:00:00Z"})
+        out = render_compact_shard_receipt(receipt)
+        self.assertNotIn("╭─ OpenShard Receipt", out)
+
+    def test_compact_receipt_findings_absent_when_none(self):
+        entry = {"task": "t", "timestamp": "2026-05-22T00:00:00Z"}
+        receipt = build_shard_receipt(entry)
+        out = render_compact_shard_receipt(receipt)
+        self.assertNotIn("FINDINGS", out)
+
+    def test_compact_receipt_findings_present_when_structured(self):
+        entry = {
+            "task": "IaC audit",
+            "timestamp": "2026-05-22T00:00:00Z",
+            "findings": [{"severity": "High", "message": "Open port 22 detected"}],
+        }
+        receipt = build_shard_receipt(entry)
+        out = render_compact_shard_receipt(receipt)
+        self.assertIn("FINDINGS", out)
+        self.assertIn("Open port 22 detected", out)

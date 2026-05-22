@@ -59,7 +59,7 @@ def _stdout_supports_unicode() -> bool:
 
 
 _UNICODE_OK: bool = _stdout_supports_unicode()
-_SEP: str = ("━" if _UNICODE_OK else "-") * 46
+_SEP: str = ("━" if _UNICODE_OK else "-") * 40
 _EM: str = "—" if _UNICODE_OK else "-"
 _INDENT: str = "  "
 _COL: int = 12
@@ -240,6 +240,49 @@ def _trunc(s: str, n: int) -> str:
     return s[: n - 1] + ("…" if _UNICODE_OK else ".")
 
 
+_MAX_RESULT: int = 60
+
+# Words that signal a dangling clause when a sentence is clipped at them.
+_RE_TRAILING_CONNECTIVE = re.compile(
+    r"\s+(and|or|with|for|but|as|of|to|in|a|an|the|covering|including|"
+    r"such|which|that|when|where|while|by|on|at|from|its|their|this|these|"
+    r"its|both|also|well|via|across|using|within)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _result_display(summary: str) -> str:
+    """Return a short, complete result line from a full run summary.
+
+    Prefers the first complete sentence when one is found within _MAX_RESULT.
+    Falls back to a clean word-boundary clip. Never appends an ellipsis or
+    leaves a dangling clause.
+    """
+    if not summary:
+        return "Not recorded"
+    line = summary.split("\n")[0].strip()
+    if not line:
+        return "Not recorded"
+    # Always try first complete sentence before considering full-line length.
+    for sep in (". ", "; ", "! ", "? "):
+        idx = line.find(sep, 0, _MAX_RESULT)
+        if idx != -1:
+            candidate = line[:idx + 1].strip()
+            if len(candidate) >= 4:
+                return candidate
+    # No internal sentence boundary — use full line when it fits.
+    if len(line) <= _MAX_RESULT:
+        return line
+    # Long line: clip at a word boundary and strip trailing connectives.
+    clipped = line[:_MAX_RESULT]
+    sp = clipped.rfind(" ")
+    if sp > _MAX_RESULT // 3:
+        clipped = clipped[:sp]
+    clipped = clipped.rstrip(" ,;:")
+    clipped = _RE_TRAILING_CONNECTIVE.sub("", clipped).rstrip(" ,;:")
+    return clipped or line[:_MAX_RESULT]
+
+
 def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceipt:
     """Convert a raw run-history entry dict into a ShardReceipt. Never raises."""
     timestamp = entry.get("timestamp") or ""
@@ -327,7 +370,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     cost_display = f"${cost_raw:.4f}" if cost_raw is not None else "Not recorded"
 
     summary = entry.get("summary") or ""
-    result = _trunc(summary.split("\n")[0] if summary else "", 120) or "Not recorded"
+    result = _result_display(summary) or "Not recorded"
 
     files_detail_raw = entry.get("files_detail") or []
     files_touched = [f["path"] for f in files_detail_raw if isinstance(f, dict) and "path" in f]
@@ -465,35 +508,28 @@ def render_compact_shard_receipt(receipt: ShardReceipt) -> str:
         _SEP,
         _row("Task", receipt.task_short),
         _row("Agent", receipt.agent),
-        _row("Strategy", receipt.strategy),
         _row(model_label, model_value),
         _row("Risk", receipt.risk),
         _row("Sandbox", receipt.sandbox),
         _row("Changed", file_str),
         _row("Checks", receipt.checks_display),
-    ]
-
-    # Findings grouped by severity in priority order (critical first)
-    if receipt.findings:
-        sorted_findings = sorted(
-            receipt.findings,
-            key=lambda f: _SEVERITY_ORDER.index(f.severity) if f.severity in _SEVERITY_ORDER else len(_SEVERITY_ORDER),
-        )
-        lines.append(_row("Findings", ""))
-        current_sev: str | None = None
-        for f in sorted_findings:
-            if f.severity != current_sev:
-                lines.append(f"{_INDENT}  {f.severity.upper()}")
-                current_sev = f.severity
-            icon = _FINDING_ICONS.get(f.severity, "-")
-            msg = f.message[:80]
-            lines.append(f"{_INDENT}    {icon} {msg}")
-
-    lines += [
         _row("Approval", receipt.approval),
         _row("Cost", receipt.cost_display),
         _row("Result", receipt.result),
     ]
+
+    _TOP_SEVERITIES = {"Critical", "High", "Medium"}
+    top_findings = [f for f in receipt.findings if f.severity in _TOP_SEVERITIES]
+    if top_findings:
+        top_findings = sorted(
+            top_findings,
+            key=lambda f: _SEVERITY_ORDER.index(f.severity) if f.severity in _SEVERITY_ORDER else len(_SEVERITY_ORDER),
+        )
+        lines.append(_SEP)
+        lines.append(f"{_INDENT}FINDINGS")
+        icon = "⚠" if _UNICODE_OK else "!"
+        for f in top_findings:
+            lines.append(f"{_INDENT}{icon}  {f.message[:80]}")
 
     # Warning line: only shown when a note contains an explicit blocker keyword
     _WARNING_KEYWORDS = ("DO NOT RUN", "WARNING:", "BLOCKER:", "DANGER:", "DO NOT APPLY")
@@ -506,6 +542,78 @@ def render_compact_shard_receipt(receipt: ShardReceipt) -> str:
 
     lines.append(_SEP)
     return "\n".join(lines)
+
+
+def build_live_run_receipt(
+    *,
+    task: str,
+    run_id: str,
+    run_index: "Optional[int]",
+    agent: str,
+    stage_runs: list,
+    routing_model: "Optional[str]",
+    risk: str,
+    sandbox: str,
+    files_changed: int,
+    verification_attempted: "Optional[bool]",
+    verification_passed: "Optional[bool]",
+    approval: str,
+    estimated_cost: "Optional[float]",
+    result_summary: str,
+    agent_notes: "Optional[list[str]]" = None,
+    findings: "Optional[list[ShardFinding]]" = None,
+) -> ShardReceipt:
+    """Build a ShardReceipt from live run metadata (before log write). Pure, no I/O."""
+    _model_stages: list[tuple[str, str]] = [
+        (
+            _STAGE_DISPLAY_LABELS.get(
+                getattr(getattr(sr, "stage", None), "stage_type", "") or "",
+                (getattr(getattr(sr, "stage", None), "stage_type", None) or "").capitalize(),
+            ),
+            _display_model_name(getattr(sr, "model", "") or ""),
+        )
+        for sr in stage_runs
+        if getattr(getattr(sr, "stage", None), "stage_type", None) and getattr(sr, "model", None)
+    ]
+    _model_display = _display_model_name(routing_model) if routing_model else "Not recorded"
+
+    if verification_attempted is None or not verification_attempted:
+        _checks = "Not run"
+        _status = "No checks run"
+    elif verification_passed is True:
+        _checks = "1/1 passed"
+        _status = "Passed"
+    elif verification_passed is False:
+        _checks = "0/1 passed"
+        _status = "Failed"
+    else:
+        _checks = "Not run"
+        _status = "No checks run"
+
+    _cost_display = f"${estimated_cost:.4f}" if estimated_cost is not None else "Not recorded"
+    _result = _result_display(result_summary or "") or "Not recorded"
+
+    return ShardReceipt(
+        shard_id=_make_shard_id(run_id, run_index),
+        created_at=run_id,
+        task_short=_trunc(task, 70),
+        task_full=task,
+        agent=agent,
+        strategy="Not recorded",
+        model_display=_model_display,
+        risk=risk,
+        sandbox=sandbox,
+        files_changed=files_changed,
+        checks_display=_checks,
+        approval=approval,
+        cost_display=_cost_display,
+        result=_result,
+        status=_status,
+        duration_seconds=None,
+        model_stages=_model_stages,
+        agent_notes=[n.split("\n")[0][:300] for n in (agent_notes or []) if n][:5],
+        findings=list(findings) if findings else [],
+    )
 
 
 def _fmt_timestamp(ts: str) -> str:
