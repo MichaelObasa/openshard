@@ -1734,34 +1734,38 @@ def render_post_run(
     repo_facts: Any,
     mode_label: str | None = None,
     usage: Any = None,
+    task: str = "",
+    run_id: str = "",
+    run_index: "int | None" = None,
+    risk: str = "Not recorded",
+    sandbox: str = "Not recorded",
+    approval: str = "Not recorded",
+    is_native: bool = False,
+    exec_result_summary: str = "",
 ) -> None:
-    """Render the post-execution receipt panel."""
-    import os
+    """Render the post-execution receipt in compact shard format."""
+    import click
+    from openshard.history.shard_contract import build_live_run_receipt, render_compact_shard_receipt
 
-    from openshard.cli.ui.console import make_console
-    from openshard.cli.ui.run_screen import render_receipt_panel, render_receipt_panel_plain
-
-    stages = build_stage_displays(
-        stage_runs=stage_runs,
-        routing_decision=routing_decision,
+    receipt = build_live_run_receipt(
+        task=task,
+        run_id=run_id,
+        run_index=run_index,
+        agent="OpenShard Native" if is_native else "OpenShard",
+        stage_runs=stage_runs or [],
+        routing_model=getattr(routing_decision, "model", None),
+        risk=risk,
+        sandbox=sandbox,
+        files_changed=len(final_files) if final_files else 0,
         verification_attempted=verification_attempted,
         verification_passed=verification_passed,
-        readonly_task=readonly_task,
-        validator_policy=validator_policy,
-        final_files=final_files,
+        approval=approval,
+        estimated_cost=getattr(usage, "estimated_cost", None) if usage is not None else None,
+        result_summary=exec_result_summary,
+        agent_notes=list(notes) if notes else [],
     )
-
-    cost_str = (
-        f"${usage.estimated_cost:.4f}"
-        if usage is not None and usage.estimated_cost is not None
-        else None
-    )
-
-    no_color = bool(os.environ.get("NO_COLOR")) or os.environ.get("TERM") == "dumb"
-    if no_color:
-        render_receipt_panel_plain(stages, mode_label, cost_str)
-    else:
-        render_receipt_panel(stages, mode_label, cost_str, make_console())
+    click.echo("")
+    click.echo(render_compact_shard_receipt(receipt))
 
     if detail == "default":
         return

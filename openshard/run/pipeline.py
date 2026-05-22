@@ -1137,6 +1137,21 @@ class RunPipeline:
             _profile_decision.profile if _profile_decision is not None else None,
             is_readonly=_readonly_task,
         )
+        _receipt_risk = (
+            _form_factor_decision.risk_level.capitalize()
+            if _form_factor_decision and _form_factor_decision.risk_level
+            else "Not recorded"
+        )
+        _receipt_sandbox = "Not required" if _readonly_task else "Not recorded"
+        _receipt_approval = "Not required" if _readonly_task else "Not recorded"
+        _receipt_index: "int | None" = None
+        try:
+            _log_p = Path.cwd() / _LOG_PATH
+            if _log_p.exists():
+                with _log_p.open("r", encoding="utf-8") as _lf:
+                    _receipt_index = sum(1 for _ in _lf)
+        except Exception:
+            pass
         render_post_run(
             stage_runs=stage_runs,
             routing_decision=routing_decision,
@@ -1151,6 +1166,14 @@ class RunPipeline:
             repo_facts=_repo_facts,
             mode_label=_mode_label,
             usage=usage,
+            task=task,
+            run_id=_run_id,
+            run_index=_receipt_index,
+            risk=_receipt_risk,
+            sandbox=_receipt_sandbox,
+            approval=_receipt_approval,
+            is_native=(effective_executor == "native"),
+            exec_result_summary=exec_result.summary,
         )
 
         if dry_run:
