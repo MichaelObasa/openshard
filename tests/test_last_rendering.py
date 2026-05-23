@@ -4208,5 +4208,29 @@ class TestLastTimelineSection(unittest.TestCase):
         self.assertEqual(out.count("Saved Shard receipt"), 1)
 
 
+class TestContextRepoAndBranchRendering(unittest.TestCase):
+    """repo_name and git_branch stored in the entry appear in /last --more output."""
+
+    def _base(self) -> dict:
+        return {
+            "task": "review terraform",
+            "timestamp": "2026-05-23T00:00:00Z",
+            "execution_model": "anthropic/claude-sonnet-4-6",
+            "summary": "Review complete.",
+        }
+
+    def test_repo_name_appears_in_more_output(self):
+        entry = self._base()
+        entry["repo_name"] = "myrepo"
+        out = _render(entry, "more")
+        self.assertIn("myrepo", out)
+
+    def test_git_branch_appears_in_more_output(self):
+        entry = self._base()
+        entry["git_branch"] = "feat/x"
+        out = _render(entry, "more")
+        self.assertIn("feat/x", out)
+
+
 if __name__ == "__main__":
     unittest.main()

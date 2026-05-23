@@ -1049,9 +1049,9 @@ class TestContextProvenancePolish(unittest.TestCase):
         entry = dict(_minimal_entry())
         entry["workspace_path"] = r"C:\Users\Michael\openshard"
         receipt = build_shard_receipt(entry)
-        self.assertEqual(receipt.repo, r"C:\Users\Michael\openshard")
+        self.assertEqual(receipt.repo, "openshard")
         out = render_full_shard_receipt(receipt)
-        self.assertIn(r"C:\Users\Michael\openshard", out)
+        self.assertIn("openshard", out)
 
     def test_git_state_from_observation(self):
         for dirty, expected in [(True, "Changes pending"), (False, "Clean")]:
@@ -1577,3 +1577,225 @@ class TestRunTimeline(unittest.TestCase):
         )
         self.assertEqual(len(receipt.run_timeline), 1)
         self.assertEqual(receipt.run_timeline[0]["label"], "Started run")
+
+
+class TestRepoFromEntryFields(unittest.TestCase):
+    """repo_name field takes priority; workspace_path is a folder-name fallback."""
+
+    def test_repo_name_field_used_when_present(self):
+        entry = dict(_minimal_entry())
+        entry["repo_name"] = "harbourdocs-infra"
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.repo, "harbourdocs-infra")
+
+    def test_workspace_path_falls_back_to_folder_name(self):
+        entry = dict(_minimal_entry())
+        entry["workspace_path"] = "/home/user/openshard"
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.repo, "openshard")
+
+    def test_workspace_path_windows_style_folder_name(self):
+        entry = dict(_minimal_entry())
+        entry["workspace_path"] = r"C:\Users\Michael\harbourdocs-infra"
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.repo, "harbourdocs-infra")
+
+    def test_repo_name_takes_priority_over_workspace_path(self):
+        entry = dict(_minimal_entry())
+        entry["repo_name"] = "my-repo"
+        entry["workspace_path"] = "/home/user/other-folder"
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.repo, "my-repo")
+
+    def test_no_fields_gives_none(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertIsNone(receipt.repo)
+
+    def test_full_path_never_leaked_into_repo(self):
+        entry = dict(_minimal_entry())
+        entry["workspace_path"] = "/home/user/my-project"
+        receipt = build_shard_receipt(entry)
+        self.assertNotIn("/", receipt.repo or "")
+        self.assertNotIn("\\", receipt.repo or "")
+
+
+class TestBranchFromEntry(unittest.TestCase):
+    """branch is read from the git_branch key in the log entry."""
+
+    def test_branch_read_from_entry(self):
+        entry = dict(_minimal_entry())
+        entry["git_branch"] = "main"
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.branch, "main")
+
+    def test_branch_feature_branch(self):
+        entry = dict(_minimal_entry())
+        entry["git_branch"] = "feat/context-inspected-files-accuracy"
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.branch, "feat/context-inspected-files-accuracy")
+
+    def test_branch_absent_gives_none(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertIsNone(receipt.branch)
+
+    def test_branch_appears_in_render(self):
+        entry = dict(_minimal_entry())
+        entry["git_branch"] = "feat/my-feature"
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("feat/my-feature", out)
+
+    def test_branch_absent_shows_not_recorded(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        branch_line = next(ln for ln in out.splitlines() if "Branch" in ln)
+        self.assertIn("Not recorded", branch_line)
+
+
+class TestGitStateFallback(unittest.TestCase):
+    """git_dirty from the log entry is used when observation data is absent."""
+
+    def test_git_dirty_true_gives_changes_pending(self):
+        entry = dict(_minimal_entry())
+        entry["git_dirty"] = True
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.git_state, "Changes pending")
+
+    def test_git_dirty_false_gives_clean(self):
+        entry = dict(_minimal_entry())
+        entry["git_dirty"] = False
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.git_state, "Clean")
+
+    def test_neither_source_gives_none(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertIsNone(receipt.git_state)
+
+    def test_observation_takes_priority_over_git_dirty(self):
+        entry = dict(_minimal_entry())
+        entry["observation"] = {"dirty_diff_present": False}
+        entry["git_dirty"] = True
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.git_state, "Clean")
+
+
+class TestFilesReferencedFromFindings(unittest.TestCase):
+    """files_referenced is derived from finding.path values in the log entry."""
+
+    def test_finding_paths_populate_files_referenced(self):
+        entry = dict(_minimal_entry())
+        entry["findings"] = [
+            {"severity": "Critical", "message": "root IAM", "path": "iam.tf"},
+            {"severity": "High", "message": "no KMS", "path": "secrets.tf"},
+        ]
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.files_referenced, ["iam.tf", "secrets.tf"])
+
+    def test_files_referenced_sorted(self):
+        entry = dict(_minimal_entry())
+        entry["findings"] = [
+            {"severity": "High", "message": "b", "path": "z.tf"},
+            {"severity": "High", "message": "a", "path": "a.tf"},
+        ]
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.files_referenced, ["a.tf", "z.tf"])
+
+    def test_duplicate_paths_deduplicated(self):
+        entry = dict(_minimal_entry())
+        entry["findings"] = [
+            {"severity": "High", "message": "x", "path": "iam.tf"},
+            {"severity": "Medium", "message": "y", "path": "iam.tf"},
+        ]
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.files_referenced, ["iam.tf"])
+
+    def test_findings_without_path_excluded(self):
+        entry = dict(_minimal_entry())
+        entry["findings"] = [
+            {"severity": "Note", "message": "no path finding"},
+        ]
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.files_referenced, [])
+
+    def test_inspected_files_unaffected_by_findings(self):
+        entry = dict(_minimal_entry())
+        entry["findings"] = [{"severity": "High", "message": "x", "path": "iam.tf"}]
+        entry["file_context"] = {"files_read": 1, "paths": ["demo-task.md"]}
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.inspected_files, ["demo-task.md"])
+        self.assertEqual(receipt.files_referenced, ["iam.tf"])
+
+    def test_default_files_referenced_is_empty(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertEqual(receipt.files_referenced, [])
+
+
+class TestFilesWithFindingsRender(unittest.TestCase):
+    """FILES WITH FINDINGS section appears only when findings have file paths."""
+
+    def test_section_present_when_files_referenced_non_empty(self):
+        entry = dict(_minimal_entry())
+        entry["findings"] = [{"severity": "High", "message": "x", "path": "iam.tf"}]
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("FILES WITH FINDINGS", out)
+        self.assertIn("iam.tf", out)
+
+    def test_section_absent_when_no_finding_paths(self):
+        entry = dict(_minimal_entry())
+        entry["findings"] = [{"severity": "Note", "message": "general note"}]
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("FILES WITH FINDINGS", out)
+
+    def test_section_absent_when_no_findings(self):
+        out = render_full_shard_receipt(build_shard_receipt(_minimal_entry()))
+        self.assertNotIn("FILES WITH FINDINGS", out)
+
+    def test_inspected_files_always_present(self):
+        entry = dict(_minimal_entry())
+        entry["findings"] = [{"severity": "High", "message": "x", "path": "iam.tf"}]
+        out = render_full_shard_receipt(build_shard_receipt(entry))
+        self.assertIn("INSPECTED FILES", out)
+
+    def test_both_sections_simultaneously(self):
+        entry = dict(_minimal_entry())
+        entry["file_context"] = {"files_read": 1, "paths": ["demo-task.md"]}
+        entry["findings"] = [{"severity": "Critical", "message": "root", "path": "iam.tf"}]
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("INSPECTED FILES", out)
+        self.assertIn("demo-task.md", out)
+        self.assertIn("FILES WITH FINDINGS", out)
+        self.assertIn("iam.tf", out)
+        inspected_idx = out.index("INSPECTED FILES")
+        findings_file_idx = out.index("FILES WITH FINDINGS")
+        policy_idx = out.index("POLICY")
+        self.assertLess(inspected_idx, findings_file_idx)
+        self.assertLess(findings_file_idx, policy_idx)
+
+    def test_files_not_swapped_between_sections(self):
+        entry = dict(_minimal_entry())
+        entry["file_context"] = {"files_read": 1, "paths": ["demo-task.md"]}
+        entry["findings"] = [{"severity": "Critical", "message": "x", "path": "iam.tf"}]
+        out = render_full_shard_receipt(build_shard_receipt(entry))
+        inspected_block_end = out.index("FILES WITH FINDINGS")
+        inspected_block = out[out.index("INSPECTED FILES"):inspected_block_end]
+        self.assertIn("demo-task.md", inspected_block)
+        self.assertNotIn("iam.tf", inspected_block)
+
+    def test_cap_at_10_with_overflow(self):
+        entry = dict(_minimal_entry())
+        entry["findings"] = [
+            {"severity": "High", "message": f"issue {i}", "path": f"file_{i:02d}.tf"}
+            for i in range(12)
+        ]
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        # Isolate the FILES WITH FINDINGS block only
+        block_start = out.index("FILES WITH FINDINGS")
+        block_end = out.index("POLICY")
+        block = out[block_start:block_end]
+        self.assertIn("(+2 more)", block)
+        self.assertIn("file_00.tf", block)
+        self.assertNotIn("file_10.tf", block)
