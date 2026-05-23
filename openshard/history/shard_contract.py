@@ -329,6 +329,7 @@ class ShardReceipt:
     model_stages: list[tuple[str, str]] = field(default_factory=list)
     findings: list[ShardFinding] = field(default_factory=list)
     agent_notes: list[str] = field(default_factory=list)
+    run_timeline: list = field(default_factory=list)
 
 
 def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
@@ -623,6 +624,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         blocked_commands=blocked_commands,
         findings=findings,
         agent_notes=agent_notes,
+        run_timeline=[e for e in (entry.get("run_timeline") or []) if isinstance(e, dict) and e.get("label")],
     )
 
 
@@ -728,6 +730,7 @@ def build_live_run_receipt(
     result: "Optional[str]" = None,
     agent_notes: "Optional[list[str]]" = None,
     findings: "Optional[list[ShardFinding]]" = None,
+    run_timeline: "Optional[list[dict]]" = None,
 ) -> ShardReceipt:
     """Build a ShardReceipt from live run metadata (before log write). Pure, no I/O.
 
@@ -786,6 +789,7 @@ def build_live_run_receipt(
         model_stages=_model_stages,
         agent_notes=[n.split("\n")[0][:300] for n in (agent_notes or []) if n][:5],
         findings=list(findings) if findings else [],
+        run_timeline=list(run_timeline) if run_timeline else [],
     )
 
 
@@ -827,6 +831,18 @@ def render_full_shard_receipt(receipt: ShardReceipt) -> str:
     lines.append(_row("Duration", dur))
     lines.append(_row("Status", receipt.status))
     lines.append("")
+
+    if receipt.run_timeline:
+        _chk_ok = _UNICODE_OK
+        _chk = "✓" if _chk_ok else "+"
+        _fail = "✖" if _chk_ok else "x"
+        lines.append(f"{_INDENT}TIMELINE")
+        for _ev in receipt.run_timeline:
+            _st = _ev.get("status", "completed") if isinstance(_ev, dict) else getattr(_ev, "status", "completed")
+            _lbl = _ev.get("label", "") if isinstance(_ev, dict) else getattr(_ev, "label", "")
+            _sym = _chk if _st != "failed" else _fail
+            lines.append(f"{_INDENT}  {_sym} {_lbl}")
+        lines.append("")
 
     lines.append(f"{_INDENT}CONTEXT")
     lines.append(_row("Repo", receipt.repo or "Not recorded"))

@@ -792,6 +792,46 @@ def test_extract_run_display_no_receipt_no_memo_returns_tail():
     assert "line 0" not in result
 
 
+@pytest.mark.asyncio
+async def test_run_output_shows_activity_feed_checkmarks(tmp_path):
+    """Activity feed checkmarks appear in the TUI output panel after a run."""
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = (
+        "  . Running...\n"
+        "Review complete\n"
+        "\n"
+        "Running production IaC review\n"
+        "\n"
+        "  ✓ Loaded workflow pack\n"
+        "  ✓ Scanned repo\n"
+        "  ✓ Model responded\n"
+        "  ✓ Saved Shard receipt\n"
+        "\n"
+        "━" * 40 + "\n"
+        "  RECEIPT — shard-20260523-0001\n"
+        "  Task   review stuff\n"
+        "━" * 40 + "\n"
+    )
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review stuff")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "✓" in text or "+" in text, "Activity feed checkmarks not found in output panel"
+    assert "chain of thought" not in text.lower()
+    assert "reasoning trace" not in text.lower()
+    assert "STRUCTURED_FINDINGS" not in text
+
+
 def test_extract_run_display_does_not_contain_structured_findings_json():
     output = (
         'STRUCTURED_FINDINGS: [{"severity": "Critical", "message": "Bad thing"}]\n'

@@ -4171,5 +4171,42 @@ class TestLastFindingsWithStringItems(unittest.TestCase):
         self.assertNotIn("TypeError", out)
 
 
+class TestLastTimelineSection(unittest.TestCase):
+
+    def _entry_with_timeline(self) -> dict:
+        return {
+            "task": "review iac",
+            "timestamp": "2026-05-23T00:00:00Z",
+            "execution_model": "anthropic/claude-sonnet-4-6",
+            "summary": "Review complete.",
+            "run_timeline": [
+                {"event": "workflow_pack_loaded", "label": "Loaded workflow pack", "kind": "workflow", "status": "completed"},
+                {"event": "repo_scanned", "label": "Scanned repo", "kind": "scan", "status": "completed"},
+                {"event": "receipt_saved", "label": "Saved Shard receipt", "kind": "receipt", "status": "completed"},
+            ],
+        }
+
+    def test_timeline_section_shown_in_more(self):
+        out = _render(self._entry_with_timeline(), "more")
+        self.assertIn("TIMELINE", out)
+        self.assertIn("Loaded workflow pack", out)
+        self.assertIn("Scanned repo", out)
+        self.assertIn("Saved Shard receipt", out)
+
+    def test_timeline_section_absent_when_missing(self):
+        entry = {
+            "task": "plain task",
+            "timestamp": "2026-05-23T00:00:00Z",
+            "execution_model": "anthropic/claude-sonnet-4-6",
+            "summary": "Done.",
+        }
+        out = _render(entry, "more")
+        self.assertNotIn("TIMELINE", out)
+
+    def test_receipt_saved_not_duplicated_in_more(self):
+        out = _render(self._entry_with_timeline(), "more")
+        self.assertEqual(out.count("Saved Shard receipt"), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
