@@ -1799,3 +1799,194 @@ class TestFilesWithFindingsRender(unittest.TestCase):
         self.assertIn("(+2 more)", block)
         self.assertIn("file_00.tf", block)
         self.assertNotIn("file_10.tf", block)
+
+
+# ---------------------------------------------------------------------------
+# Review checks rendering
+# ---------------------------------------------------------------------------
+
+def _review_checks_all_skipped() -> list[dict]:
+    return [
+        {"name": "terraform fmt", "status": "skipped", "command": "terraform fmt -check -recursive -no-color", "reason": "terraform not installed", "summary": "", "returncode": None},
+        {"name": "terraform validate", "status": "skipped", "command": "terraform validate -no-color", "reason": "terraform not installed", "summary": "", "returncode": None},
+        {"name": "tflint", "status": "skipped", "command": "tflint --no-color", "reason": "tflint not installed", "summary": "", "returncode": None},
+    ]
+
+
+def _review_checks_mixed() -> list[dict]:
+    return [
+        {"name": "terraform fmt", "status": "passed", "command": "terraform fmt -check -recursive -no-color", "reason": "", "summary": "formatting is clean", "returncode": 0},
+        {"name": "terraform validate", "status": "skipped", "command": "terraform validate -no-color", "reason": "terraform init required", "summary": "", "returncode": None},
+        {"name": "tflint", "status": "skipped", "command": "tflint --no-color", "reason": "tflint not installed", "summary": "", "returncode": None},
+    ]
+
+
+def _review_checks_failed() -> list[dict]:
+    return [
+        {"name": "terraform fmt", "status": "failed", "command": "terraform fmt -check -recursive -no-color", "reason": "", "summary": "main.tf needs formatting", "returncode": 1},
+        {"name": "terraform validate", "status": "skipped", "command": "terraform validate -no-color", "reason": "terraform init required", "summary": "", "returncode": None},
+        {"name": "tflint", "status": "skipped", "command": "tflint --no-color", "reason": "tflint not installed", "summary": "", "returncode": None},
+    ]
+
+
+class TestFormatReviewChecks(unittest.TestCase):
+
+    def setUp(self):
+        from openshard.history.shard_contract import _format_review_checks
+        self._fmt = _format_review_checks
+
+    def test_all_skipped_shows_count(self):
+        display, _ = self._fmt(_review_checks_all_skipped())
+        self.assertEqual(display, "3 skipped")
+
+    def test_mixed_passed_and_skipped(self):
+        display, _ = self._fmt(_review_checks_mixed())
+        self.assertIn("passed", display)
+        self.assertIn("skipped", display)
+        self.assertIn("1", display)
+        self.assertIn("2", display)
+
+    def test_failed_present_in_display(self):
+        display, _ = self._fmt(_review_checks_failed())
+        self.assertIn("failed", display)
+
+    def test_per_check_lines_count(self):
+        _, lines = self._fmt(_review_checks_all_skipped())
+        self.assertEqual(len(lines), 3)
+
+    def test_skipped_line_contains_reason(self):
+        _, lines = self._fmt(_review_checks_all_skipped())
+        validate_line = next(ln for ln in lines if "terraform validate" in ln)
+        self.assertIn("terraform not installed", validate_line)
+
+    def test_passed_line_contains_summary(self):
+        _, lines = self._fmt(_review_checks_mixed())
+        fmt_line = next(ln for ln in lines if "terraform fmt" in ln)
+        self.assertIn("formatting is clean", fmt_line)
+
+    def test_failed_line_contains_summary(self):
+        _, lines = self._fmt(_review_checks_failed())
+        fmt_line = next(ln for ln in lines if "terraform fmt" in ln)
+        self.assertIn("main.tf needs formatting", fmt_line)
+
+
+class TestBuildShardReceiptWithReviewChecks(unittest.TestCase):
+
+    def test_review_checks_override_checks_display(self):
+        entry = {**_minimal_entry(), "review_checks": _review_checks_all_skipped()}
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.checks_display, "3 skipped")
+
+    def test_review_checks_populate_check_results(self):
+        entry = {**_minimal_entry(), "review_checks": _review_checks_mixed()}
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(len(receipt.check_results), 3)
+
+    def test_old_entry_without_review_checks_unchanged(self):
+        entry = {**_minimal_entry(), "verification_attempted": False}
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.checks_display, "Not run")
+        self.assertEqual(receipt.check_results, [])
+
+    def test_old_entry_passed_checks_unchanged(self):
+        entry = {**_minimal_entry(), "verification_attempted": True, "verification_passed": True}
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.checks_display, "1/1 passed")
+
+    def test_full_receipt_shows_check_result_lines(self):
+        entry = {**_minimal_entry(), "review_checks": _review_checks_mixed()}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("CHECKS", out)
+        self.assertIn("terraform fmt", out)
+        self.assertIn("formatting is clean", out)
+
+    def test_full_receipt_checks_block_shows_per_check_lines_not_flat_string(self):
+        entry = {**_minimal_entry(), "review_checks": _review_checks_all_skipped()}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        # Isolate the CHECKS block only — per-check lines should be there
+        checks_start = out.index("CHECKS")
+        checks_end = out.index("FINDINGS", checks_start)
+        checks_block = out[checks_start:checks_end]
+        self.assertIn("terraform fmt", checks_block)
+        self.assertIn("terraform validate", checks_block)
+        # The flat summary string should not appear inside the CHECKS block itself
+        self.assertNotIn("3 skipped", checks_block)
+
+    def test_compact_receipt_shows_checks_summary(self):
+        entry = {**_minimal_entry(), "review_checks": _review_checks_mixed()}
+        receipt = build_shard_receipt(entry)
+        out = render_compact_shard_receipt(receipt)
+        self.assertIn("Checks", out)
+        self.assertIn("passed", out)
+        self.assertIn("skipped", out)
+
+
+class TestBuildLiveReceiptWithReviewChecks(unittest.TestCase):
+
+    def _build(self, review_checks=None) -> "ShardReceipt":
+        return build_live_run_receipt(
+            task="review infra",
+            run_id="2026-05-23T00:00:00Z",
+            run_index=None,
+            agent="OpenShard",
+            stage_runs=[],
+            routing_model=None,
+            risk="High",
+            sandbox="Off",
+            files_changed=0,
+            verification_attempted=False,
+            verification_passed=None,
+            approval="Not required",
+            estimated_cost=None,
+            result_summary="Review completed.",
+            review_checks=review_checks,
+        )
+
+    def test_no_review_checks_gives_not_run(self):
+        receipt = self._build()
+        self.assertEqual(receipt.checks_display, "Not run")
+        self.assertEqual(receipt.check_results, [])
+
+    def test_review_checks_override_checks_display(self):
+        receipt = self._build(review_checks=_review_checks_all_skipped())
+        self.assertEqual(receipt.checks_display, "3 skipped")
+
+    def test_review_checks_populate_check_results(self):
+        receipt = self._build(review_checks=_review_checks_mixed())
+        self.assertEqual(len(receipt.check_results), 3)
+
+    def test_compact_receipt_with_review_checks(self):
+        receipt = self._build(review_checks=_review_checks_mixed())
+        out = render_compact_shard_receipt(receipt)
+        self.assertIn("Checks", out)
+        self.assertNotIn("Not run", out)
+
+
+class TestFullReceiptStatusConsistency(unittest.TestCase):
+
+    def test_all_skipped_status_not_no_checks_run(self):
+        entry = {**_minimal_entry(), "review_checks": _review_checks_all_skipped()}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("No checks run", out)
+
+    def test_all_skipped_status_shows_checks_prefix(self):
+        entry = {**_minimal_entry(), "review_checks": _review_checks_all_skipped()}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("Checks: 3 skipped", out)
+
+    def test_mixed_status_shows_checks_prefix(self):
+        entry = {**_minimal_entry(), "review_checks": _review_checks_mixed()}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("Checks:", out)
+        self.assertIn("passed", out)
+        self.assertIn("skipped", out)
+
+    def test_old_entry_without_review_checks_still_says_no_checks_run(self):
+        entry = {**_minimal_entry(), "verification_attempted": False}
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.status, "No checks run")

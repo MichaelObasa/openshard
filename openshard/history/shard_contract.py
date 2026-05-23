@@ -486,6 +486,12 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         checks_display = "Not run"
         status = "No checks run"
 
+    check_results: list[str] = []
+    _review_checks_raw = entry.get("review_checks")
+    if _review_checks_raw and isinstance(_review_checks_raw, list):
+        checks_display, check_results = _format_review_checks(_review_checks_raw)
+        status = f"Checks: {checks_display}"
+
     approval_receipt_raw = entry.get("approval_receipt") or {}
     if approval_receipt_raw:
         if approval_receipt_raw.get("granted"):
@@ -647,6 +653,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         blocked_commands=blocked_commands,
         findings=findings,
         agent_notes=agent_notes,
+        check_results=check_results,
         run_timeline=[e for e in (entry.get("run_timeline") or []) if isinstance(e, dict) and e.get("label")],
     )
 
@@ -734,6 +741,41 @@ def render_compact_shard_receipt(receipt: ShardReceipt) -> str:
     return "\n".join(lines)
 
 
+def _format_review_checks(checks: list[dict]) -> tuple[str, list[str]]:
+    """Return (checks_display, per-check lines) for a list of review check dicts."""
+    passed = [c for c in checks if c.get("status") == "passed"]
+    failed = [c for c in checks if c.get("status") == "failed"]
+    skipped = [c for c in checks if c.get("status") == "skipped"]
+
+    parts: list[str] = []
+    if failed:
+        parts.append(f"{len(failed)} failed")
+    if passed:
+        parts.append(f"{len(passed)} passed")
+    if skipped:
+        parts.append(f"{len(skipped)} skipped")
+    checks_display = ", ".join(parts) if parts else "Not run"
+
+    pass_icon = "✓" if _UNICODE_OK else "+"
+    fail_icon = "✖" if _UNICODE_OK else "x"
+    skip_icon = "-"
+    lines: list[str] = []
+    for c in checks:
+        status = c.get("status", "skipped")
+        name = c.get("name", "check")
+        reason = c.get("reason") or ""
+        summary = c.get("summary") or ""
+        if status == "passed":
+            lines.append(f"{pass_icon} {name:<22}{summary if summary else 'passed'}")
+        elif status == "failed":
+            lines.append(f"{fail_icon} {name:<22}{summary if summary else 'failed'}")
+        else:
+            suffix = f"skipped — {reason}" if reason else "skipped"
+            lines.append(f"{skip_icon} {name:<22}{suffix}")
+
+    return checks_display, lines
+
+
 def build_live_run_receipt(
     *,
     task: str,
@@ -754,6 +796,7 @@ def build_live_run_receipt(
     agent_notes: "Optional[list[str]]" = None,
     findings: "Optional[list[ShardFinding]]" = None,
     run_timeline: "Optional[list[dict]]" = None,
+    review_checks: "Optional[list[dict]]" = None,
 ) -> ShardReceipt:
     """Build a ShardReceipt from live run metadata (before log write). Pure, no I/O.
 
@@ -789,6 +832,11 @@ def build_live_run_receipt(
         _checks = "Not run"
         _status = "No checks run"
 
+    _check_results: list[str] = []
+    if review_checks:
+        _checks, _check_results = _format_review_checks(review_checks)
+        _status = f"Checks: {_checks}"
+
     _cost_display = f"${estimated_cost:.4f}" if estimated_cost is not None else "Not recorded"
     _result = result if result is not None else (_result_display(result_summary or "") or "Not recorded")
 
@@ -813,6 +861,7 @@ def build_live_run_receipt(
         agent_notes=[n.split("\n")[0][:300] for n in (agent_notes or []) if n][:5],
         findings=list(findings) if findings else [],
         run_timeline=list(run_timeline) if run_timeline else [],
+        check_results=_check_results,
     )
 
 

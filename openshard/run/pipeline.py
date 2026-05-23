@@ -1274,6 +1274,22 @@ class RunPipeline:
                 count=len(_extracted_findings),
             ))
 
+        _review_checks: list[dict] = []
+        if _is_review_task:
+            try:
+                from openshard.review.checks import run_review_checks
+                _check_root = workspace if workspace is not None else Path.cwd()
+                _review_checks = run_review_checks(_check_root)
+            except Exception:
+                pass
+            if _review_checks:
+                _timeline.append(RunTimelineEvent(
+                    "review_checks_recorded",
+                    "Recorded review checks",
+                    kind="check",
+                    count=len(_review_checks),
+                ))
+
         if _is_review_task:
             _emit_review_debug(
                 effective_executor=effective_executor,
@@ -1290,6 +1306,8 @@ class RunPipeline:
         _findings_extra: dict = {}
         if _is_review_task:
             _findings_extra["is_review_task"] = True
+        if _review_checks:
+            _findings_extra["review_checks"] = _review_checks
         if _extracted_findings:
             _findings_extra["findings"] = [
                 {
@@ -1367,6 +1385,7 @@ class RunPipeline:
             generator_model=getattr(generator, "model", None),
             run_timeline=[e.to_dict() for e in _timeline],
             run_label=_pack_label,
+            review_checks=_review_checks if _review_checks else None,
         )
 
         if dry_run:
