@@ -28,6 +28,7 @@ from openshard.cli.run_output import (
     _should_shrink,
     render_post_run,
 )
+from openshard.run.timeline import RunTimelineEvent
 from openshard.config.settings import get_anthropic_api_key, get_openai_api_key
 from openshard.execution.gates import GateEvaluator, VALID_APPROVAL_MODES
 from openshard.execution.generator import (
@@ -299,8 +300,10 @@ class RunPipeline:
         verification_passed: bool | None = None
         usage = None
         retry_usage = None
+        _timeline: list[RunTimelineEvent] = []
 
         try:
+            _timeline.append(RunTimelineEvent("run_started", "Started run", kind="run"))
             _cfg = self._config
             _cfg_workflow = _cfg.get("workflow", "").strip().lower()
             _cfg_executor_legacy = _cfg.get("executor", "direct").strip().lower()
@@ -311,6 +314,7 @@ class RunPipeline:
 
             # --workflow > --executor (deprecated) > config.workflow > config.executor > auto
             _show_executor_deprecation = False
+            _pack_label: str = ""
             if workflow is not None:
                 _wf = workflow.lower()
                 if _wf in ("claude-code", "codex"):
@@ -320,6 +324,15 @@ class RunPipeline:
                     )
                 effective_workflow = _wf
                 _policy_reason = ""
+                _timeline.append(RunTimelineEvent("workflow_pack_loaded", "Loaded workflow pack", kind="workflow", target=_wf))
+                try:
+                    from openshard.workflow_packs.packs import load_packs as _load_packs_fn
+                    _pack_label = next(
+                        (p.title for p in _load_packs_fn() if p.prompt and task.startswith(p.prompt)),
+                        "",
+                    )
+                except Exception:
+                    _pack_label = ""
             elif executor is not None:
                 _show_executor_deprecation = True
                 effective_workflow = executor.lower()
@@ -580,8 +593,17 @@ class RunPipeline:
         _repo_facts: RepoFacts | None = None
         try:
             _repo_facts = analyze_repo(Path.cwd())
+            _timeline.append(RunTimelineEvent("repo_scanned", "Scanned repo", kind="scan"))
         except Exception:
             pass
+
+        if _routed_model:
+            _timeline.append(RunTimelineEvent(
+                "model_selected",
+                f"Routed to {_model_label(_routed_model)}",
+                kind="route",
+                target=_routed_model,
+            ))
 
         _readonly_task = is_readonly_task(task)
         _is_sf_task = "STRUCTURED_FINDINGS:" in task
@@ -971,8 +993,10 @@ class RunPipeline:
                         _stage_model,
                         routing_decision.rationale if routing_decision else "",
                     ))
+                    _stage_ok = False
                     try:
                         exec_result = generator.generate(_impl_task, model=_stage_model, repo_facts=_repo_facts, skills_context=_skills_ctx, max_tokens=_generation_max_tokens, is_review_task=_is_sf_task)
+                        _stage_ok = True
                     except RuntimeError as exc:
                         raise click.ClickException(str(exc))
                     except ProviderAuthError:
@@ -985,6 +1009,9 @@ class RunPipeline:
                         raise click.ClickException(f"API error: {exc}")
                     finally:
                         spinner.stop()
+                        if not _stage_ok:
+                            _timeline.append(RunTimelineEvent("model_response_received", "Model request failed", kind="model", status="failed"))
+                    _timeline.append(RunTimelineEvent("model_response_received", "Model responded", kind="model", target=_stage_model))
                     stage_runs.append(StageRun(
                         stage=_stage,
                         model=_stage_model,
@@ -1009,11 +1036,13 @@ class RunPipeline:
                 )
                 _safe_checkpoint("plan", "passed")
             spinner.start(_single_msg)
+            _single_ok = False
             try:
                 if opencode_mode:
                     exec_result = generator.generate(task, workspace=workspace)
                 else:
                     exec_result = generator.generate(task, model=_effective_model, repo_facts=_repo_facts, skills_context=_skills_ctx, max_tokens=_generation_max_tokens, is_review_task=_is_sf_task)
+                _single_ok = True
             except RuntimeError as exc:
                 raise click.ClickException(str(exc))
             except ProviderAuthError:
@@ -1026,6 +1055,9 @@ class RunPipeline:
                 raise click.ClickException(f"API error: {exc}")
             finally:
                 spinner.stop()
+                if not _single_ok:
+                    _timeline.append(RunTimelineEvent("model_response_received", "Model request failed", kind="model", status="failed"))
+            _timeline.append(RunTimelineEvent("model_response_received", "Model responded", kind="model", target=_effective_model))
             if effective_executor == "native" and generator.native_meta.plan_ledger is not None:
                 from openshard.native.context import update_native_plan_ledger_status
                 generator.native_meta.plan_ledger = update_native_plan_ledger_status(
@@ -1235,6 +1267,12 @@ class RunPipeline:
                         _extraction_source = _extraction_source or "static-review"
             except Exception:
                 pass
+            _timeline.append(RunTimelineEvent(
+                "static_findings_detected",
+                f"Found {len(_extracted_findings)} raw findings",
+                kind="scan",
+                count=len(_extracted_findings),
+            ))
 
         if _is_review_task:
             _emit_review_debug(
@@ -1296,6 +1334,12 @@ class RunPipeline:
                     _receipt_index = sum(1 for _ in _lf)
         except Exception:
             pass
+        if _is_review_task:
+            _timeline.append(RunTimelineEvent(
+                "review_memo_rendered", "Generated review memo",
+                kind="review", count=len(_extracted_findings),
+            ))
+        _timeline.append(RunTimelineEvent("run_completed", "Run completed", kind="run"))
         render_post_run(
             stage_runs=stage_runs,
             routing_decision=routing_decision,
@@ -1321,6 +1365,8 @@ class RunPipeline:
             findings=_extracted_findings if _extracted_findings else None,
             is_review_task=_is_review_task,
             generator_model=getattr(generator, "model", None),
+            run_timeline=[e.to_dict() for e in _timeline],
+            run_label=_pack_label,
         )
 
         if dry_run:
@@ -1359,7 +1405,8 @@ class RunPipeline:
                          profile_decision=_profile_decision,
                          verification_plan=_verification_plan,
                          form_factor_decision=_form_factor_decision,
-                         extra_metadata=_dr_extra)
+                         extra_metadata=_dr_extra,
+                         run_timeline=[e.to_dict() for e in _timeline])
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
             result_obj.exit_code = 0
@@ -1682,7 +1729,8 @@ class RunPipeline:
                              profile_decision=_profile_decision,
                              verification_plan=_verification_plan,
                              form_factor_decision=_form_factor_decision,
-                             extra_metadata=_vf_extra)
+                             extra_metadata=_vf_extra,
+                             run_timeline=[e.to_dict() for e in _timeline])
                 except Exception as exc:
                     click.echo(f"  [log] warning: {exc}")
                 result_obj.exit_code = code
@@ -2119,7 +2167,8 @@ class RunPipeline:
                      verification_plan=_verification_plan,
                      form_factor_decision=_form_factor_decision,
                      extra_metadata=_extra_metadata,
-                     run_id=_run_id)
+                     run_id=_run_id,
+                     run_timeline=[e.to_dict() for e in _timeline])
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
 
@@ -2248,6 +2297,7 @@ def _log_run(
     form_factor_decision: ExecutionFormFactorDecision | None = None,
     extra_metadata: dict | None = None,
     run_id: str | None = None,
+    run_timeline: list | None = None,
 ) -> None:
     entry: dict = {
         "timestamp": run_id if run_id else datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -2347,6 +2397,11 @@ def _log_run(
 
     if extra_metadata:
         entry.update(extra_metadata)
+
+    if run_timeline is not None:
+        _tl = list(run_timeline)
+        _tl.append(RunTimelineEvent("receipt_saved", "Saved Shard receipt", kind="receipt").to_dict())
+        entry["run_timeline"] = _tl
 
     log_path = Path.cwd() / _LOG_PATH
     log_path.parent.mkdir(parents=True, exist_ok=True)

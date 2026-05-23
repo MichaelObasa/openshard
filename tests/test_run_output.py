@@ -9,7 +9,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from openshard.cli.run_output import build_stage_displays
+from openshard.cli.run_output import build_stage_displays, render_run_timeline
 from openshard.execution.stages import Stage, StageRun
 from openshard.routing.engine import RoutingDecision
 
@@ -246,6 +246,113 @@ class TestReceiptStage(unittest.TestCase):
     def test_receipt_always_last(self):
         stages = _stages()
         self.assertEqual(stages[-1].name, "Receipt")
+
+
+# ---------------------------------------------------------------------------
+# render_run_timeline()
+# ---------------------------------------------------------------------------
+
+def _tl_ev(event: str, label: str, kind: str = "run", status: str = "completed") -> dict:
+    return {"event": event, "label": label, "kind": kind, "status": status}
+
+
+class TestRenderRunTimeline(unittest.TestCase):
+
+    def test_empty_timeline_shows_receipt_saved(self):
+        text = "\n".join(render_run_timeline(None))
+        self.assertIn("Saved Shard receipt", text)
+
+    def test_events_appear_in_order(self):
+        tl = [
+            _tl_ev("repo_scanned", "Scanned repo", "scan"),
+            _tl_ev("model_selected", "Routed to Claude", "route"),
+        ]
+        text = "\n".join(render_run_timeline(tl))
+        repo_pos = text.index("Scanned repo")
+        model_pos = text.index("Routed to Claude")
+        receipt_pos = text.index("Saved Shard receipt")
+        self.assertLess(repo_pos, model_pos)
+        self.assertLess(model_pos, receipt_pos)
+
+    def test_task_header_shown(self):
+        lines = render_run_timeline([], task="production IaC review")
+        self.assertEqual(lines[0], "Running production IaC review")
+
+    def test_no_task_header_when_task_empty(self):
+        lines = render_run_timeline([], task="")
+        self.assertFalse(any(ln.startswith("Running") for ln in lines))
+
+    def test_completed_event_gets_checkmark(self):
+        text = "\n".join(render_run_timeline([_tl_ev("x", "Did something")]))
+        self.assertTrue("✓" in text or "+" in text)
+
+    def test_failed_event_gets_x_symbol(self):
+        text = "\n".join(render_run_timeline([_tl_ev("x", "Model failed", "model", "failed")]))
+        self.assertTrue("✖" in text or "x  Model failed" in text)
+
+    def test_receipt_saved_is_last_non_blank(self):
+        lines = render_run_timeline([_tl_ev("run_started", "Started run")])
+        non_blank = [ln for ln in lines if ln.strip()]
+        self.assertIn("Saved Shard receipt", non_blank[-1])
+
+    def test_receipt_saved_not_duplicated(self):
+        tl = [_tl_ev("receipt_saved", "Saved Shard receipt", "receipt")]
+        text = "\n".join(render_run_timeline(tl))
+        self.assertEqual(text.count("Saved Shard receipt"), 1)
+
+    def test_run_started_skipped_in_live_feed(self):
+        tl = [_tl_ev("run_started", "Started run")]
+        lines = render_run_timeline(tl)
+        self.assertFalse(any("Started run" in ln for ln in lines))
+
+    def test_run_label_overrides_task_header(self):
+        lines = render_run_timeline(
+            [],
+            task="Review and harden this deliberately flawed Terraform codebase...",
+            run_label="production IaC review",
+        )
+        self.assertEqual(lines[0], "Running production IaC review")
+        self.assertFalse(any("Terraform" in ln for ln in lines))
+
+    def test_run_label_fallback_to_task(self):
+        lines = render_run_timeline([], task="some task", run_label="")
+        self.assertEqual(lines[0], "Running some task")
+
+    def test_timeline_scan_before_route(self):
+        tl = [
+            _tl_ev("repo_scanned", "Scanned repo", "scan"),
+            _tl_ev("model_selected", "Routed to Claude", "route"),
+        ]
+        text = "\n".join(render_run_timeline(tl))
+        self.assertLess(text.index("Scanned repo"), text.index("Routed to Claude"))
+
+
+class TestTimelineWordingGuards(unittest.TestCase):
+
+    def _rendered(self) -> str:
+        return "\n".join(render_run_timeline([
+            _tl_ev("repo_scanned", "Scanned repo", "scan"),
+            _tl_ev("model_selected", "Routed to Claude Sonnet 4.6", "route"),
+        ]))
+
+    def test_no_chain_of_thought(self):
+        self.assertNotIn("chain of thought", self._rendered().lower())
+
+    def test_no_reasoning_trace(self):
+        self.assertNotIn("reasoning trace", self._rendered().lower())
+
+    def test_no_internal_thoughts(self):
+        self.assertNotIn("internal thoughts", self._rendered().lower())
+
+    def test_no_structured_findings_in_labels(self):
+        self.assertNotIn("STRUCTURED_FINDINGS", self._rendered())
+
+    def test_no_raw_json_in_event_lines(self):
+        for ln in self._rendered().splitlines():
+            stripped = ln.strip()
+            if stripped:
+                self.assertFalse(stripped.startswith("{"), f"JSON leak: {stripped!r}")
+                self.assertFalse(stripped.startswith("["), f"JSON leak: {stripped!r}")
 
     def test_receipt_status_saved(self):
         stages = _stages()

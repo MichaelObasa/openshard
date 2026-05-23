@@ -12,6 +12,7 @@ from openshard.analysis.repo import RepoFacts
 from openshard.execution.generator import ChangedFile, ExecutionGenerator
 from openshard.execution.stages import StageRun
 from openshard.routing.engine import MODEL_STRONG, RoutingDecision
+from openshard.run.timeline import normalize_timeline, timeline_symbol
 
 
 class _Spinner:
@@ -1994,6 +1995,37 @@ def render_review_fallback_memo(files: list, *, include_diagnostic: bool = False
     return "\n".join(lines)
 
 
+_TIMELINE_SKIP_LIVE = frozenset({"run_started"})
+
+
+def render_run_timeline(
+    timeline: "list[dict] | None",
+    task: str = "",
+    run_label: str = "",
+) -> list[str]:
+    """Return compact activity feed lines. Pure, no I/O.
+
+    Filters out run_started (redundant with the task header).
+    Appends receipt_saved synthetically if not already present,
+    since live rendering occurs before the history write.
+    """
+    events = normalize_timeline(list(timeline) if timeline else [])
+    if not any(e.get("event") == "receipt_saved" for e in events):
+        events.append({"event": "receipt_saved", "label": "Saved Shard receipt",
+                       "kind": "receipt", "status": "completed"})
+    lines: list[str] = []
+    _display = run_label or (task[:70] if task else "")
+    if _display:
+        lines.append(f"Running {_display}")
+        lines.append("")
+    for ev in events:
+        if ev.get("event") in _TIMELINE_SKIP_LIVE:
+            continue
+        symbol = timeline_symbol(ev.get("status", "completed"))
+        lines.append(f"  {symbol} {ev.get('label', '')}")
+    return lines
+
+
 def render_post_run(
     *,
     stage_runs: list[StageRun],
@@ -2020,10 +2052,18 @@ def render_post_run(
     findings: "list | None" = None,
     is_review_task: bool = False,
     generator_model: "str | None" = None,
+    run_timeline: "list[dict] | None" = None,
+    run_label: str = "",
 ) -> None:
     """Render the post-execution receipt in compact shard format."""
     import click
     from openshard.history.shard_contract import build_live_run_receipt, render_compact_shard_receipt
+
+    _tl_lines = render_run_timeline(run_timeline, task=task, run_label=run_label)
+    if _tl_lines:
+        click.echo("")
+        for ln in _tl_lines:
+            click.echo(ln)
 
     _findings = list(findings) if findings else []
 

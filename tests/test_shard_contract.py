@@ -1492,3 +1492,88 @@ class TestBuildShardReceiptStageRunsFallback(unittest.TestCase):
         }
         receipt = build_shard_receipt(entry)
         self.assertIn("2 issues", receipt.result)
+
+
+# ---------------------------------------------------------------------------
+# Run timeline storage and rendering
+# ---------------------------------------------------------------------------
+
+def _tl_event(event: str, label: str, kind: str = "run", status: str = "completed") -> dict:
+    return {"event": event, "label": label, "kind": kind, "status": status}
+
+
+class TestRunTimeline(unittest.TestCase):
+
+    def test_build_receipt_populates_timeline(self):
+        entry = {**_minimal_entry(), "run_timeline": [_tl_event("run_started", "Started run")]}
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(len(receipt.run_timeline), 1)
+        self.assertEqual(receipt.run_timeline[0]["label"], "Started run")
+
+    def test_build_receipt_empty_when_key_absent(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertEqual(receipt.run_timeline, [])
+
+    def test_build_receipt_drops_invalid_events(self):
+        entry = {**_minimal_entry(), "run_timeline": [
+            _tl_event("x", "Good event"),
+            "not a dict",
+            {"event": "y"},          # missing label
+            {"label": ""},            # empty label
+        ]}
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(len(receipt.run_timeline), 1)
+        self.assertEqual(receipt.run_timeline[0]["label"], "Good event")
+
+    def test_render_full_shows_timeline_section(self):
+        entry = {**_minimal_entry(), "run_timeline": [_tl_event("repo_scanned", "Scanned repo", "scan")]}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("TIMELINE", out)
+        self.assertIn("Scanned repo", out)
+
+    def test_render_full_receipt_saved_from_stored_timeline(self):
+        entry = {**_minimal_entry(), "run_timeline": [
+            _tl_event("repo_scanned", "Scanned repo", "scan"),
+            _tl_event("receipt_saved", "Saved Shard receipt", "receipt"),
+        ]}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("Saved Shard receipt", out)
+        self.assertEqual(out.count("Saved Shard receipt"), 1)
+
+    def test_render_full_no_timeline_section_when_empty(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("TIMELINE", out)
+
+    def test_render_full_failed_event_gets_x_symbol(self):
+        entry = {**_minimal_entry(), "run_timeline": [
+            _tl_event("model_response_received", "Model request failed", "model", "failed"),
+        ]}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertTrue("✖" in out or "x" in out)
+        self.assertIn("Model request failed", out)
+
+    def test_build_live_receipt_accepts_timeline(self):
+        tl = [_tl_event("run_started", "Started run")]
+        receipt = build_live_run_receipt(
+            task="test task",
+            run_id="2026-05-23T00:00:00Z",
+            run_index=None,
+            agent="OpenShard",
+            stage_runs=[],
+            routing_model=None,
+            risk="Not recorded",
+            sandbox="Not recorded",
+            files_changed=0,
+            verification_attempted=None,
+            verification_passed=None,
+            approval="Not recorded",
+            estimated_cost=None,
+            result_summary="Done.",
+            run_timeline=tl,
+        )
+        self.assertEqual(len(receipt.run_timeline), 1)
+        self.assertEqual(receipt.run_timeline[0]["label"], "Started run")
