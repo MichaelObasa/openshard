@@ -6,7 +6,14 @@ import pytest
 from textual.containers import ScrollableContainer
 from textual.widgets import Label, Static
 
-from openshard.tui.app import OpenShardTui, TaskInput, _extract_receipt_block, _extract_run_display
+from openshard.tui.app import (
+    OpenShardTui,
+    TaskInput,
+    _extract_receipt_block,
+    _extract_run_display,
+    _render_openshard_block,
+    _render_user_block,
+)
 from openshard.tui.state import get_guardrails
 
 _SIZE = (120, 55)
@@ -867,3 +874,169 @@ def test_feedback_with_reason_produces_expected_cli_args():
     if parsed.feedback_reason:
         args += ["--reason", parsed.feedback_reason]
     assert args == ["feedback", "--outcome", "rejected", "--reason", "wording wrong"]
+
+
+# ── Transcript separation labels (v1) ─────────────────────────────────────
+
+
+def _cli_ok(output: str = "ok\n") -> MagicMock:
+    r = MagicMock()
+    r.output = output
+    r.exit_code = 0
+    r.exception = None
+    return r
+
+
+@pytest.mark.asyncio
+async def test_transcript_you_and_openshard_for_plain_task(tmp_path):
+    app = _make_app(tmp_path)
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = _cli_ok()
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("explain this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+    assert "YOU" in text
+    assert "explain this repo" in text
+    assert "OPENSHARD" in text
+
+
+@pytest.mark.asyncio
+async def test_transcript_you_and_openshard_for_pack(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/pack production-iac-hardening")
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+    assert "YOU" in text
+    assert "OPENSHARD" in text
+    assert "Workflow pack selected:" in text
+
+
+@pytest.mark.asyncio
+async def test_transcript_you_and_openshard_for_last(tmp_path):
+    app = _make_app(tmp_path)
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = _cli_ok("last output\n")
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/last")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+    assert "YOU" in text
+    assert "OPENSHARD" in text
+
+
+@pytest.mark.asyncio
+async def test_transcript_you_and_openshard_for_last_more(tmp_path):
+    app = _make_app(tmp_path)
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = _cli_ok("last more output\n")
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/last more")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+    assert "YOU" in text
+    assert "OPENSHARD" in text
+
+
+@pytest.mark.asyncio
+async def test_transcript_you_and_openshard_for_last_full(tmp_path):
+    app = _make_app(tmp_path)
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = _cli_ok("last full output\n")
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/last full")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+    assert "YOU" in text
+    assert "OPENSHARD" in text
+
+
+@pytest.mark.asyncio
+async def test_transcript_you_and_openshard_for_feedback(tmp_path):
+    app = _make_app(tmp_path)
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = _cli_ok("Feedback recorded: partial\n")
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/feedback partial")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+    assert "YOU" in text
+    assert "OPENSHARD" in text
+
+
+@pytest.mark.asyncio
+async def test_transcript_clear_still_empties_panel(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/help")
+        await pilot.press("enter")
+        await pilot.pause()
+        ta.load_text("/clear")
+        await pilot.press("enter")
+        await pilot.pause()
+        text = _text(app.query_one("#output-content", Static))
+    assert text.strip() == ""
+
+
+# ── _render_user_block / _render_openshard_block unit tests ───────────────
+
+
+def test_render_user_block_contains_you_label():
+    result = _render_user_block("/last more")
+    assert "YOU" in result
+
+
+def test_render_user_block_contains_command_text():
+    result = _render_user_block("/last more")
+    assert "/last more" in result
+
+
+def test_render_user_block_contains_guide_rail():
+    result = _render_user_block("/last more")
+    assert "│" in result
+
+
+def test_render_user_block_multiline_preserves_all_lines():
+    result = _render_user_block("line one\nline two")
+    assert "line one" in result
+    assert "line two" in result
+
+
+def test_render_openshard_block_contains_label():
+    result = _render_openshard_block("some output\nDone.")
+    assert "OPENSHARD" in result
+
+
+def test_render_openshard_block_body_unchanged():
+    body = "some output\nDone."
+    result = _render_openshard_block(body)
+    assert "some output" in result
+    assert "Done." in result
+
+
+def test_render_openshard_block_does_not_indent_body():
+    result = _render_openshard_block("RECEIPT — shard-001\n1 file changed.")
+    lines = result.splitlines()
+    body_lines = [ln for ln in lines if "RECEIPT" in ln or "1 file" in ln]
+    for line in body_lines:
+        assert not line.startswith(" "), f"Body line was unexpectedly indented: {line!r}"

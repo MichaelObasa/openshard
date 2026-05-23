@@ -113,6 +113,20 @@ def _render_pack_detail(pack_id: str | None) -> str:
     return f"Workflow pack selected: {p.title}"
 
 
+def _render_user_block(text: str) -> str:
+    # v1: styled label + guide line; v2 will add action/file/check sub-blocks
+    rail = "[blue]│[/blue]"
+    lines = text.split("\n")
+    header = f"{rail}  [bold]YOU[/bold]"
+    body = "\n".join(f"{rail}  {line}" for line in lines)
+    return f"{header}\n{body}\n"
+
+
+def _render_openshard_block(text: str) -> str:
+    # v1: styled label only; body unchanged to preserve receipt alignment
+    return f"[dark_orange]OPENSHARD[/dark_orange]\n{text}\n"
+
+
 def _extract_receipt_block(output: str) -> str | None:
     """Return the receipt block from CLI output, or None if not found.
 
@@ -295,8 +309,12 @@ class OpenShardTui(App):
         self.query_one("#task-input", TaskInput).load_text("")
         parsed = parse_tui_input(raw)
 
+        _no_echo = {TuiCommand.CLEAR, TuiCommand.QUIT}
+        if parsed.cmd not in _no_echo:
+            self._append_output(_render_user_block(raw))
+
         if parsed.cmd == TuiCommand.HELP:
-            self._append_output(_HELP_TEXT)
+            self._append_output(_render_openshard_block(_HELP_TEXT))
         elif parsed.cmd == TuiCommand.CLEAR:
             self._pack_suffix = ""
             self._pack_workflow = ""
@@ -315,7 +333,6 @@ class OpenShardTui(App):
                 _fb_args += ["--reason", parsed.feedback_reason]
             self._run_cli_async(_fb_args)
         elif parsed.cmd == TuiCommand.RUN_TASK:
-            self._append_output(f"> {raw}")
             self._start_run_status(raw)
             _suffix = self._pack_suffix
             _pw = self._pack_workflow
@@ -325,9 +342,9 @@ class OpenShardTui(App):
             _args = ["run", "--workflow", _pw, _effective_task] if _pw else ["run", _effective_task]
             self._run_cli_async(_args, refresh_after=True, is_run=True)
         elif parsed.cmd == TuiCommand.PACKS:
-            self._append_output(_render_packs_list())
+            self._append_output(_render_openshard_block(_render_packs_list()))
         elif parsed.cmd == TuiCommand.PACK_SHOW:
-            self._append_output(_render_pack_detail(parsed.pack_id))
+            self._append_output(_render_openshard_block(_render_pack_detail(parsed.pack_id)))
             if parsed.pack_id:
                 try:
                     from openshard.workflow_packs.packs import get_pack
@@ -339,7 +356,7 @@ class OpenShardTui(App):
                     self._pack_suffix = ""
                     self._pack_workflow = ""
         else:
-            self._append_output(f"Unknown command: {raw}\nType /help for supported commands.")
+            self._append_output(_render_openshard_block(f"Unknown command: {raw}\nType /help for supported commands."))
 
     def _start_run_status(self, task_text: str) -> None:
         self._run_in_progress = True
@@ -412,7 +429,7 @@ class OpenShardTui(App):
         else:
             display = output.rstrip("\n") + "\n" + status
 
-        self._append_output(display)
+        self._append_output(_render_openshard_block(display))
 
         if refresh_after:
             from openshard.tui.state import load_recent_runs
