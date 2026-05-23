@@ -156,10 +156,11 @@ class OpenRouterClient(BaseProvider):
         ]
 
     def execute(
-        self, model: str, prompt: str, system: str | None = None
+        self, model: str, prompt: str, system: str | None = None,
+        max_tokens: int | None = None,
     ) -> ChatResponse:
         """Send *prompt* to *model* and return a structured response."""
-        return self.send_request(model, prompt, system)
+        return self.send_request(model, prompt, system, max_tokens=max_tokens)
 
     def get_model_info(self, model_id: str) -> ModelInfo | None:
         """Return info for *model_id*, or None if not listed."""
@@ -173,20 +174,24 @@ class OpenRouterClient(BaseProvider):
     # ------------------------------------------------------------------
 
     def send_request(
-        self, model: str, prompt: str, system: str | None = None
+        self, model: str, prompt: str, system: str | None = None,
+        max_tokens: int | None = None,
     ) -> ChatResponse:
         """Send *prompt* to *model* and return a structured response.
 
         *system* is an optional system-role message prepended to the conversation.
+        *max_tokens* caps the completion length sent to the API.
         """
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        payload = {
+        payload: dict = {
             "model": model,
             "messages": messages,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         data = self._post("/chat/completions", payload)
 
         choices = data.get("choices", [])

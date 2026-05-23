@@ -467,3 +467,68 @@ class TestReadonlyFastPath(unittest.TestCase):
                 any(ask_plan_model in ln for ln in ask_stage_rows),
                 f"Stage Ask row {ask_stage_rows!r} does not match plan Ask: model {ask_plan_model!r}",
             )
+
+
+# ---------------------------------------------------------------------------
+# SF task (STRUCTURED_FINDINGS) pipeline integration tests
+# ---------------------------------------------------------------------------
+
+_SF_TASK = (
+    "Review this code for security issues.\n\n"
+    'STRUCTURED_FINDINGS: [{"severity": "Critical", "message": "test"}]'
+)
+
+
+class TestSfTaskPipelineIntegration(unittest.TestCase):
+    """Tasks containing STRUCTURED_FINDINGS: are treated as review tasks regardless of prefix."""
+
+    def test_sf_task_injects_review_instruction(self):
+        """skills_context must contain the STRUCTURED_FINDINGS review instruction."""
+        _, gen_mock = _invoke(_SF_TASK, extra_args=("--workflow", "direct"))
+        gen_mock.generate.assert_called_once()
+        ctx = gen_mock.generate.call_args[1].get("skills_context", "")
+        self.assertIn("[IMPORTANT]", ctx)
+        self.assertIn("STRUCTURED_FINDINGS", ctx)
+        self.assertIn("files` array must be empty", ctx)
+
+    def test_sf_task_uses_review_max_tokens(self):
+        """max_tokens must be 8192 for SF tasks, not the 65536 OpenRouter default."""
+        _, gen_mock = _invoke(_SF_TASK, extra_args=("--workflow", "direct"))
+        gen_mock.generate.assert_called_once()
+        max_tokens = gen_mock.generate.call_args[1].get("max_tokens")
+        self.assertIsNotNone(max_tokens, "max_tokens was not passed to generate()")
+        self.assertEqual(max_tokens, 8192)
+        self.assertNotEqual(max_tokens, 65536)
+
+    def test_normal_task_uses_standard_max_tokens(self):
+        """max_tokens must be 16384 for normal write tasks."""
+        _, gen_mock = _invoke("implement a new feature", extra_args=("--workflow", "direct"))
+        gen_mock.generate.assert_called_once()
+        max_tokens = gen_mock.generate.call_args[1].get("max_tokens")
+        self.assertIsNotNone(max_tokens, "max_tokens was not passed to generate()")
+        self.assertEqual(max_tokens, 16384)
+        self.assertNotEqual(max_tokens, 65536)
+
+    def test_sf_task_discards_returned_files(self):
+        """Files returned by the model must be discarded for SF tasks (even when not _readonly_task)."""
+        result, _ = _invoke(
+            _SF_TASK,
+            extra_args=("--workflow", "direct"),
+            result=_fake_result_with_files(),
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertNotIn("[written]", result.output)
+        self.assertIn("Read-only task", result.output)
+        self.assertIn("discarded", result.output)
+
+    def test_production_iac_hardening_max_tokens_not_65536(self):
+        """The production-iac-hardening full task must request 8192 max_tokens, not 65536."""
+        from openshard.workflow_packs.packs import get_pack
+        p = get_pack("production-iac-hardening")
+        full_task = p.prompt + p.execution_prompt_suffix
+        _, gen_mock = _invoke(full_task, extra_args=("--workflow", "direct"))
+        gen_mock.generate.assert_called_once()
+        max_tokens = gen_mock.generate.call_args[1].get("max_tokens")
+        self.assertIsNotNone(max_tokens, "max_tokens was not passed to generate()")
+        self.assertLessEqual(max_tokens, 16384, f"max_tokens={max_tokens} exceeds 16384 cap")
+        self.assertEqual(max_tokens, 8192)

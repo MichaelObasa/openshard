@@ -1,5 +1,24 @@
 from __future__ import annotations
 
+# Internal execution suffix: appended to the prompt sent to the model for review packs.
+# Never shown in the TUI composer, CLI prompt display, or any user-facing output.
+_EXECUTION_FINDINGS_SUFFIX = (
+    "\n\nAfter completing your analysis, put the following content in the JSON `summary` field "
+    "of your response (multi-line content is allowed for review tasks):\n\n"
+    "Found X issues worth addressing.\n\n"
+    "Critical\n"
+    "- <one-sentence finding>\n\n"
+    "High\n"
+    "- <one-sentence finding>\n\n"
+    "Only include severity levels that have findings. "
+    "Use 'No issues found.' if the review is clean.\n\n"
+    "End the summary field with this exact line (do not wrap it in a code block):\n"
+    "STRUCTURED_FINDINGS: [{\"severity\": \"Critical\", \"message\": \"One sentence finding\"}, "
+    "{\"severity\": \"High\", \"message\": \"Another finding\"}]\n"
+    "Severity must be one of: Critical, High, Medium, Low. "
+    "Include every significant finding. This line is required for structured reporting."
+)
+
 _BUILTIN_PACKS: list[dict] = [
     {
         "id": "repo-explanation",
@@ -25,8 +44,10 @@ _BUILTIN_PACKS: list[dict] = [
             "posture, 2am operability, and developer experience for a 5-10 person engineering team. Identify "
             "critical, high, and medium risks. Explain trade-offs. Do not apply changes directly without review."
         ),
+        "execution_prompt_suffix": _EXECUTION_FINDINGS_SUFFIX,
+        "workflow": "native",
         "recommended_context": "Run from a directory containing Terraform files (.tf). Works best with the OpenShard production-infra-demo fixture.",
-        "expected_receipt_value": "A prioritised list of critical, high, and medium risks with trade-off explanations.",
+        "expected_receipt_value": "A prioritised list of critical, high, and medium risks with trade-off explanations, plus a STRUCTURED_FINDINGS line.",
         "safety_notes": "Review-only by default. Do not apply changes without explicit confirmation.",
         "tags": ["terraform", "iac", "security", "compliance", "infrastructure"],
     },
@@ -39,8 +60,10 @@ _BUILTIN_PACKS: list[dict] = [
             "Review this Terraform networking configuration and identify risky firewall rules, overly broad ingress, "
             "missing egress controls, NAT/subnet issues, and unsafe defaults before apply."
         ),
+        "execution_prompt_suffix": _EXECUTION_FINDINGS_SUFFIX,
+        "workflow": "native",
         "recommended_context": "Run from a directory containing Terraform networking files (network.tf, firewall.tf, vpc.tf, or similar).",
-        "expected_receipt_value": "A list of networking risks grouped by severity with remediation notes.",
+        "expected_receipt_value": "A list of networking risks grouped by severity with remediation notes, plus a STRUCTURED_FINDINGS line.",
         "safety_notes": "Read-only analysis. No changes applied.",
         "tags": ["terraform", "networking", "firewall", "iac", "infrastructure"],
     },
@@ -53,8 +76,10 @@ _BUILTIN_PACKS: list[dict] = [
             "Review this IAM configuration and identify privilege escalation risks, overly broad roles, "
             "wildcard permissions, missing conditions, and least-privilege gaps."
         ),
+        "execution_prompt_suffix": _EXECUTION_FINDINGS_SUFFIX,
+        "workflow": "native",
         "recommended_context": "Run from a directory containing IAM configuration files (iam.tf, *.json policy files, or similar).",
-        "expected_receipt_value": "A prioritised list of IAM risks with specific permissions or roles called out.",
+        "expected_receipt_value": "A prioritised list of IAM risks with specific permissions or roles called out, plus a STRUCTURED_FINDINGS line.",
         "safety_notes": "Read-only analysis. No IAM changes applied.",
         "tags": ["iam", "security", "permissions", "least-privilege"],
     },
@@ -67,8 +92,10 @@ _BUILTIN_PACKS: list[dict] = [
             "Review this CI/CD pipeline and identify unguarded production deploys, missing approval gates, "
             "exposed secrets, unsafe environment handling, and rollback gaps."
         ),
+        "execution_prompt_suffix": _EXECUTION_FINDINGS_SUFFIX,
+        "workflow": "native",
         "recommended_context": "Run from a directory containing CI/CD config files (.github/workflows, .gitlab-ci.yml, Jenkinsfile, or similar).",
-        "expected_receipt_value": "A list of pipeline risks grouped by severity: deploy safety, secrets handling, and rollback readiness.",
+        "expected_receipt_value": "A list of pipeline risks grouped by severity: deploy safety, secrets handling, and rollback readiness, plus a STRUCTURED_FINDINGS line.",
         "safety_notes": "Read-only analysis. No pipeline config changes applied.",
         "tags": ["cicd", "pipeline", "delivery", "secrets", "security"],
     },
@@ -81,8 +108,10 @@ _BUILTIN_PACKS: list[dict] = [
             "Review this PowerShell deployment script and identify missing validation, poor error handling, "
             "secret-handling risks, idempotency issues, and rollback gaps."
         ),
+        "execution_prompt_suffix": _EXECUTION_FINDINGS_SUFFIX,
+        "workflow": "native",
         "recommended_context": "Run from a directory containing PowerShell scripts (.ps1 files).",
-        "expected_receipt_value": "A list of script risks covering validation, error handling, secrets, idempotency, and rollback.",
+        "expected_receipt_value": "A list of script risks covering validation, error handling, secrets, idempotency, and rollback, plus a STRUCTURED_FINDINGS line.",
         "safety_notes": "Read-only analysis. No script changes applied.",
         "tags": ["powershell", "automation", "scripting", "deployment"],
     },

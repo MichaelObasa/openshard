@@ -63,7 +63,8 @@ class BaseProvider(ABC):
 
     @abstractmethod
     def execute(
-        self, model: str, prompt: str, system: str | None = None
+        self, model: str, prompt: str, system: str | None = None,
+        max_tokens: int | None = None,
     ) -> ChatResponse:
         """Send *prompt* to *model* and return a structured response."""
 

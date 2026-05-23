@@ -2930,21 +2930,21 @@ class TestLastReadonlyLabels(unittest.TestCase):
         out = _render(self._ro_entry(), detail="more")
         self.assertNotIn("Implementation", out)
 
-    def test_readonly_model_line_says_analysis(self):
+    def test_readonly_stage_section_says_analysis(self):
         out = _render(self._ro_entry(), detail="more")
-        self.assertIn("analysis", out)
+        self.assertIn("Analysis", out)
 
-    def test_readonly_model_line_not_implementation(self):
+    def test_readonly_stage_section_not_implementation(self):
         out = _render(self._ro_entry(), detail="more")
-        self.assertNotIn("implementation", out)
+        self.assertNotIn("Implementation", out)
 
     def test_write_stage_label_says_implementation(self):
         out = _render(self._write_entry(), detail="more")
         self.assertIn("Implementation", out)
 
-    def test_write_model_line_says_implementation(self):
+    def test_write_stage_section_says_implementation(self):
         out = _render(self._write_entry(), detail="more")
-        self.assertIn("implementation", out)
+        self.assertIn("Implementation", out)
 
     def test_readonly_default_detail_no_stage_section(self):
         out = _render(self._ro_entry(), detail="default")
@@ -3571,17 +3571,22 @@ class TestFormFactorRendering(unittest.TestCase):
         self.assertNotIn("Form factor", out)
         self.assertNotIn("public_mode", out)
 
-    def test_last_more_shows_compact_form_factor_line(self):
+    def test_last_more_shows_run_type_line(self):
         out = _render(self._ff_entry(), detail="more")
-        self.assertIn("Form factor:", out)
+        self.assertIn("Run type:", out)
         self.assertIn("Run", out)
-        self.assertIn("staged", out)
-        self.assertIn("high", out)
+        self.assertNotIn("Form factor:", out)
+        self.assertNotIn("native-loop-candidate", out)
 
-    def test_last_more_compact_line_is_single_line(self):
-        out = _render(self._ff_entry(), detail="more")
-        form_factor_lines = [ln for ln in out.splitlines() if "Form factor" in ln]
-        self.assertEqual(len(form_factor_lines), 1)
+    def test_last_more_shows_execution_label(self):
+        out = _render(self._ff_entry(internal_form_factor="staged"), detail="more")
+        self.assertIn("Execution:", out)
+        self.assertIn("OpenShard", out)
+
+    def test_last_more_no_internal_form_factor_name(self):
+        out = _render(self._ff_entry(internal_form_factor="native-loop-candidate"), detail="more")
+        self.assertNotIn("native-loop-candidate", out)
+        self.assertNotIn("Form factor:", out)
 
     def test_last_full_shows_expanded_form_factor_block(self):
         out = _render(self._ff_entry(), detail="full")
@@ -3937,6 +3942,233 @@ class TestFeedbackScoringRendering(unittest.TestCase):
         out = _render(entry, "more")
         self.assertIn("-0.20", out)
         self.assertIn("+0.10", out)
+
+
+class TestReviewRiskRendering(unittest.TestCase):
+    """Risk level renders correctly for review entries in /last and compact receipt."""
+
+    def _entry_with_risk(self, risk_level: str) -> dict:
+        return {
+            "task": "Review production IAC configuration",
+            "timestamp": "2026-05-22T10:00:00Z",
+            "summary": "Review completed.",
+            "findings": [{"severity": "High", "message": "Wide IAM role"}],
+            "files_detail": [],
+            "stage_runs": [],
+            "routing_model": "anthropic/claude-sonnet-4-6",
+            "form_factor": {"risk_level": risk_level},
+        }
+
+    def test_high_risk_from_form_factor_shown_in_compact_receipt(self):
+        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        entry = self._entry_with_risk("high")
+        receipt = build_shard_receipt(entry)
+        rendered = render_compact_shard_receipt(receipt)
+        self.assertIn("High", rendered)
+
+    def test_high_risk_shown_in_last_default_render(self):
+        entry = self._entry_with_risk("high")
+
+        @click.command()
+        def cmd():
+            _render_log_entry(entry, "default")
+
+        out = CliRunner().invoke(cmd).output
+        self.assertIn("High", out)
+
+    def test_production_iac_hardening_risk_not_low(self):
+        entry = self._entry_with_risk("high")
+
+        @click.command()
+        def cmd():
+            _render_log_entry(entry, "default")
+
+        out = CliRunner().invoke(cmd).output
+        self.assertNotIn("Risk        Low", out)
+        self.assertNotIn("Risk        Not recorded", out)
+
+    def test_security_category_risk_high_via_form_factor_policy(self):
+        from openshard.routing.form_factor_policy import _derive_risk_level
+        risk = _derive_risk_level("security", None, False)
+        self.assertEqual(risk, "high")
+
+    def test_security_category_risk_high_stored_in_receipt(self):
+        from openshard.history.shard_contract import build_shard_receipt
+        entry = self._entry_with_risk("high")
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.risk, "High")
+
+    def test_review_task_flag_overrides_low_risk_in_last(self):
+        # is_review_task=True saved in log entry → /last must floor risk to High
+        entry = {
+            "task": "production-iac-hardening",
+            "timestamp": "2026-05-22T10:00:00Z",
+            "summary": "Review completed.",
+            "is_review_task": True,
+            "form_factor": {"risk_level": "low"},
+            "findings": [{"severity": "High", "message": "IAM role too broad"}],
+            "files_detail": [],
+            "stage_runs": [],
+        }
+
+        @click.command()
+        def cmd():
+            _render_log_entry(entry, "default")
+
+        out = CliRunner().invoke(cmd).output
+        self.assertIn("High", out)
+
+    def test_review_task_no_form_factor_still_high_in_last(self):
+        entry = {
+            "task": "iam-security-review",
+            "timestamp": "2026-05-22T10:00:00Z",
+            "summary": "Review completed.",
+            "is_review_task": True,
+            "findings": [{"severity": "Critical", "message": "Public bucket"}],
+            "files_detail": [],
+            "stage_runs": [],
+        }
+
+        @click.command()
+        def cmd():
+            _render_log_entry(entry, "default")
+
+        out = CliRunner().invoke(cmd).output
+        self.assertIn("High", out)
+
+
+class TestLastVerificationPlanNativeFormat(unittest.TestCase):
+    """Regression tests for /last --more crash when verification_plan is stored as a dict.
+
+    Native runs serialize VerificationPlan via asdict(), producing
+    {"commands": [...]} — a dict. Non-native runs store a plain list of command dicts.
+    Both formats must render without raising TypeError.
+    """
+
+    def test_native_dict_format_does_not_crash(self):
+        """verification_plan stored as {"commands": [...]} (native format) must not crash."""
+        entry = {
+            "task": "review infra",
+            "verification_plan": {
+                "commands": [
+                    {
+                        "name": "tests",
+                        "argv": ["python", "-m", "pytest"],
+                        "kind": "test",
+                        "source": "detected",
+                        "safety": "safe",
+                        "reason": "safe prefix",
+                    }
+                ],
+                "task_type": "read-only",
+                "risk_level": "low",
+            },
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("Verification", out)
+        self.assertIn("python -m pytest", out)
+        self.assertIn("safe", out)
+
+    def test_native_dict_empty_commands_does_not_crash(self):
+        """Empty commands list in native dict format must not crash."""
+        entry = {
+            "task": "review infra",
+            "verification_plan": {"commands": [], "task_type": "read-only", "risk_level": "low"},
+        }
+        out = _render(entry, detail="more")
+        self.assertNotIn("Verification", out)
+
+    def test_native_dict_no_commands_key_does_not_crash(self):
+        """verification_plan dict without 'commands' key must not crash."""
+        entry = {
+            "task": "review infra",
+            "verification_plan": {"task_type": "read-only"},
+        }
+        out = _render(entry, detail="more")
+        self.assertNotIn("Verification", out)
+
+    def test_list_format_still_works(self):
+        """Existing list format (non-native) must still render correctly."""
+        entry = {
+            "task": "do a thing",
+            "verification_plan": [
+                {
+                    "name": "lint",
+                    "argv": ["ruff", "check", "."],
+                    "source": "config",
+                    "safety": "safe",
+                    "reason": "safe prefix",
+                }
+            ],
+        }
+        out = _render(entry, detail="more")
+        self.assertIn("Verification", out)
+        self.assertIn("ruff check .", out)
+
+    def test_non_dict_item_in_list_does_not_crash(self):
+        """Non-dict items in verification_plan list must be skipped silently."""
+        entry = {
+            "task": "do a thing",
+            "verification_plan": ["not-a-dict", None, 42],
+        }
+        out = _render(entry, detail="more")
+        self.assertNotIn("Verification", out)
+
+    def test_default_detail_hides_native_dict_plan(self):
+        """verification_plan in native dict format must not appear in default detail."""
+        entry = {
+            "task": "review infra",
+            "verification_plan": {
+                "commands": [{"name": "t", "argv": ["pytest"], "source": "s", "safety": "safe", "reason": "r"}],
+            },
+        }
+        out = _render(entry, detail="default")
+        self.assertNotIn("Verification", out)
+
+
+class TestLastFindingsWithStringItems(unittest.TestCase):
+    """Regression: findings list that contains bare strings must not crash rendering."""
+
+    def test_string_finding_renders_safely(self):
+        entry = {
+            "task": "iac review",
+            "timestamp": "2026-05-22T10:00:00Z",
+            "summary": "Review completed.",
+            "is_review_task": True,
+            "findings": ["Public S3 bucket detected"],
+            "files_detail": [],
+            "stage_runs": [],
+        }
+
+        @click.command()
+        def cmd():
+            _render_log_entry(entry, "default")
+
+        out = CliRunner().invoke(cmd).output
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn("TypeError", out)
+
+    def test_mixed_dict_and_string_findings_renders_safely(self):
+        entry = {
+            "task": "iac review",
+            "timestamp": "2026-05-22T10:00:00Z",
+            "summary": "Review completed.",
+            "is_review_task": True,
+            "findings": [
+                {"severity": "Critical", "message": "Wildcard CIDR"},
+                "Plain string finding",
+            ],
+            "files_detail": [],
+            "stage_runs": [],
+        }
+
+        @click.command()
+        def cmd():
+            _render_log_entry(entry, "default")
+
+        out = CliRunner().invoke(cmd).output
+        self.assertNotIn("Traceback", out)
+        self.assertNotIn("TypeError", out)
 
 
 if __name__ == "__main__":

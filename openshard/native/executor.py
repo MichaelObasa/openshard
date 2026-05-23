@@ -1402,6 +1402,8 @@ class NativeAgentExecutor:
         model: str | None = None,
         repo_facts: RepoFacts | None = None,
         skills_context: str = "",
+        max_tokens: int | None = None,
+        is_review_task: bool = False,
     ) -> ExecutionResult:
         self._run_preflight()
         self.record_osn_loop_step(
@@ -1573,8 +1575,10 @@ class NativeAgentExecutor:
         )
         self.record_loop_step("context_provenance")
 
+        _is_review = is_review_task or "STRUCTURED_FINDINGS:" in task
         result = self._gen.generate(
-            task, model=model, repo_facts=repo_facts, skills_context=combined_context
+            task, model=model, repo_facts=repo_facts, skills_context=combined_context,
+            max_tokens=max_tokens, is_review_task=_is_review,
         )
         self.record_loop_step("generation")
         self.record_osn_loop_step(

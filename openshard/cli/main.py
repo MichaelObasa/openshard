@@ -43,6 +43,7 @@ from openshard.cli.run_output import (
     _native_meta_from_entry,
     _RATIONALE_SHORT,
     _PUBLIC_MODE_LABEL,
+    _FF_EXECUTOR_DISPLAY,
 )
 from openshard.evals.registry import load_eval_tasks
 from openshard.evals.runner import append_eval_result, run_eval_task
@@ -669,26 +670,48 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
     click.echo(f"\nTask: {task}")
     if ts:
         click.echo(f"At: {ts} UTC")
-    click.echo("\nDone")
-    if summary:
-        click.echo(summary)
+    _stored_findings = entry.get("findings") or []
+    if _stored_findings:
+        from openshard.cli.run_output import render_review_tldr_memo
+        from openshard.history.shard_contract import ShardFinding
+        _sf_list = [
+            ShardFinding(severity=f.get("severity", "Note"), message=f.get("message", ""))
+            for f in _stored_findings
+            if isinstance(f, dict)
+        ]
+        _review_files = [fd.get("path", "") for fd in files_detail if fd.get("path")]
+        click.echo("\nReview complete")
+        click.echo(render_review_tldr_memo(_sf_list, _review_files))
+    elif entry.get("is_review_task"):
+        from openshard.cli.run_output import render_review_fallback_memo
+        _review_files = [fd.get("path", "") for fd in files_detail if fd.get("path")]
+        click.echo("\nReview complete")
+        click.echo(render_review_fallback_memo(
+            _review_files,
+            include_diagnostic=(detail in ("more", "full")),
+        ))
+    else:
+        click.echo("\nDone")
+        if summary:
+            click.echo(summary)
 
-    # Model line — always shown
+    # Model line — only in default mode; receipt shows model in --more / --full
     _is_ro = routing_rationale == "read-only analysis"
-    if stage_runs_data:
-        seen: dict[str, list[str]] = {}
-        for sr in stage_runs_data:
-            lbl = _model_label(sr["model"])
-            stype = "analysis" if (_is_ro and sr["stage_type"] == "implementation") else sr["stage_type"]
-            seen.setdefault(lbl, []).append(stype)
-        parts = [f"{lbl} ({' + '.join(types)})" for lbl, types in seen.items()]
-        prefix = "Model" if len(seen) == 1 else "Models"
-        click.echo(f"\n{prefix}: {', '.join(parts)}")
-    elif routing_model:
-        lbl = _model_label(routing_model)
-        reason = _RATIONALE_SHORT.get(routing_rationale, "")
-        suffix = f" ({reason})" if reason else ""
-        click.echo(f"\nModel: {lbl}{suffix}")
+    if detail == "default":
+        if stage_runs_data:
+            seen: dict[str, list[str]] = {}
+            for sr in stage_runs_data:
+                lbl = _model_label(sr["model"])
+                stype = "analysis" if (_is_ro and sr["stage_type"] == "implementation") else sr["stage_type"]
+                seen.setdefault(lbl, []).append(stype)
+            parts = [f"{lbl} ({' + '.join(types)})" for lbl, types in seen.items()]
+            prefix = "Model" if len(seen) == 1 else "Models"
+            click.echo(f"\n{prefix}: {', '.join(parts)}")
+        elif routing_model:
+            lbl = _model_label(routing_model)
+            reason = _RATIONALE_SHORT.get(routing_rationale, "")
+            suffix = f" ({reason})" if reason else ""
+            click.echo(f"\nModel: {lbl}{suffix}")
 
     # Shard receipt (--more / --full) — shown near top before diagnostic blocks
     if detail != "default":
@@ -757,9 +780,10 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
         _ff = entry["form_factor"]
         _ff_pub = _PUBLIC_MODE_LABEL.get(_ff["public_mode"], _ff["public_mode"].title())
         if detail == "more":
-            click.echo(
-                f"  Form factor: {_ff_pub} / {_ff['internal_form_factor']} ({_ff['confidence']})"
-            )
+            click.echo(f"\n  Run type: {_ff_pub}")
+            _executor = _FF_EXECUTOR_DISPLAY.get(_ff.get("internal_form_factor", ""))
+            if _executor:
+                click.echo(f"  Execution: {_executor}")
         else:
             click.echo("\n  Form factor")
             click.echo(f"    Public mode:  {_ff_pub}")
@@ -774,12 +798,23 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
 
     # Verification plan (--more / --full)
     if detail != "default" and "verification_plan" in entry:
-        for _vc in entry["verification_plan"]:
-            _argv_str = " ".join(_vc["argv"])
+        _vp_raw = entry["verification_plan"]
+        # Native runs store verification_plan as {"commands": [...]} (asdict of VerificationPlan).
+        # Non-native runs store it as a plain list of command dicts.
+        if isinstance(_vp_raw, dict):
+            _vp_cmds = _vp_raw.get("commands") or []
+        elif isinstance(_vp_raw, list):
+            _vp_cmds = _vp_raw
+        else:
+            _vp_cmds = []
+        for _vc in _vp_cmds:
+            if not isinstance(_vc, dict):
+                continue
+            _argv_str = " ".join(_vc.get("argv") or [])
             click.echo("  Verification")
-            click.echo(f"    Name:    {_vc['name']}")
-            click.echo(f"    Safety:  {_vc['safety']}")
-            click.echo(f"    Source:  {_vc['source']}")
+            click.echo(f"    Name:    {_vc.get('name', '')}")
+            click.echo(f"    Safety:  {_vc.get('safety', '')}")
+            click.echo(f"    Source:  {_vc.get('source', '')}")
             click.echo(f"    Command: {_argv_str}")
 
     # Files
