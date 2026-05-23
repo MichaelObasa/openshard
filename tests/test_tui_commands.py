@@ -84,6 +84,11 @@ def test_slash_last_more_parses_as_last_more():
     assert result.cmd == TuiCommand.LAST_MORE
 
 
+def test_slash_last_full_parses_as_last_full():
+    result = parse_tui_input("/last full")
+    assert result.cmd == TuiCommand.LAST_FULL
+
+
 def test_slash_clear_parses_as_clear():
     assert parse_tui_input("/clear").cmd == TuiCommand.CLEAR
 

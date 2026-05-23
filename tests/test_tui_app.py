@@ -254,6 +254,7 @@ async def test_help_command_shows_help_in_panel(tmp_path):
         text = _text(app.query_one("#output-content", Static))
         assert "Supported commands" in text
         assert "/last" in text
+        assert "/last full" in text
         assert "/quit" in text
 
 

@@ -40,6 +40,7 @@ _SLASH_MENU_TEXT = (
     "  /pack <id>     Load a workflow pack\n"
     "  /last          Show most recent run\n"
     "  /last more     Show more detail\n"
+    "  /last full     Show full debug/audit detail\n"
     "  /clear         Clear output\n"
     "  /quit          Exit"
 )
@@ -68,7 +69,8 @@ _HELP_TEXT = (
     "Supported commands:\n"
     "  /help           Show this help\n"
     "  /last           Show most recent run\n"
-    "  /last more      Show more details of most recent run\n"
+    "  /last more      Show more detail\n"
+    "  /last full      Show full debug/audit detail\n"
     "  /clear          Clear output area\n"
     "  /quit           Exit the TUI\n"
     "  /packs          List available workflow packs\n"
@@ -302,6 +304,8 @@ class OpenShardTui(App):
             self._run_cli_async(["last"])
         elif parsed.cmd == TuiCommand.LAST_MORE:
             self._run_cli_async(["last", "--more"])
+        elif parsed.cmd == TuiCommand.LAST_FULL:
+            self._run_cli_async(["last", "--full"])
         elif parsed.cmd == TuiCommand.RUN_TASK:
             self._append_output(f"> {raw}")
             self._start_run_status(raw)

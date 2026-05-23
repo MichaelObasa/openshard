@@ -357,9 +357,8 @@ class TestStepRendering(unittest.TestCase):
                 _make_event(run_id="2025-01-01T00:00:00Z", step_name="gather_context"),
             ])
             entry = _make_run_entry(timestamp="2025-01-01T00:00:00Z")
-            out = _render(entry, detail="more")
+            out = _render(entry, detail="full")
             self.assertIn("[native steps]", out)
-            self.assertIn("3 steps", out)
             self.assertIn("preflight", out)
 
     def test_full_detail_shows_step_timeline(self):

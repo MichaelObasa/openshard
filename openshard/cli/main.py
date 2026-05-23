@@ -43,7 +43,6 @@ from openshard.cli.run_output import (
     _native_meta_from_entry,
     _RATIONALE_SHORT,
     _PUBLIC_MODE_LABEL,
-    _FF_EXECUTOR_DISPLAY,
 )
 from openshard.evals.registry import load_eval_tasks
 from openshard.evals.runner import append_eval_result, run_eval_task
@@ -726,22 +725,22 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
         click.echo("")
         click.echo(render_full_shard_receipt(_shard))
 
-    # Stages (--more / --full)
-    if detail != "default" and stage_runs_data:
+    # Stages (--full only)
+    if detail == "full" and stage_runs_data:
         click.echo("\nStages")
         for sr in stage_runs_data:
             cost_s = f"${sr['cost']:.4f}" if sr.get("cost") is not None else "-"
             _stage_label = "Analysis" if (_is_ro and sr['stage_type'] == "implementation") else sr['stage_type'].capitalize()
             click.echo(f"  {_stage_label} ({_model_label(sr['model'])}): {sr['duration']:.1f}s, {cost_s}")
 
-    # Task type (--more / --full, read-only only)
-    if detail != "default" and _is_ro:
+    # Task type (--full only, read-only only)
+    if detail == "full" and _is_ro:
         click.echo("\nTask type")
         click.echo("  Read-only analysis")
         click.echo("  Reason: The prompt asks a question, so file changes are blocked.")
 
-    # Routing (--more / --full)
-    if detail != "default" and "routing_category" in entry:
+    # Routing (--full only)
+    if detail == "full" and "routing_category" in entry:
         click.echo("\n  Routing")
         click.echo(f"    Category: {entry['routing_category']}")
         if entry.get("routing_used_fallback"):
@@ -765,8 +764,8 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
             else:
                 click.echo("    Feedback scoring: enabled (no adjustment)")
 
-    # Execution profile (--more / --full)
-    if detail != "default" and entry.get("execution_profile"):
+    # Execution profile (--full only)
+    if detail == "full" and entry.get("execution_profile"):
         _profile = entry["execution_profile"]
         _reason = entry.get("execution_profile_reason", "")
         click.echo("  Execution")
@@ -775,29 +774,23 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
         if _reason:
             click.echo(f"    Reason: {_reason}")
 
-    # Form factor (--more: compact; --full: expanded)
-    if detail != "default" and "form_factor" in entry:
+    # Form factor (--full only)
+    if detail == "full" and "form_factor" in entry:
         _ff = entry["form_factor"]
         _ff_pub = _PUBLIC_MODE_LABEL.get(_ff["public_mode"], _ff["public_mode"].title())
-        if detail == "more":
-            click.echo(f"\n  Run type: {_ff_pub}")
-            _executor = _FF_EXECUTOR_DISPLAY.get(_ff.get("internal_form_factor", ""))
-            if _executor:
-                click.echo(f"  Execution: {_executor}")
-        else:
-            click.echo("\n  Form factor")
-            click.echo(f"    Public mode:  {_ff_pub}")
-            click.echo(f"    Internal:     {_ff['internal_form_factor']}")
-            click.echo(f"    Reason:       {_ff['reason']}")
-            click.echo(f"    Confidence:   {_ff['confidence']}")
-            click.echo(f"    Risk:         {_ff['risk_level']}")
-            if _ff.get("context_quality"):
-                click.echo(f"    Context:      {_ff['context_quality']}")
-            for _w in _ff.get("warnings", []):
-                click.echo(f"    Warning:      {_w}")
+        click.echo("\n  Form factor")
+        click.echo(f"    Public mode:  {_ff_pub}")
+        click.echo(f"    Internal:     {_ff['internal_form_factor']}")
+        click.echo(f"    Reason:       {_ff['reason']}")
+        click.echo(f"    Confidence:   {_ff['confidence']}")
+        click.echo(f"    Risk:         {_ff['risk_level']}")
+        if _ff.get("context_quality"):
+            click.echo(f"    Context:      {_ff['context_quality']}")
+        for _w in _ff.get("warnings", []):
+            click.echo(f"    Warning:      {_w}")
 
-    # Verification plan (--more / --full)
-    if detail != "default" and "verification_plan" in entry:
+    # Verification plan (--full only)
+    if detail == "full" and "verification_plan" in entry:
         _vp_raw = entry["verification_plan"]
         # Native runs store verification_plan as {"commands": [...]} (asdict of VerificationPlan).
         # Non-native runs store it as a plain list of command dicts.
@@ -828,13 +821,13 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
             f"{fd} deleted" if fd else "",
         ] if p)
         click.echo(f"\nFiles: {counts}")
-        if detail != "default":
+        if detail == "full":
             for f in files_detail:
                 desc = f" - {f['summary']}" if f.get("summary") else ""
                 click.echo(f"  {f['path']}{desc}")
 
-    # Notes (--more / --full)
-    if detail != "default" and notes:
+    # Notes (--full only)
+    if detail == "full" and notes:
         _notes = [_truncate_note(n) for n in notes if n][:3]
         if _notes:
             click.echo("\nNotes")
@@ -843,7 +836,7 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
 
     # Developer feedback (--more / --full)
     _feedback = entry.get("feedback")
-    if detail != "default" and _feedback:
+    if detail in ("more", "full") and _feedback:
         click.echo("\nDeveloper feedback")
         _action = _feedback.get("action")
         _reason = _feedback.get("correction_reason")
@@ -859,7 +852,7 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
             click.echo(f"  Note: {_fb_note}")
 
     # Feedback Signals v0 (--more / --full)
-    if detail != "default" and index is not None:
+    if detail in ("more", "full") and index is not None:
         from openshard.history.feedback import load_feedback_for_shard
         from openshard.history.shard_contract import _make_shard_id
         _shard_id = _make_shard_id(entry.get("timestamp", ""), index)
@@ -871,8 +864,8 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
             if _fb.note:
                 click.echo(f"{'Note':<12}{_fb.note}")
 
-    # Token / model detail (--more / --full)
-    if detail != "default":
+    # Token / model detail (--full only)
+    if detail == "full":
         full_model = entry.get("execution_model", "")
         if full_model and not stage_runs_data and not routing_model:
             click.echo(f"\nModel: {full_model}")
@@ -883,20 +876,19 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
             click.echo(f"Tokens: {pt} prompt / {ct} completion / {tt} total")
         if entry.get("retry_triggered"):
             click.echo("Retried: yes")
-        if detail == "full":
-            vp = entry.get("verification_passed")
-            if vp is not None:
-                click.echo(f"Verification: {'passed' if vp else 'failed'}")
-            ws = entry.get("workspace_path")
-            if ws:
-                click.echo(f"Workspace: {ws}")
+        vp = entry.get("verification_passed")
+        if vp is not None:
+            click.echo(f"Verification: {'passed' if vp else 'failed'}")
+        ws = entry.get("workspace_path")
+        if ws:
+            click.echo(f"Workspace: {ws}")
 
-    # Native inspection (--more / --full)
-    if detail != "default":
+    # Native inspection (--full only)
+    if detail == "full":
         _render_native_inspection(entry, detail)
 
     # Tier dispatch for non-native runs (native gets it inside _render_native_inspection)
-    if detail != "default" and entry.get("workflow") != "native":
+    if detail == "full" and entry.get("workflow") != "native":
         _tdr = entry.get("tier_dispatch_receipt")
         _vpol = entry.get("validator_policy")
         if _tdr and _tdr.get("enabled"):
@@ -935,32 +927,25 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
             _bl = format_baseline_line(_pt, _ct, actual_cost=cost)
             if _bl is not None:
                 click.echo(_bl)
-    elif detail in ("more", "full"):
+    elif detail == "full":
         from openshard.cost.baseline import (
             compute_baseline_comparison,
-            format_cost_difference,
             format_full_comparison_lines,
         )
         _pt = entry.get("prompt_tokens") or 0
         _ct = entry.get("completion_tokens") or 0
         _cmp = compute_baseline_comparison(_pt, _ct, actual_cost=cost)
         if _cmp is not None:
-            _frontier_cost = _cmp["frontier_baseline_cost_usd"]
             click.echo("\nCost comparison")
             click.echo(f"  OpenShard: ${_cmp['actual_cost_usd']:.4f}")
-            if detail == "more":
-                click.echo(f"  Sonnet 4.6-only estimate: ${_frontier_cost:.4f}")
-                _diff = format_cost_difference(_cmp["actual_cost_usd"], _frontier_cost)
-                click.echo(f"  Difference: {_diff}")
-            else:  # full
-                _rows = format_full_comparison_lines(_pt, _ct, _cmp["actual_cost_usd"])
-                if _rows:
-                    click.echo("")
-                    click.echo("  Compared with")
-                    for _row in _rows:
-                        click.echo(_row)
+            _rows = format_full_comparison_lines(_pt, _ct, _cmp["actual_cost_usd"])
+            if _rows:
                 click.echo("")
-                click.echo("  Method: same-token API price estimate. Real single-model cost may differ.")
+                click.echo("  Compared with")
+                for _row in _rows:
+                    click.echo(_row)
+            click.echo("")
+            click.echo("  Method: same-token API price estimate. Real single-model cost may differ.")
 
 
 @cli.command()

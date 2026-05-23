@@ -45,7 +45,7 @@ class TestLastRoutingDisplay(unittest.TestCase):
             "routing_selected_provider": "openrouter",
             "routing_used_fallback": False,
         }
-        out = _render(entry)
+        out = _render(entry, "full")
         self.assertIn("Category: standard", out)
         self.assertIn("Initial candidate:", out)
         self.assertIn(_model_label("openrouter/fast-model"), out)
@@ -60,7 +60,7 @@ class TestLastRoutingDisplay(unittest.TestCase):
             "routing_selected_provider": None,
             "routing_used_fallback": True,
         }
-        out = _render(entry)
+        out = _render(entry, "full")
         self.assertIn("Category: visual", out)
         self.assertIn("Initial candidate: fallback (keyword routing)", out)
 
@@ -89,7 +89,7 @@ class TestLastRoutingDisplay(unittest.TestCase):
             "routing_used_fallback": False,
             "tier_dispatch_receipt": {"enabled": True, "applied": True},
         }
-        out = _render(entry)
+        out = _render(entry, "full")
         self.assertIn("Note: tier dispatch changed the work model shown below.", out)
 
 
@@ -101,7 +101,7 @@ class TestLastProfileDisplay(unittest.TestCase):
             "execution_profile": "native_deep",
             "execution_profile_reason": "security category",
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("Execution", out)
         self.assertIn("Mode: Deep Run", out)
         self.assertIn("Reason: security category", out)
@@ -122,13 +122,13 @@ class TestLastProfileDisplay(unittest.TestCase):
             "task": "do a thing",
             "execution_profile": "native_swarm",
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("Execution", out)
         self.assertIn("Mode: Deep Run", out)
 
     def test_no_crash_on_entry_without_profile_fields(self):
         entry = {"task": "do a thing"}
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertNotIn("Execution", out)
 
     def test_no_crash_on_entry_without_profile_fields_full(self):
@@ -152,13 +152,13 @@ class TestLastProfileDisplay(unittest.TestCase):
             "execution_profile_reason": "simple/safe task",
             "routing_rationale": "read-only analysis",
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("Mode: Ask", out)
 
     def test_raw_profile_names_not_in_output(self):
         for profile in ("native_light", "native_deep", "native_swarm"):
             entry = {"task": "do a thing", "execution_profile": profile}
-            out = _render(entry, detail="more")
+            out = _render(entry, detail="full")
             for leaked in ("native_light", "native_deep", "native_swarm", "Team Run"):
                 self.assertNotIn(leaked, out, f"profile={profile!r} leaked {leaked!r}")
 
@@ -180,7 +180,7 @@ class TestLastVerificationDisplay(unittest.TestCase):
     }
 
     def test_more_shows_verification_plan(self):
-        out = _render(self._PLAN_ENTRY, detail="more")
+        out = _render(self._PLAN_ENTRY, detail="full")
         self.assertIn("Verification", out)
         self.assertIn("safe", out)
         self.assertIn("detected", out)
@@ -192,7 +192,7 @@ class TestLastVerificationDisplay(unittest.TestCase):
         self.assertIn("detected", out)
 
     def test_argv_rendered_space_joined(self):
-        out = _render(self._PLAN_ENTRY, detail="more")
+        out = _render(self._PLAN_ENTRY, detail="full")
         self.assertIn("python -m pytest", out)
 
     def test_default_detail_hides_verification_plan(self):
@@ -201,7 +201,7 @@ class TestLastVerificationDisplay(unittest.TestCase):
 
     def test_old_entry_without_plan_no_crash(self):
         entry = {"task": "old run"}
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertNotIn("Verification", out)
 
     def test_config_source_shown(self):
@@ -218,7 +218,7 @@ class TestLastVerificationDisplay(unittest.TestCase):
                 }
             ],
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("config", out)
         self.assertIn("pytest", out)
 
@@ -231,7 +231,7 @@ class TestLastReadonlyTaskTypeBlock(unittest.TestCase):
     }
 
     def test_more_shows_task_type_for_readonly(self):
-        out = _render(self._RO_ENTRY, detail="more")
+        out = _render(self._RO_ENTRY, detail="full")
         self.assertIn("Task type", out)
         self.assertIn("Read-only analysis", out)
         self.assertIn("Reason:", out)
@@ -311,13 +311,13 @@ def _native_entry() -> dict:
 class TestLastNativeInspection(unittest.TestCase):
 
     def test_more_renders_native_block(self):
-        out = _render(_native_entry(), detail="more")
+        out = _render(_native_entry(), detail="full")
         self.assertIn("[native]", out)
         self.assertIn("repo:", out)
         self.assertIn("python", out)
 
     def test_more_renders_native_summary(self):
-        out = _render(_native_entry(), detail="more")
+        out = _render(_native_entry(), detail="full")
         self.assertIn("[native summary]", out)
         self.assertIn("context: yes", out)
         self.assertIn("repo mapping", out)
@@ -378,7 +378,7 @@ class TestLastNativeInspection(unittest.TestCase):
                 "truncated": False,
             },
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("[native]", out)
         self.assertIn("repo:", out)
         self.assertNotIn("[native summary]", out)
@@ -394,7 +394,7 @@ class TestLastNativeInspection(unittest.TestCase):
     def test_loop_steps_rendered_in_native_block(self):
         entry = _native_entry()
         entry["native_loop_steps"] = ["repo_context", "observation", "plan", "generation"]
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("loop:", out)
         self.assertIn("repo_context -> observation -> plan -> generation", out)
 
@@ -493,7 +493,7 @@ class TestLastNativeInspection(unittest.TestCase):
         entry["native_backend"] = "deepagents"
         entry["native_backend_available"] = False
         entry["native_backend_notes"] = ["Install deepagents to enable this experimental backend."]
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("backend: deepagents unavailable", out)
 
     def test_render_readonly_proof_line(self):
@@ -660,12 +660,12 @@ class TestReadSearchFindingsRendering(unittest.TestCase):
 
     def test_render_block_via_full_render_shows_read_search(self):
         entry = self._entry_with_findings(["file:src/main.py"])
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("read/search: 1 findings", out)
 
     def test_raw_finding_labels_not_shown_in_default_block(self):
         entry = self._entry_with_findings(["test-marker:tests/secret_config.py"])
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertNotIn("test-marker:tests/secret_config.py", out)
         self.assertIn("read/search:", out)
 
@@ -703,7 +703,7 @@ class TestPatchProposalRendering(unittest.TestCase):
 
     def test_saved_run_inspection_renders_proposal_count(self):
         entry = self._entry_with_proposal(1)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("proposal: 1 files", out)
 
     def test_old_entry_without_patch_proposal_does_not_crash(self):
@@ -771,7 +771,7 @@ class TestVerificationCommandSummaryRendering(unittest.TestCase):
 
     def test_saved_run_inspection_renders_command_counts(self):
         entry = self._entry_with_summary(3, 2, 1, 0)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("verification commands:", out)
         self.assertIn("2 safe", out)
 
@@ -825,7 +825,7 @@ class TestCommandPolicyPreviewRendering(unittest.TestCase):
 
     def test_saved_run_shows_counts(self):
         entry = self._entry_with_preview(3, 1, 0)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("command policy:", out)
         self.assertIn("3 safe", out)
 
@@ -930,7 +930,7 @@ class TestNativeFileContextRendering(unittest.TestCase):
             "truncated": False,
             "warnings": [],
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("file context: 3 files, 4210 chars", out)
 
     def test_file_context_not_rendered_when_zero_files(self):
@@ -973,7 +973,7 @@ class TestContextQualityScoreRendering(unittest.TestCase):
             "reasons": ["repo_context", "read_search"],
             "warnings": [],
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("context quality: good 70/100", out)
 
     def test_context_quality_absent_does_not_crash(self):
@@ -1029,7 +1029,7 @@ class TestContextQualityAdvisoryRendering(unittest.TestCase):
             "should_block": False,
             "warnings": [],
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("context advisory: context is good enough for normal generation", out)
 
     def test_advisory_line_absent_when_missing(self):
@@ -1067,7 +1067,7 @@ class TestContextQualityAdvisoryRendering(unittest.TestCase):
             "should_block": False,
             "warnings": ["consider smaller changes if the task is risky"],
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertNotIn("consider smaller changes", out)
         self.assertIn("context advisory:", out)
 
@@ -1091,7 +1091,7 @@ class TestNativeChangeBudgetRendering(unittest.TestCase):
             "guidance": "normal generation is acceptable; avoid unnecessary broad refactors",
             "warnings": [],
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("change budget: 3 files, normal", out)
 
     def test_change_budget_absent_when_missing(self):
@@ -1131,7 +1131,7 @@ class TestNativeChangeBudgetRendering(unittest.TestCase):
             "guidance": "UNIQUE_GUIDANCE_STRING_NOT_IN_OUTPUT",
             "warnings": [],
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertNotIn("UNIQUE_GUIDANCE_STRING_NOT_IN_OUTPUT", out)
         self.assertIn("change budget:", out)
 
@@ -1165,7 +1165,7 @@ class TestNativeChangeBudgetPreviewRendering(unittest.TestCase):
 
     def test_budget_preview_line_rendered(self):
         entry = self._entry_with_preview(proposed_files=4, budget_max_files=2, action="warn")
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("budget preview:", out)
         self.assertIn("4/2 files", out)
         self.assertIn("warn", out)
@@ -1221,7 +1221,7 @@ class TestNativeChangeBudgetSoftGateRendering(unittest.TestCase):
 
     def test_soft_gate_line_rendered(self):
         entry = self._entry_with_gate(action="require_approval", requires_approval=True)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("budget gate:", out)
         self.assertIn("require_approval", out)
         self.assertIn("approval=true", out)
@@ -1287,7 +1287,7 @@ class TestNativeApprovalRequestRendering(unittest.TestCase):
 
     def test_approval_request_line_rendered(self):
         entry = self._entry_with_approval(requires_approval=True)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("approval request:", out)
         self.assertIn("change_budget_soft_gate", out)
         self.assertIn("required=true", out)
@@ -1358,7 +1358,7 @@ class TestNativeApprovalReceiptRendering(unittest.TestCase):
 
     def test_receipt_line_rendered(self):
         entry = self._entry_with_receipt(granted=True)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("approval receipt:", out)
         self.assertIn("change_budget_soft_gate", out)
         self.assertIn("granted=true", out)
@@ -1542,37 +1542,37 @@ class TestContextUsageRendering(unittest.TestCase):
 
     def test_context_usage_line_rendered_when_used(self):
         entry = self._entry_with_usage(used=True)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("context usage: used=yes", out)
 
     def test_context_usage_line_rendered_when_not_used(self):
         entry = self._entry_with_usage(used=False)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("context usage: used=no", out)
 
     def test_context_usage_includes_evidence_count(self):
         entry = self._entry_with_usage(used=True, evidence_items=5)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("evidence=5 items", out)
 
     def test_context_usage_omits_zero_evidence(self):
         entry = self._entry_with_usage(used=True, evidence_items=0)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertNotIn("evidence=0", out)
 
     def test_context_usage_includes_snippet_count(self):
         entry = self._entry_with_usage(used=True, snippet_files=2)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("2 snippets", out)
 
     def test_context_usage_omits_zero_snippets(self):
         entry = self._entry_with_usage(used=True, snippet_files=0)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertNotIn("0 snippets", out)
 
     def test_context_usage_absent_when_no_final_report(self):
         entry = self._base_entry()
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertNotIn("context usage:", out)
 
     def test_context_usage_not_in_default_output(self):
@@ -1592,12 +1592,12 @@ class TestContextUsageRendering(unittest.TestCase):
 
     def test_file_context_shows_truncated_flag(self):
         entry = self._entry_with_usage(fc_files=2, fc_truncated=True)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("file context: 2 files, 2000 chars, truncated", out)
 
     def test_file_context_no_truncated_flag_when_false(self):
         entry = self._entry_with_usage(fc_files=2, fc_truncated=False)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("file context: 2 files, 2000 chars", out)
         self.assertNotIn("truncated", out)
 
@@ -1605,7 +1605,7 @@ class TestContextUsageRendering(unittest.TestCase):
 
     def test_context_warnings_count_shown_for_one(self):
         entry = self._entry_with_usage(cqs_warnings=["context packet may be insufficient"])
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("context warnings: 1 warning", out)
 
     def test_context_warnings_count_shown_for_multiple(self):
@@ -1613,23 +1613,23 @@ class TestContextUsageRendering(unittest.TestCase):
             cqs_warnings=["weak quality"],
             cp_warnings=["no repo context", "no skills"],
         )
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("context warnings: 3 warnings", out)
 
     def test_context_warnings_raw_text_not_rendered(self):
         warning_text = "context packet may be insufficient for generation"
         entry = self._entry_with_usage(cqs_warnings=[warning_text])
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertNotIn(warning_text, out)
 
     def test_context_warnings_from_packet(self):
         entry = self._entry_with_usage(cp_warnings=["no repo context found"])
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("context warnings: 1 warning", out)
 
     def test_context_warnings_from_file_context(self):
         entry = self._entry_with_usage(fc_files=1, fc_warnings=["read failed for one file"])
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("context warnings: 1 warning", out)
 
     def test_context_warnings_absent_when_none(self):
@@ -1638,7 +1638,7 @@ class TestContextUsageRendering(unittest.TestCase):
             cp_warnings=[],
             fc_warnings=[],
         )
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertNotIn("context warnings:", out)
 
 
@@ -1672,7 +1672,7 @@ class TestNativeFailureMemoryRendering(unittest.TestCase):
             {"lesson_type": "weak_context", "reason": "score 20/100"},
             {"lesson_type": "missing_verification", "reason": "no commands"},
         ])
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("failure memory:", out)
         self.assertIn("weak_context", out)
         self.assertIn("missing_verification", out)
@@ -1681,19 +1681,23 @@ class TestNativeFailureMemoryRendering(unittest.TestCase):
         entry = self._entry_with_failure_memory([
             {"lesson_type": "failed_verification", "reason": "exit code 1"},
         ])
-        out = _render(entry, detail="more")
-        self.assertIn("failure memory: failed_verification", out)
+        out = _render(entry, detail="full")
+        self.assertIn("failure memory:", out)
+        self.assertIn("failed_verification", out)
 
     def test_compact_rendering_shows_labels_not_reasons(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
         entry = self._entry_with_failure_memory([
             {"lesson_type": "weak_context", "reason": "score 20/100"},
             {"lesson_type": "missing_verification", "reason": "no commands available"},
         ])
-        out = _render(entry, detail="more")
-        self.assertIn("weak_context", out)
-        self.assertIn("missing_verification", out)
-        self.assertNotIn("score 20/100", out)
-        self.assertNotIn("no commands available", out)
+        meta = _native_meta_from_entry(entry)
+        lines = _render_native_demo_block(meta, detail="more")
+        joined = "\n".join(lines)
+        self.assertIn("weak_context", joined)
+        self.assertIn("missing_verification", joined)
+        self.assertNotIn("score 20/100", joined)
+        self.assertNotIn("no commands available", joined)
 
     def test_full_rendering_shows_reasons(self):
         entry = self._entry_with_failure_memory([
@@ -1718,7 +1722,7 @@ class TestNativeFailureMemoryRendering(unittest.TestCase):
         ]
         lessons = [{"lesson_type": t, "reason": f"reason for {t}"} for t in all_types]
         entry = self._entry_with_failure_memory(lessons)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("failure memory:", out)
         for t in all_types:
             self.assertIn(t, out)
@@ -1764,7 +1768,7 @@ class TestNativeValidationContractRendering(unittest.TestCase):
 
     def test_compact_line_appears_at_more_detail(self):
         entry = self._entry_with_contract(strength="strong", checks=3, cmds=1)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("validation contract:", out)
         self.assertIn("strong", out)
         self.assertIn("3 checks", out)
@@ -1772,24 +1776,24 @@ class TestNativeValidationContractRendering(unittest.TestCase):
 
     def test_compact_line_singular_check(self):
         entry = self._entry_with_contract(strength="fair", checks=1, cmds=0)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("1 check", out)
         self.assertNotIn("1 checks", out)
 
     def test_compact_line_singular_command(self):
         entry = self._entry_with_contract(strength="strong", checks=2, cmds=1)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("1 verification command", out)
         self.assertNotIn("1 verification commands", out)
 
     def test_compact_line_plural_checks(self):
         entry = self._entry_with_contract(strength="strong", checks=3, cmds=1)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("3 checks", out)
 
     def test_compact_line_plural_commands(self):
         entry = self._entry_with_contract(strength="strong", checks=2, cmds=3)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("3 verification commands", out)
 
     def test_full_detail_includes_multiline_render(self):
@@ -1882,7 +1886,7 @@ class TestNativeContextProvenanceRendering(unittest.TestCase):
             observation=obs,
             injected_source_names={"observation"},
         )
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("context provenance:", out)
         self.assertIn("sources", out)
         self.assertIn("injected", out)
@@ -1891,7 +1895,7 @@ class TestNativeContextProvenanceRendering(unittest.TestCase):
     def test_gaps_line_renders_when_has_gaps(self):
         cqs = NativeContextQualityScore(level="weak")
         entry = self._entry_with_provenance(context_quality_score=cqs)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("context provenance gaps:", out)
 
     def test_gaps_line_absent_when_no_gaps(self):
@@ -1927,7 +1931,7 @@ class TestNativeContextProvenanceRendering(unittest.TestCase):
             context_quality_score=cqs,
             validation_contract=vc,
         )
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertNotIn("context quality weak", out)
         self.assertNotIn("validation contract weak", out)
         self.assertIn("context provenance gaps:", out)
@@ -1939,7 +1943,7 @@ class TestNativeContextProvenanceRendering(unittest.TestCase):
             context_quality_score=cqs,
             validation_contract=vc,
         )
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("2 warnings", out)
 
     def test_native_meta_from_entry_roundtrips_provenance(self):
@@ -2000,17 +2004,17 @@ class TestNativeRunTrustScoreRendering(unittest.TestCase):
 
     def test_compact_line_renders_when_present_in_more(self):
         entry = self._entry_with_trust(score=72, level="good")
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("run trust: 72/100 good", out)
 
     def test_warning_count_line_renders_when_warnings_exist(self):
         entry = self._entry_with_trust(warnings=["verification failed", "context truncated"])
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("run trust warnings: 2 warnings", out)
 
     def test_blocker_count_line_renders_when_blockers_exist(self):
         entry = self._entry_with_trust(blockers=["verification failed"])
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("run trust blockers: 1 blocker", out)
 
     def test_trust_absent_from_default_output(self):
@@ -2073,7 +2077,7 @@ class TestNativeRunTrustScoreRendering(unittest.TestCase):
             warnings=["verification failed", "blocked commands detected"],
             blockers=["verification failed"],
         )
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertNotIn("verification failed", out)
         self.assertNotIn("blocked commands detected", out)
         self.assertIn("2 warnings", out)
@@ -2120,7 +2124,7 @@ class TestNativeModelSelectionDecisionRendering(unittest.TestCase):
     def test_compact_line_renders_at_more(self):
         entry = self._base_entry()
         entry["model_selection_decision"] = self._msd_dict(strategy="cost-balanced")
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("model selection:", out)
         self.assertIn("cost-balanced", out)
 
@@ -2182,7 +2186,7 @@ class TestNativeModelSelectionDecisionRendering(unittest.TestCase):
         entry["model_selection_decision"] = self._msd_dict(
             warnings=["model selection adjusted by policy enforcement"],
         )
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("warnings=1", out)
 
     def test_old_entries_without_warnings_render_safely(self):
@@ -2190,7 +2194,7 @@ class TestNativeModelSelectionDecisionRendering(unittest.TestCase):
         msd = self._msd_dict()
         msd.pop("warnings", None)
         entry["model_selection_decision"] = msd
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("model selection:", out)
         self.assertNotIn("warnings=", out)
 
@@ -2261,7 +2265,7 @@ class TestNativeModelCandidateScoringRendering(unittest.TestCase):
     def test_present_more_renders_compact_line(self):
         entry = self._base_entry()
         entry["model_candidate_scoring"] = self._mcs_dict(strategy="cost-balanced", confidence="high")
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("model candidates:", out)
         self.assertIn("cost-balanced", out)
 
@@ -2348,7 +2352,7 @@ class TestNativeModelCandidateScoringRendering(unittest.TestCase):
         mcs.pop("blocked_candidates", None)
         entry["model_candidate_scoring"] = mcs
         try:
-            out = _render(entry, detail="more")
+            out = _render(entry, detail="full")
         except Exception as exc:
             self.fail(f"render raised {exc}")
         self.assertIn("model candidates:", out)
@@ -2371,7 +2375,7 @@ class TestNativeModelCandidateScoringRendering(unittest.TestCase):
         mcs = self._mcs_dict(strategy="cost-balanced", confidence="high")
         mcs["blocked_candidates"] = ["planner/frontier-reasoning-model", "executor/frontier-reasoning-model"]
         entry["model_candidate_scoring"] = mcs
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("blocked=2", out)
 
     def test_zero_blocked_not_shown_in_compact(self):
@@ -2416,30 +2420,30 @@ class TestNativeModelPolicyRendering(unittest.TestCase):
 
     def test_model_policy_compact_line_at_more(self):
         entry = self._entry_with_policy("auto")
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("model policy:", out)
         self.assertIn("auto", out)
 
     def test_model_policy_frontier_allowed_flag_at_more(self):
         entry = self._entry_with_policy("auto")
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("frontier allowed", out)
 
     def test_model_policy_frontier_blocked_flag_at_more(self):
         entry = self._entry_with_policy("open-source-only")
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("frontier blocked", out)
 
     def test_model_policy_cheapest_safe_at_more(self):
         entry = self._entry_with_policy("cheapest-safe")
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("model policy:", out)
         self.assertIn("cheapest-safe", out)
         self.assertIn("prefer low cost", out)
 
     def test_model_policy_local_only_at_more(self):
         entry = self._entry_with_policy("local-only")
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("local only", out)
         self.assertIn("frontier blocked", out)
 
@@ -2473,7 +2477,7 @@ class TestNativeModelPolicyRendering(unittest.TestCase):
         entry = self._base_entry()
         p = build_native_model_policy("custom")
         entry["model_policy"] = asdict(p)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("warning(s)", out)
 
     def test_model_policy_none_no_crash_at_more(self):
@@ -2532,12 +2536,12 @@ class TestNativeModelPolicyReceiptRendering(unittest.TestCase):
 
     def test_compact_line_shown_at_more(self):
         entry = self._entry_with_receipt(active=True, blocked_count=2)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("model policy receipt:", out)
 
     def test_compact_line_shows_active_and_blocked(self):
         entry = self._entry_with_receipt(active=True, blocked_count=3)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("active=true", out)
         self.assertIn("blocked=3", out)
 
@@ -2815,7 +2819,7 @@ class TestRoutingPreviewRendering(unittest.TestCase):
     # --- integration: dict entry round-trip ---
 
     def test_compact_via_entry_contains_all_key_fields(self):
-        out = _render(self._entry_with_preview(), detail="more")
+        out = _render(self._entry_with_preview(), detail="full")
         self.assertIn("routing preview:", out)
         self.assertIn("changed=yes", out)
         self.assertIn("blocked=3", out)
@@ -2923,27 +2927,27 @@ class TestLastReadonlyLabels(unittest.TestCase):
         }
 
     def test_readonly_stage_label_says_analysis(self):
-        out = _render(self._ro_entry(), detail="more")
+        out = _render(self._ro_entry(), detail="full")
         self.assertIn("Analysis", out)
 
     def test_readonly_stage_label_not_implementation(self):
-        out = _render(self._ro_entry(), detail="more")
+        out = _render(self._ro_entry(), detail="full")
         self.assertNotIn("Implementation", out)
 
     def test_readonly_stage_section_says_analysis(self):
-        out = _render(self._ro_entry(), detail="more")
+        out = _render(self._ro_entry(), detail="full")
         self.assertIn("Analysis", out)
 
     def test_readonly_stage_section_not_implementation(self):
-        out = _render(self._ro_entry(), detail="more")
+        out = _render(self._ro_entry(), detail="full")
         self.assertNotIn("Implementation", out)
 
     def test_write_stage_label_says_implementation(self):
-        out = _render(self._write_entry(), detail="more")
+        out = _render(self._write_entry(), detail="full")
         self.assertIn("Implementation", out)
 
     def test_write_stage_section_says_implementation(self):
-        out = _render(self._write_entry(), detail="more")
+        out = _render(self._write_entry(), detail="full")
         self.assertIn("Implementation", out)
 
     def test_readonly_default_detail_no_stage_section(self):
@@ -3023,7 +3027,7 @@ class TestFeedbackRendering(unittest.TestCase):
             "notes": ["a pipeline note"],
             "feedback": {"schema_version": 1, "rating": "good", "note": ""},
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertGreater(out.index("Developer feedback"), out.index("Notes"))
 
 
@@ -3098,7 +3102,7 @@ class TestLastStagesDispatchModels(unittest.TestCase):
                 "warnings": [],
             },
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         sonnet_label = _model_label(MODEL_STRONG)
         glm_label = _model_label(MODEL_MAIN)
         self.assertIn(sonnet_label, out)
@@ -3139,11 +3143,11 @@ class TestLastCostComparisonBlock(unittest.TestCase):
     }
 
     def test_more_shows_cost_comparison(self):
-        out = _render(self._ENTRY_WITH_COST, detail="more")
+        out = _render(self._ENTRY_WITH_COST, detail="full")
         self.assertIn("Cost comparison", out)
         self.assertIn("OpenShard:", out)
-        self.assertIn("Sonnet 4.6-only estimate:", out)
-        self.assertIn("Difference:", out)
+        self.assertIn("Sonnet 4.6-only", out)
+        self.assertIn("Compared with", out)
 
     def test_full_shows_cost_comparison(self):
         out = _render(self._ENTRY_WITH_COST, detail="full")
@@ -3153,24 +3157,17 @@ class TestLastCostComparisonBlock(unittest.TestCase):
         self.assertNotIn("Frontier-only baseline:", out)
 
     def test_cheaper_case(self):
-        out = _render(self._ENTRY_WITH_COST, detail="more")
-        diff_line = [ln for ln in out.splitlines() if "Difference:" in ln][0]
-        self.assertIn("cheaper", diff_line)
-        self.assertNotIn("more expensive", diff_line)
-        self.assertNotIn("equal", diff_line)
+        out = _render(self._ENTRY_WITH_COST, detail="full")
+        self.assertIn("cheaper", out)
+        self.assertNotIn("more expensive", out)
 
     def test_more_expensive_case(self):
-        out = _render(self._ENTRY_MORE_EXPENSIVE, detail="more")
-        diff_line = [ln for ln in out.splitlines() if "Difference:" in ln][0]
-        self.assertIn("more expensive", diff_line)
-        self.assertNotIn("cheaper", diff_line)
-        self.assertNotIn("-", diff_line)
+        out = _render(self._ENTRY_MORE_EXPENSIVE, detail="full")
+        self.assertIn("more expensive", out)
 
     def test_equal_case(self):
-        out = _render(self._ENTRY_EQUAL, detail="more")
-        diff_line = [ln for ln in out.splitlines() if "Difference:" in ln][0]
-        self.assertIn("equal", diff_line)
-        self.assertNotIn("(", diff_line)
+        out = _render(self._ENTRY_EQUAL, detail="full")
+        self.assertIn("equal", out)
 
     def test_default_does_not_show_cost_comparison(self):
         out = _render(self._ENTRY_WITH_COST, detail="default")
@@ -3193,13 +3190,12 @@ class TestLastCostComparisonBlock(unittest.TestCase):
             "prompt_tokens": 500_000,
             "completion_tokens": 500_000,
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("Cost comparison", out)
-        diff_line = [ln for ln in out.splitlines() if "Difference:" in ln][0]
         # actual=0, baseline>0 → cheaper (100%), no x-multiple
-        self.assertIn("cheaper", diff_line)
-        self.assertIn("100%", diff_line)
-        self.assertNotIn("x lower", diff_line)
+        self.assertIn("cheaper", out)
+        self.assertIn("100%", out)
+        self.assertNotIn("x lower", out)
 
 
 _TDR_ENABLED = {
@@ -3239,7 +3235,7 @@ class TestTierDispatchModelPlanAskMode(unittest.TestCase):
         self.assertNotIn("Planning:", out)
 
     def test_ask_more_shows_ask_label(self):
-        out = _render(self._ask_entry(), detail="more")
+        out = _render(self._ask_entry(), detail="full")
         self.assertIn("Ask:", out)
 
     def test_ask_full_shows_ask_label(self):
@@ -3247,7 +3243,7 @@ class TestTierDispatchModelPlanAskMode(unittest.TestCase):
         self.assertIn("Ask:", out)
 
     def test_ask_validator_skipped_shown(self):
-        out = _render(self._ask_entry(), detail="more")
+        out = _render(self._ask_entry(), detail="full")
         self.assertIn("skipped", out.lower())
         self.assertIn("read-only", out.lower())
 
@@ -3257,7 +3253,7 @@ class TestTierDispatchModelPlanAskMode(unittest.TestCase):
             "stage_runs": [],
             "tier_dispatch_receipt": _TDR_ENABLED,
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("Planning:", out)
         self.assertIn("Work:", out)
 
@@ -3271,7 +3267,7 @@ class TestTierDispatchModelPlanAskMode(unittest.TestCase):
                 "summary": "planned",
             }],
         )
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         # planning actually ran, so is_direct_ask=False → staged rendering
         self.assertIn("Planning:", out)
 
@@ -3294,19 +3290,19 @@ class TestCostComparisonNewFormat(unittest.TestCase):
     }
 
     def test_more_shows_openshard_label(self):
-        out = _render(self._ENTRY, detail="more")
+        out = _render(self._ENTRY, detail="full")
         self.assertIn("OpenShard:", out)
 
     def test_more_shows_sonnet46_only_estimate(self):
-        out = _render(self._ENTRY, detail="more")
-        self.assertIn("Sonnet 4.6-only estimate:", out)
+        out = _render(self._ENTRY, detail="full")
+        self.assertIn("Sonnet 4.6-only", out)
 
     def test_more_no_frontier_only_baseline(self):
         out = _render(self._ENTRY, detail="more")
         self.assertNotIn("Frontier-only baseline", out)
 
     def test_more_difference_has_x_multiple(self):
-        out = _render(self._ENTRY, detail="more")
+        out = _render(self._ENTRY, detail="full")
         self.assertIn("x lower cost", out)
 
     def test_full_shows_compared_with(self):
@@ -3322,10 +3318,11 @@ class TestCostComparisonNewFormat(unittest.TestCase):
         self.assertIn("Method:", out)
 
     def test_more_equal_case_no_pct(self):
-        out = _render(self._ENTRY_EQUAL, detail="more")
-        diff_line = [ln for ln in out.splitlines() if "Difference:" in ln][0]
-        self.assertIn("equal", diff_line)
-        self.assertNotIn("%", diff_line)
+        out = _render(self._ENTRY_EQUAL, detail="full")
+        self.assertIn("equal", out)
+        equal_lines = [ln for ln in out.splitlines() if "equal" in ln]
+        for ln in equal_lines:
+            self.assertNotIn("%", ln)
 
 
 class TestLastCorrectionFieldsRendering(unittest.TestCase):
@@ -3430,6 +3427,7 @@ class TestToolSearchEventsRendering(unittest.TestCase):
         self.assertIn("injected", out)
 
     def test_more_shows_count_only(self):
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
         events = [
             {"tool_name": "list_files", "result_quality": "useful", "result_count": 10,
              "selected_reason": "preflight scan", "query": ".", "context_injected": True,
@@ -3438,10 +3436,12 @@ class TestToolSearchEventsRendering(unittest.TestCase):
              "selected_reason": "observe dirty diff", "query": "", "context_injected": False,
              "retry_count": 0, "fallback_tool": None, "changed_plan": False, "warnings": []},
         ]
-        out = _render(self._native_entry(events), detail="more")
-        self.assertIn("tool/search events: 2", out)
-        self.assertNotIn("preflight scan", out)
-        self.assertNotIn("observe dirty diff", out)
+        entry = self._native_entry(events)
+        meta = _native_meta_from_entry(entry)
+        joined = "\n".join(_render_native_demo_block(meta, detail="more"))
+        self.assertIn("tool/search events: 2", joined)
+        self.assertNotIn("preflight scan", joined)
+        self.assertNotIn("observe dirty diff", joined)
 
     def test_empty_events_list_shows_nothing(self):
         out = _render(self._native_entry([]), detail="full")
@@ -3482,7 +3482,7 @@ class TestToolSearchEventsRendering(unittest.TestCase):
              "context_injected": True, "retry_count": 0, "fallback_tool": None,
              "changed_plan": False, "warnings": []},
         ]
-        out = _render(self._native_entry(events), detail="more")
+        out = _render(self._native_entry(events), detail="full")
         self.assertIn("search_repo", out)
 
     def test_more_shows_result_count(self):
@@ -3492,7 +3492,7 @@ class TestToolSearchEventsRendering(unittest.TestCase):
              "context_injected": True, "retry_count": 0, "fallback_tool": None,
              "changed_plan": False, "warnings": []},
         ]
-        out = _render(self._native_entry(events), detail="more")
+        out = _render(self._native_entry(events), detail="full")
         self.assertIn("7 results", out)
 
     def test_more_shows_zero_results_label(self):
@@ -3502,7 +3502,7 @@ class TestToolSearchEventsRendering(unittest.TestCase):
              "context_injected": False, "retry_count": 0, "fallback_tool": None,
              "changed_plan": False, "warnings": []},
         ]
-        out = _render(self._native_entry(events), detail="more")
+        out = _render(self._native_entry(events), detail="full")
         self.assertIn("zero-results", out)
         self.assertNotIn("  empty  ", out)
 
@@ -3513,7 +3513,7 @@ class TestToolSearchEventsRendering(unittest.TestCase):
              "context_injected": True, "retry_count": 0, "fallback_tool": None,
              "changed_plan": True, "warnings": []},
         ]
-        out = _render(self._native_entry(events), detail="more")
+        out = _render(self._native_entry(events), detail="full")
         self.assertIn("plan-changed", out)
 
     def test_full_shows_changed_plan(self):
@@ -3572,16 +3572,16 @@ class TestFormFactorRendering(unittest.TestCase):
         self.assertNotIn("public_mode", out)
 
     def test_last_more_shows_run_type_line(self):
+        # Form factor block is --full only; at --more, no form factor output shown
         out = _render(self._ff_entry(), detail="more")
-        self.assertIn("Run type:", out)
-        self.assertIn("Run", out)
-        self.assertNotIn("Form factor:", out)
-        self.assertNotIn("native-loop-candidate", out)
+        self.assertNotIn("Run type:", out)
+        self.assertNotIn("Form factor", out)
 
     def test_last_more_shows_execution_label(self):
+        # Form factor block is --full only; at --more, execution label not shown
         out = _render(self._ff_entry(internal_form_factor="staged"), detail="more")
-        self.assertIn("Execution:", out)
-        self.assertIn("OpenShard", out)
+        self.assertNotIn("Execution:", out)
+        self.assertNotIn("Form factor", out)
 
     def test_last_more_no_internal_form_factor_name(self):
         out = _render(self._ff_entry(internal_form_factor="native-loop-candidate"), detail="more")
@@ -3697,7 +3697,7 @@ class TestLastOSNLoopSummaryRendering(unittest.TestCase):
         ]
 
     def test_more_shows_compact_summary(self):
-        out = _render(self._entry_with_osn_summary(), detail="more")
+        out = _render(self._entry_with_osn_summary(), detail="full")
         self.assertIn("OSN loop summary:", out)
         self.assertIn("experimental", out)
         self.assertIn("5 steps", out)
@@ -3705,7 +3705,7 @@ class TestLastOSNLoopSummaryRendering(unittest.TestCase):
 
     def test_more_uses_correct_label_not_tool_level_label(self):
         # Tool-level line is "  osn loop: ..." (lowercase), summary line is "  OSN loop summary: ..."
-        out = _render(self._entry_with_osn_summary(), detail="more")
+        out = _render(self._entry_with_osn_summary(), detail="full")
         self.assertIn("OSN loop summary:", out)
 
     def test_full_shows_pipeline_header(self):
@@ -3752,7 +3752,7 @@ class TestLastOSNLoopSummaryRendering(unittest.TestCase):
                 "consecutive_empty": 0, "truncated": False,
             },
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("osn loop:", out)
 
     def test_osn_summary_not_shown_when_enabled_false(self):
@@ -3821,7 +3821,7 @@ class TestLastContractVerificationDisplay(unittest.TestCase):
 
     def test_more_shows_compact_contract_verification(self):
         entry = self._entry_with_vcr("passed", self._passed_checks())
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("contract verification:", out)
         self.assertIn("passed", out)
         self.assertIn("2 checks", out)
@@ -3843,13 +3843,13 @@ class TestLastContractVerificationDisplay(unittest.TestCase):
     def test_old_record_without_vcr_renders_cleanly(self):
         entry = _native_entry()
         entry.pop("verification_contract_result", None)
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("[native]", out)
         self.assertNotIn("contract verification:", out)
 
     def test_skipped_status_displayed(self):
         entry = self._entry_with_vcr("skipped", self._skipped_checks())
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("contract verification:", out)
         self.assertIn("skipped", out)
 
@@ -3886,12 +3886,12 @@ class TestFeedbackScoringRendering(unittest.TestCase):
 
     def test_last_more_renders_feedback_scoring_header(self):
         entry = self._entry_with_feedback_scoring({"openrouter/fast-model": -0.20})
-        out = _render(entry, "more")
+        out = _render(entry, "full")
         self.assertIn("Feedback scoring:", out)
 
     def test_last_more_renders_model_and_adjustment(self):
         entry = self._entry_with_feedback_scoring({"openrouter/fast-model": -0.20})
-        out = _render(entry, "more")
+        out = _render(entry, "full")
         self.assertIn("-0.20", out)
 
     def test_last_more_renders_reason_string(self):
@@ -3899,17 +3899,17 @@ class TestFeedbackScoringRendering(unittest.TestCase):
             {"openrouter/fast-model": -0.20},
             {"openrouter/fast-model": "feedback: 3 rejected"},
         )
-        out = _render(entry, "more")
+        out = _render(entry, "full")
         self.assertIn("feedback: 3 rejected", out)
 
     def test_last_more_renders_positive_adjustment(self):
         entry = self._entry_with_feedback_scoring({"openrouter/fast-model": 0.15})
-        out = _render(entry, "more")
+        out = _render(entry, "full")
         self.assertIn("+0.15", out)
 
     def test_last_more_no_adjustment_shows_enabled_message(self):
         entry = self._entry_with_feedback_scoring({})
-        out = _render(entry, "more")
+        out = _render(entry, "full")
         self.assertIn("Feedback scoring: enabled (no adjustment)", out)
 
     def test_last_full_renders_feedback_scoring_too(self):
@@ -3926,7 +3926,7 @@ class TestFeedbackScoringRendering(unittest.TestCase):
             "routing_selected_provider": "openrouter",
             "routing_used_fallback": False,
         }
-        out = _render(entry, "more")
+        out = _render(entry, "full")
         self.assertNotIn("Feedback scoring:", out)
         self.assertIn("Category: standard", out)
 
@@ -3939,7 +3939,7 @@ class TestFeedbackScoringRendering(unittest.TestCase):
         entry = self._entry_with_feedback_scoring(
             {"openrouter/fast-model": -0.20, "openrouter/strong-model": 0.10},
         )
-        out = _render(entry, "more")
+        out = _render(entry, "full")
         self.assertIn("-0.20", out)
         self.assertIn("+0.10", out)
 
@@ -4064,7 +4064,7 @@ class TestLastVerificationPlanNativeFormat(unittest.TestCase):
                 "risk_level": "low",
             },
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("Verification", out)
         self.assertIn("python -m pytest", out)
         self.assertIn("safe", out)
@@ -4101,7 +4101,7 @@ class TestLastVerificationPlanNativeFormat(unittest.TestCase):
                 }
             ],
         }
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("Verification", out)
         self.assertIn("ruff check .", out)
 
@@ -4327,6 +4327,166 @@ class TestReviewChecksLastRendering(unittest.TestCase):
         entry = _iac_review_entry(review_checks=checks)
         out = _render(entry, "more")
         self.assertLess(len(out), 10000)
+
+
+class TestMoreTierExclusion(unittest.TestCase):
+    """Guard tier separation: --more shows product Shard sections only; --full exposes debug internals."""
+
+    def _native_entry_with_backend(self) -> dict:
+        entry = _native_entry()
+        entry["native_backend"] = "openrouter"
+        return entry
+
+    def _native_entry_with_loop(self) -> dict:
+        entry = _native_entry()
+        entry["native_loop_steps"] = ["plan", "execute", "verify"]
+        return entry
+
+    def _native_entry_with_context_packet(self) -> dict:
+        entry = _native_entry()
+        entry["context_packet"] = {
+            "task_preview": "fix bug",
+            "sources": ["backend", "repo_context"],
+            "repo_stack": [],
+            "test_marker_count": 0,
+            "package_file_count": 0,
+            "read_search_count": 1,
+            "selected_skills": [],
+            "backend": "builtin",
+            "backend_available": True,
+            "backend_proof_mode": "",
+            "compact_paths": ["file:src/x.py"],
+            "warnings": [],
+        }
+        return entry
+
+    def _native_entry_with_routing_preview(self) -> dict:
+        return {
+            "task": "add feature",
+            "workflow": "native",
+            "executor": "native",
+            "routing_preview": {
+                "strategy": "cost-balanced",
+                "policy_mode": "cheapest-safe",
+                "planner_tier": "frontier-reasoning-model",
+                "executor_tier": "balanced-coding-model",
+                "validator_tier": "independent-validator-model",
+                "risk_level": "medium",
+                "confidence": "high",
+                "trust_level": "good",
+                "blocked_count": 0,
+                "policy_affected": False,
+                "warnings": [],
+                "summary": "",
+            },
+        }
+
+    def _native_entry_with_model_candidates(self) -> dict:
+        entry = _native_entry()
+        entry["model_candidate_scoring"] = asdict(NativeModelCandidateScoring(
+            strategy="cost-balanced",
+            confidence="high",
+            selected_by_role={"planner": "frontier-reasoning-model"},
+            candidates=[],
+            blocked_candidates=[],
+            warnings=[],
+        ))
+        return entry
+
+    def _entry_with_cost(self) -> dict:
+        return {
+            "task": "test task",
+            "cost": 0.005,
+            "prompt_tokens": 1000,
+            "completion_tokens": 500,
+        }
+
+    def _entry_with_timeline(self) -> dict:
+        return {
+            "task": "review iac",
+            "timestamp": "2026-05-23T00:00:00Z",
+            "execution_model": "anthropic/claude-sonnet-4-6",
+            "summary": "Review complete.",
+            "run_timeline": [
+                {"event": "repo_scanned", "label": "Scanned repo", "kind": "scan", "status": "completed"},
+            ],
+        }
+
+    # --- --more must exclude debug internals ---
+
+    def test_more_excludes_native_block(self):
+        out = _render(_native_entry(), "more")
+        self.assertNotIn("[native]", out)
+
+    def test_more_excludes_native_summary(self):
+        out = _render(_native_entry(), "more")
+        self.assertNotIn("[native summary]", out)
+
+    def test_more_excludes_backend_line(self):
+        out = _render(self._native_entry_with_backend(), "more")
+        self.assertNotIn("backend:", out)
+
+    def test_more_excludes_loop_line(self):
+        out = _render(self._native_entry_with_loop(), "more")
+        self.assertNotIn("loop:", out)
+
+    def test_more_excludes_context_packet(self):
+        out = _render(self._native_entry_with_context_packet(), "more")
+        self.assertNotIn("context packet:", out)
+
+    def test_more_excludes_model_candidates(self):
+        out = _render(self._native_entry_with_model_candidates(), "more")
+        self.assertNotIn("model candidates:", out)
+
+    def test_more_excludes_routing_preview(self):
+        out = _render(self._native_entry_with_routing_preview(), "more")
+        self.assertNotIn("routing preview:", out)
+
+    def test_more_excludes_cost_comparison_block(self):
+        out = _render(self._entry_with_cost(), "more")
+        self.assertNotIn("Cost comparison", out)
+
+    def test_more_excludes_tokens_line(self):
+        entry = {
+            "task": "test task",
+            "prompt_tokens": 1000,
+            "completion_tokens": 500,
+            "execution_model": "anthropic/claude-sonnet-4-6",
+        }
+        out = _render(entry, "more")
+        self.assertNotIn("Tokens:", out)
+
+    # --- --more must include product Shard sections ---
+
+    def test_more_includes_task_section(self):
+        out = _render({"task": "review infra"}, "more")
+        self.assertIn("TASK", out)
+
+    def test_more_includes_timeline_section(self):
+        out = _render(self._entry_with_timeline(), "more")
+        self.assertIn("TIMELINE", out)
+
+    def test_more_includes_checks_section(self):
+        out = _render({"task": "check run"}, "more")
+        self.assertIn("CHECKS", out)
+
+    # --- --full must still expose debug internals ---
+
+    def test_full_includes_native_block(self):
+        out = _render(_native_entry(), "full")
+        self.assertIn("[native]", out)
+
+    def test_full_includes_backend_line(self):
+        out = _render(self._native_entry_with_backend(), "full")
+        self.assertIn("backend:", out)
+
+    def test_full_includes_loop_line(self):
+        out = _render(self._native_entry_with_loop(), "full")
+        self.assertIn("loop:", out)
+
+    def test_full_includes_context_packet(self):
+        out = _render(self._native_entry_with_context_packet(), "full")
+        self.assertIn("context packet:", out)
 
 
 if __name__ == "__main__":

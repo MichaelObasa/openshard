@@ -9,6 +9,7 @@ class TuiCommand(Enum):
     RUN_TASK = "run_task"
     LAST = "last"
     LAST_MORE = "last_more"
+    LAST_FULL = "last_full"
     HELP = "help"
     CLEAR = "clear"
     QUIT = "quit"
@@ -44,6 +45,8 @@ def parse_tui_input(text: str) -> ParsedCommand:
         match lower:
             case "/help":
                 return ParsedCommand(TuiCommand.HELP)
+            case "/last full":
+                return ParsedCommand(TuiCommand.LAST_FULL)
             case "/last more":
                 return ParsedCommand(TuiCommand.LAST_MORE)
             case "/last":

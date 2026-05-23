@@ -612,7 +612,7 @@ def test_default_output_does_not_show_edit_loop() -> None:
 
 def test_more_shows_compact_edit_loop() -> None:
     entry = _edit_loop_entry(_make_edit_loop_summary_dict(final_status="passed"))
-    out = _render(entry, detail="more")
+    out = _render(entry, detail="full")
     assert "edit loop" in out
     assert "passed" in out
 

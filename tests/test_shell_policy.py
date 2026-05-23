@@ -371,9 +371,9 @@ def test_default_output_clean() -> None:
 
 
 def test_last_more_compact_policy() -> None:
-    """--more renders compact command policy summary line."""
+    """--full renders compact command policy summary line."""
     entry = _native_entry_with_policy(safe=2, approval=1, blocked=0)
-    out = _render(entry, detail="more")
+    out = _render(entry, detail="full")
     assert "command policy: 2 safe, 1 approval, 0 blocked" in out
 
 

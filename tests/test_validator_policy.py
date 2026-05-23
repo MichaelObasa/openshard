@@ -313,8 +313,8 @@ class TestValidatorPolicyRendering(unittest.TestCase):
         }
 
     def test_more_shows_skipped_reason_in_model_plan(self):
-        out = _render(self._entry_skipped("read-only task"), "more")
-        self.assertIn("skipped", out)
+        out = _render(self._entry_skipped("read-only task"), "full")
+        self.assertIn("Skipped", out)
         self.assertIn("read-only task", out)
 
     def test_full_shows_skipped_reason_in_model_plan(self):
@@ -327,7 +327,7 @@ class TestValidatorPolicyRendering(unittest.TestCase):
         self.assertNotIn("\nValidator: skipped", out)
 
     def test_standalone_skipped_line_when_no_tdr(self):
-        out = _render(self._entry_skipped_no_tdr("simple/safe task"), "more")
+        out = _render(self._entry_skipped_no_tdr("simple/safe task"), "full")
         self.assertIn("Validator: skipped", out)
         self.assertIn("simple/safe task", out)
 
@@ -342,7 +342,7 @@ class TestValidatorPolicyRendering(unittest.TestCase):
             "summary": "done",
             "tier_dispatch_receipt": _tdr_base(),
         }
-        out = _render(entry, "more")
+        out = _render(entry, "full")
         self.assertIn("reserved", out)
 
     def test_verdict_shown_when_validator_ran(self):
@@ -354,7 +354,7 @@ class TestValidatorPolicyRendering(unittest.TestCase):
             "validator_result": {"verdict": "pass", "summary": "looks good", "model": MODEL_STRONG},
             "validator_policy": {"run": True, "reason": "staged write task"},
         }
-        out = _render(entry, "more")
+        out = _render(entry, "full")
         self.assertIn("pass", out)
         self.assertNotIn("skipped", out)
 

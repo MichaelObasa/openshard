@@ -489,24 +489,24 @@ def test_default_output_does_not_show_retry_detail() -> None:
 
 
 def test_last_more_shows_compact_retry_result_passed() -> None:
-    """--more shows compact retry line when retry was attempted and passed."""
+    """--full shows compact retry line when retry was attempted and passed."""
     entry = _vloop_entry(
         attempted=True, passed=True, retried=True,
         retry_meta=_retry_meta_dict(status="passed", patch_files=["src/a.py", "src/b.py"]),
     )
-    out = _render(entry, detail="more")
+    out = _render(entry, detail="full")
     assert "retry: passed" in out
     assert "reason: verification_failed" in out
     assert "files patched: 2" in out
 
 
 def test_last_more_shows_compact_retry_result_failed() -> None:
-    """--more shows compact retry line when retry was attempted and failed."""
+    """--full shows compact retry line when retry was attempted and failed."""
     entry = _vloop_entry(
         attempted=True, passed=False, retried=True,
         retry_meta=_retry_meta_dict(status="failed", patch_files=["src/foo.py"]),
     )
-    out = _render(entry, detail="more")
+    out = _render(entry, detail="full")
     assert "retry: failed" in out
     assert "files patched: 1" in out
 

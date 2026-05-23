@@ -321,7 +321,7 @@ class TestRunOutputCompatibility(unittest.TestCase):
     def test_more_shows_compact_plan_ledger(self):
         ledger = _ledger_with_all_passed()
         meta = SimpleNamespace(plan_ledger=ledger)
-        out = _render_block(meta, detail="more")
+        out = _render_block(meta, detail="full")
         self.assertIn("plan ledger", out)
         self.assertIn("5/5 passed", out)
 
