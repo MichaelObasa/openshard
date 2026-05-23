@@ -4489,5 +4489,103 @@ class TestMoreTierExclusion(unittest.TestCase):
         self.assertIn("context packet:", out)
 
 
+class TestDeveloperFeedbackV1Rendering(unittest.TestCase):
+    """Verify developer_feedback renders correctly at each detail tier."""
+
+    def _entry(self, **overrides) -> dict:
+        df = {
+            "schema_version": 1,
+            "outcome": "accepted",
+            "reason": None,
+            "edited": False,
+            "manual_fix_required": False,
+            "ci_passed": False,
+            "ci_failed": False,
+            "pr_created": False,
+            "pr_merged": False,
+            "recorded_at": "2026-05-23T12:00:00",
+            "source": "cli",
+        }
+        df.update(overrides)
+        return {"timestamp": "2026-01-01T00:00:00", "task": "do X", "summary": "done", "developer_feedback": df}
+
+    def _entry_no_feedback(self) -> dict:
+        return {"timestamp": "2026-01-01T00:00:00", "task": "do X", "summary": "done"}
+
+    def test_more_shows_feedback_section_when_present(self):
+        out = _render(self._entry(), "more")
+        self.assertIn("FEEDBACK", out)
+
+    def test_more_shows_outcome_line(self):
+        out = _render(self._entry(outcome="accepted"), "more")
+        self.assertIn("accepted", out)
+
+    def test_more_shows_reason_when_set(self):
+        out = _render(self._entry(reason="missed IAM issue"), "more")
+        self.assertIn("missed IAM issue", out)
+
+    def test_more_hides_reason_when_none(self):
+        out = _render(self._entry(reason=None), "more")
+        self.assertNotIn("Reason", out)
+
+    def test_more_shows_edited_yes_when_true(self):
+        out = _render(self._entry(edited=True), "more")
+        self.assertIn("Edited", out)
+        self.assertIn("yes", out)
+
+    def test_more_hides_edited_when_false(self):
+        out = _render(self._entry(edited=False), "more")
+        self.assertNotIn("Edited", out)
+
+    def test_more_shows_ci_passed(self):
+        out = _render(self._entry(ci_passed=True), "more")
+        self.assertIn("CI", out)
+        self.assertIn("passed", out)
+
+    def test_more_shows_ci_failed(self):
+        out = _render(self._entry(ci_failed=True), "more")
+        self.assertIn("CI", out)
+        self.assertIn("failed", out)
+
+    def test_more_hides_ci_when_both_false(self):
+        out = _render(self._entry(ci_passed=False, ci_failed=False), "more")
+        self.assertNotIn("CI", out)
+
+    def test_full_shows_feedback_section(self):
+        out = _render(self._entry(), "full")
+        self.assertIn("FEEDBACK", out)
+
+    def test_default_shows_compact_feedback_line(self):
+        out = _render(self._entry(outcome="partial"), "default")
+        self.assertIn("Feedback", out)
+        self.assertIn("partial", out)
+
+    def test_default_no_feedback_section_header(self):
+        out = _render(self._entry(), "default")
+        self.assertNotIn("FEEDBACK", out)
+
+    def test_entry_without_developer_feedback_renders_safely(self):
+        out = _render(self._entry_no_feedback(), "more")
+        self.assertNotIn("FEEDBACK", out)
+
+    def test_feedback_section_not_shown_when_absent(self):
+        out = _render(self._entry_no_feedback(), "full")
+        self.assertNotIn("FEEDBACK", out)
+
+    def test_more_feedback_section_is_indented(self):
+        out = _render(self._entry(outcome="partial"), "more")
+        self.assertIn("  FEEDBACK", out)
+        self.assertIn("  Outcome", out)
+
+    def test_more_compact_receipt_shows_feedback_row(self):
+        out = _render(self._entry(outcome="partial"), "more")
+        self.assertIn("Feedback", out)
+        self.assertIn("partial", out)
+
+    def test_no_feedback_row_in_receipt_when_absent(self):
+        out = _render(self._entry_no_feedback(), "more")
+        self.assertNotIn("Feedback", out)
+
+
 if __name__ == "__main__":
     unittest.main()

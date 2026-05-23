@@ -332,6 +332,7 @@ class ShardReceipt:
     findings: list[ShardFinding] = field(default_factory=list)
     agent_notes: list[str] = field(default_factory=list)
     run_timeline: list = field(default_factory=list)
+    developer_feedback: Optional[dict] = None
 
 
 def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
@@ -655,6 +656,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         agent_notes=agent_notes,
         check_results=check_results,
         run_timeline=[e for e in (entry.get("run_timeline") or []) if isinstance(e, dict) and e.get("label")],
+        developer_feedback=entry.get("developer_feedback") or None,
     )
 
 
@@ -705,6 +707,8 @@ def render_compact_shard_receipt(receipt: ShardReceipt) -> str:
         _row("Cost", receipt.cost_display),
         _row("Result", receipt.result),
     ]
+    if receipt.developer_feedback:
+        lines.append(_row("Feedback", receipt.developer_feedback.get("outcome", "")))
 
     _TOP_SEVERITIES = {"Critical", "High", "Medium"}
     top_raw = [f for f in receipt.findings if f.severity in _TOP_SEVERITIES]

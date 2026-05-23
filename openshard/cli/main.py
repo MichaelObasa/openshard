@@ -711,6 +711,9 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
             reason = _RATIONALE_SHORT.get(routing_rationale, "")
             suffix = f" ({reason})" if reason else ""
             click.echo(f"\nModel: {lbl}{suffix}")
+        _df_compact = entry.get("developer_feedback")
+        if _df_compact:
+            click.echo(f"Feedback: {_df_compact.get('outcome', '')}")
 
     # Shard receipt (--more / --full) — shown near top before diagnostic blocks
     if detail != "default":
@@ -863,6 +866,26 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
             click.echo(f"{'Outcome':<12}{_fb.outcome}")
             if _fb.note:
                 click.echo(f"{'Note':<12}{_fb.note}")
+
+    # Developer feedback v1 (in-entry, --more / --full)
+    _dev_feedback = entry.get("developer_feedback")
+    if detail in ("more", "full") and _dev_feedback:
+        click.echo("\n  FEEDBACK")
+        click.echo(f"  {'Outcome':<12}{_dev_feedback.get('outcome', '')}")
+        if _dev_feedback.get("edited"):
+            click.echo(f"  {'Edited':<12}yes")
+        if _dev_feedback.get("manual_fix_required"):
+            click.echo(f"  {'Manual fix':<12}yes")
+        if _dev_feedback.get("ci_passed"):
+            click.echo(f"  {'CI':<12}passed")
+        elif _dev_feedback.get("ci_failed"):
+            click.echo(f"  {'CI':<12}failed")
+        if _dev_feedback.get("pr_created"):
+            click.echo(f"  {'PR':<12}created")
+        if _dev_feedback.get("pr_merged"):
+            click.echo(f"  {'PR':<12}merged")
+        if _dev_feedback.get("reason"):
+            click.echo(f"  {'Reason':<12}{_dev_feedback['reason']}")
 
     # Token / model detail (--full only)
     if detail == "full":
@@ -1264,128 +1287,81 @@ def _load_run_entries(log_path: Path) -> list[dict]:
     return entries
 
 
-_ALLOWED_FEEDBACK_ACTIONS = [
-    "accepted", "rejected", "edited", "retried", "partially-accepted", "unknown",
-]
-_ALLOWED_CORRECTION_REASONS = [
-    "wrong-file", "wrong-scope", "failed-tests", "bad-style", "missed-requirement",
-    "too-expensive", "too-slow", "unsafe-command", "unclear-output",
-    "hallucinated", "manual-edit", "other",
-]
-_ALLOWED_OUTCOMES_V0 = ["accepted", "rejected", "partial", "useful", "wrong", "needs-retry"]
+_ALLOWED_OUTCOMES_V1 = ["accepted", "rejected", "partial", "abandoned", "retried"]
 
 
 @cli.command()
-@click.option("--last", "target_last", is_flag=True, default=False, help="Target the most recent run (currently the only supported target).")
 @click.option(
     "--outcome",
-    type=click.Choice(_ALLOWED_OUTCOMES_V0, case_sensitive=False),
-    default=None,
-    help="Outcome signal for this run: accepted, rejected, partial, useful, wrong, or needs-retry.",
+    type=click.Choice(_ALLOWED_OUTCOMES_V1, case_sensitive=False),
+    required=True,
+    help="Outcome: accepted, rejected, partial, abandoned, or retried.",
 )
-@click.option(
-    "--rating",
-    type=click.Choice(["good", "bad", "mixed"], case_sensitive=False),
-    default=None,
-    help="Your rating for the most recent run.",
-)
-@click.option(
-    "--action",
-    type=click.Choice(_ALLOWED_FEEDBACK_ACTIONS, case_sensitive=False),
-    default=None,
-    help="What you did with the run output.",
-)
-@click.option(
-    "--reason",
-    type=click.Choice(_ALLOWED_CORRECTION_REASONS, case_sensitive=False),
-    default=None,
-    help="Why you corrected or rejected the run.",
-)
-@click.option("--note", default="", help="Optional free-text note about this run.")
-def feedback(target_last: bool, outcome: str | None, rating: str | None, action: str | None, reason: str | None, note: str) -> None:
-    """Attach developer feedback to the most recent run."""
-    # Outcome-based path (Feedback Signals v0) — append-only, separate feedback.jsonl
-    if outcome is not None:
-        from openshard.history.feedback import build_feedback_record, log_feedback_record
-        log_path = Path.cwd() / _LOG_PATH
-        entries = _load_run_entries(log_path)
-        if not entries:
-            raise click.ClickException("No run history found. Run an OpenShard task before saving feedback.")
-        run_index = len(entries) - 1
-        record = build_feedback_record(entries[-1], run_index, outcome.lower(), note)
-        log_feedback_record(record)
-        click.echo("Feedback saved.")
-        click.echo(f"Shard:    {record.shard_id}")
-        click.echo(f"Outcome:  {record.outcome}")
-        if note:
-            click.echo(f"Note:     {note}")
-        return
-
-    if not rating and not action and not reason and not note:
-        raise click.ClickException("Provide at least one of --rating, --action, --reason, or --note.")
+@click.option("--reason", default=None, help="Optional free-text reason.")
+@click.option("--edited", is_flag=True, default=False, help="You edited the output manually.")
+@click.option("--manual-fix-required", is_flag=True, default=False, help="A manual fix was required.")
+@click.option("--ci-passed", is_flag=True, default=False, help="CI passed after this run.")
+@click.option("--ci-failed", is_flag=True, default=False, help="CI failed after this run.")
+@click.option("--pr-created", is_flag=True, default=False, help="A PR was created from this run.")
+@click.option("--pr-merged", is_flag=True, default=False, help="The PR was merged.")
+def feedback(
+    outcome: str,
+    reason: str | None,
+    edited: bool,
+    manual_fix_required: bool,
+    ci_passed: bool,
+    ci_failed: bool,
+    pr_created: bool,
+    pr_merged: bool,
+) -> None:
+    """Record developer feedback for the most recent run."""
     log_path = Path.cwd() / _LOG_PATH
     if not log_path.exists():
-        click.echo("No run history found. Run a task first with 'openshard run'.")
-        return
-    entries: list[dict] = []
-    for line in log_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entries.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
+        raise click.ClickException("No run history found. Run a task first with 'openshard run'.")
+    entries = _load_run_entries(log_path)
     if not entries:
-        click.echo("No runs recorded yet.")
-        return
-    fb: dict = {
+        raise click.ClickException("No run history found. Run a task first with 'openshard run'.")
+    df: dict = {
         "schema_version": 1,
-        "rating": rating.lower() if rating else None,
-        "note": note,
-        "created_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "outcome": outcome.lower(),
+        "reason": reason or None,
+        "edited": edited,
+        "manual_fix_required": manual_fix_required,
+        "ci_passed": ci_passed,
+        "ci_failed": ci_failed,
+        "pr_created": pr_created,
+        "pr_merged": pr_merged,
+        "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "source": "cli",
     }
-    if action is not None:
-        fb["action"] = action.lower()
-    if reason is not None:
-        fb["correction_reason"] = reason.lower()
-    entries[-1]["feedback"] = fb
+    entries[-1]["developer_feedback"] = df
     with log_path.open("w", encoding="utf-8") as fh:
         for entry in entries:
             fh.write(json.dumps(entry) + "\n")
-    _labels = []
-    if action:
-        _labels.append(action.lower())
-    if rating:
-        _labels.append(rating.lower())
-    click.echo(f"Feedback recorded: {', '.join(_labels) if _labels else 'note'}")
+    click.echo(f"Feedback recorded: {outcome.lower()}")
     try:
         from openshard.history.interactions import DeveloperInteractionEvent, log_interaction_event
-        _action_lower = action.lower() if action else None
         _event_type_map = {
             "accepted": "feedback_accepted",
             "rejected": "feedback_rejected",
-            "edited": "feedback_edited",
+            "partial": "feedback_partial",
+            "abandoned": "feedback_abandoned",
             "retried": "feedback_retried",
-            "partially-accepted": "feedback_partially_accepted",
         }
         _accepted_map = {
             "accepted": True,
-            "partially-accepted": True,
+            "partial": True,
             "rejected": False,
             "retried": False,
         }
         _run_id = entries[-1].get("timestamp") or ""
         _evt = DeveloperInteractionEvent(
             run_id=_run_id,
-            event_type=_event_type_map.get(_action_lower, "feedback_noted") if _action_lower else "feedback_noted",
-            summary=f"feedback action={_action_lower or 'none'} rating={rating.lower() if rating else 'none'}",
-            correction_reason=reason.lower() if reason else None,
-            accepted=_accepted_map.get(_action_lower),
-            metadata={
-                "rating": rating.lower() if rating else None,
-                "note": note,
-            },
+            event_type=_event_type_map.get(outcome.lower(), "feedback_noted"),
+            summary=f"feedback outcome={outcome.lower()}",
+            correction_reason=reason,
+            accepted=_accepted_map.get(outcome.lower()),
+            metadata={"edited": edited, "ci_passed": ci_passed, "ci_failed": ci_failed},
         )
         log_interaction_event(_evt)
     except Exception:

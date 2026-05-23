@@ -10,6 +10,7 @@ class TuiCommand(Enum):
     LAST = "last"
     LAST_MORE = "last_more"
     LAST_FULL = "last_full"
+    FEEDBACK = "feedback"
     HELP = "help"
     CLEAR = "clear"
     QUIT = "quit"
@@ -18,11 +19,16 @@ class TuiCommand(Enum):
     UNKNOWN = "unknown"
 
 
+_VALID_FEEDBACK_OUTCOMES = {"accepted", "rejected", "partial", "abandoned", "retried"}
+
+
 @dataclass
 class ParsedCommand:
     cmd: TuiCommand
     task: str | None = None
     pack_id: str | None = None
+    feedback_outcome: str | None = None
+    feedback_reason: str | None = None
 
 
 def parse_tui_input(text: str) -> ParsedCommand:
@@ -42,6 +48,16 @@ def parse_tui_input(text: str) -> ParsedCommand:
         if lower.startswith("/pack "):
             pack_id = text[6:].strip().lower()
             return ParsedCommand(TuiCommand.PACK_SHOW, pack_id=pack_id or None)
+        if lower.startswith("/feedback"):
+            rest = text[9:].strip()
+            if not rest:
+                return ParsedCommand(TuiCommand.UNKNOWN)
+            parts = rest.split(None, 1)
+            outcome = parts[0].lower()
+            if outcome not in _VALID_FEEDBACK_OUTCOMES:
+                return ParsedCommand(TuiCommand.UNKNOWN)
+            reason = parts[1] if len(parts) > 1 else None
+            return ParsedCommand(TuiCommand.FEEDBACK, feedback_outcome=outcome, feedback_reason=reason)
         match lower:
             case "/help":
                 return ParsedCommand(TuiCommand.HELP)

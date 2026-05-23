@@ -47,47 +47,48 @@ def _read_entries(log_path: Path) -> list[dict]:
 
 class TestFeedbackCommand(unittest.TestCase):
 
-    def test_feedback_adds_rating_to_last_entry(self):
+    def test_feedback_adds_outcome_to_last_entry(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             log_path = _write_runs([_make_entry(task="first"), _make_entry(task="second")])
-            result = runner.invoke(cli, ["feedback", "--rating", "good"])
+            result = runner.invoke(cli, ["feedback", "--outcome", "accepted"])
             self.assertEqual(result.exit_code, 0)
             entries = _read_entries(log_path)
-            self.assertEqual(entries[-1]["feedback"]["rating"], "good")
+            self.assertEqual(entries[-1]["developer_feedback"]["outcome"], "accepted")
 
-    def test_feedback_adds_note_to_last_entry(self):
+    def test_feedback_adds_reason_to_last_entry(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             log_path = _write_runs([_make_entry()])
-            runner.invoke(cli, ["feedback", "--rating", "mixed", "--note", "GLM was good enough"])
+            runner.invoke(cli, ["feedback", "--outcome", "partial", "--reason", "GLM was good enough"])
             entries = _read_entries(log_path)
-            self.assertEqual(entries[-1]["feedback"]["note"], "GLM was good enough")
+            self.assertEqual(entries[-1]["developer_feedback"]["reason"], "GLM was good enough")
 
-    def test_feedback_stores_empty_string_note_when_omitted(self):
+    def test_feedback_reason_is_none_when_omitted(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             log_path = _write_runs([_make_entry()])
-            runner.invoke(cli, ["feedback", "--rating", "bad"])
+            runner.invoke(cli, ["feedback", "--outcome", "rejected"])
             entries = _read_entries(log_path)
-            self.assertEqual(entries[-1]["feedback"]["note"], "")
+            self.assertIsNone(entries[-1]["developer_feedback"]["reason"])
 
     def test_feedback_stores_schema_version(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             log_path = _write_runs([_make_entry()])
-            runner.invoke(cli, ["feedback", "--rating", "good"])
+            runner.invoke(cli, ["feedback", "--outcome", "accepted"])
             entries = _read_entries(log_path)
-            self.assertEqual(entries[-1]["feedback"]["schema_version"], 1)
+            self.assertEqual(entries[-1]["developer_feedback"]["schema_version"], 1)
 
-    def test_feedback_creates_created_at_timestamp(self):
+    def test_feedback_creates_recorded_at_timestamp(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             log_path = _write_runs([_make_entry()])
-            runner.invoke(cli, ["feedback", "--rating", "good"])
+            runner.invoke(cli, ["feedback", "--outcome", "accepted"])
             entries = _read_entries(log_path)
-            created_at = entries[-1]["feedback"]["created_at"]
-            self.assertTrue(created_at.endswith("Z"), created_at)
+            recorded_at = entries[-1]["developer_feedback"]["recorded_at"]
+            self.assertIsNotNone(recorded_at)
+            self.assertGreater(len(recorded_at), 10)
 
     def test_feedback_only_updates_last_entry(self):
         runner = CliRunner()
@@ -97,133 +98,130 @@ class TestFeedbackCommand(unittest.TestCase):
                 _make_entry(task="second"),
                 _make_entry(task="third"),
             ])
-            runner.invoke(cli, ["feedback", "--rating", "good"])
+            runner.invoke(cli, ["feedback", "--outcome", "accepted"])
             entries = _read_entries(log_path)
-            self.assertNotIn("feedback", entries[0])
-            self.assertNotIn("feedback", entries[1])
-            self.assertIn("feedback", entries[2])
+            self.assertNotIn("developer_feedback", entries[0])
+            self.assertNotIn("developer_feedback", entries[1])
+            self.assertIn("developer_feedback", entries[2])
 
     def test_feedback_preserves_entry_count(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             log_path = _write_runs([_make_entry(task="a"), _make_entry(task="b")])
-            runner.invoke(cli, ["feedback", "--rating", "good"])
+            runner.invoke(cli, ["feedback", "--outcome", "accepted"])
             entries = _read_entries(log_path)
             self.assertEqual(len(entries), 2)
 
-    def test_invalid_rating_rejected(self):
+    def test_invalid_outcome_rejected(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_runs([_make_entry()])
-            result = runner.invoke(cli, ["feedback", "--rating", "excellent"])
+            result = runner.invoke(cli, ["feedback", "--outcome", "excellent"])
             self.assertNotEqual(result.exit_code, 0)
 
     def test_no_file_shows_clear_message(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
-            result = runner.invoke(cli, ["feedback", "--rating", "good"])
-            self.assertEqual(result.exit_code, 0)
+            result = runner.invoke(cli, ["feedback", "--outcome", "accepted"])
+            self.assertNotEqual(result.exit_code, 0)
             self.assertIn("No run history found", result.output)
 
-    def test_empty_file_shows_no_runs_message(self):
+    def test_empty_file_shows_error(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             Path(".openshard").mkdir()
             Path(".openshard/runs.jsonl").write_text("", encoding="utf-8")
-            result = runner.invoke(cli, ["feedback", "--rating", "good"])
-            self.assertEqual(result.exit_code, 0)
-            self.assertIn("No runs recorded yet", result.output)
+            result = runner.invoke(cli, ["feedback", "--outcome", "accepted"])
+            self.assertNotEqual(result.exit_code, 0)
+            self.assertIn("No run history found", result.output)
 
     def test_success_exit_code(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_runs([_make_entry()])
-            result = runner.invoke(cli, ["feedback", "--rating", "good"])
+            result = runner.invoke(cli, ["feedback", "--outcome", "accepted"])
             self.assertEqual(result.exit_code, 0)
 
-    def test_success_echo_confirms_rating(self):
+    def test_success_echo_confirms_outcome(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_runs([_make_entry()])
-            result = runner.invoke(cli, ["feedback", "--rating", "good"])
-            self.assertIn("Feedback recorded: good", result.output)
+            result = runner.invoke(cli, ["feedback", "--outcome", "accepted"])
+            self.assertIn("Feedback recorded: accepted", result.output)
 
-    def test_rating_stored_lowercase(self):
+    def test_outcome_stored_lowercase(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             log_path = _write_runs([_make_entry()])
-            runner.invoke(cli, ["feedback", "--rating", "GOOD"])
+            runner.invoke(cli, ["feedback", "--outcome", "ACCEPTED"])
             entries = _read_entries(log_path)
-            self.assertEqual(entries[-1]["feedback"]["rating"], "good")
+            self.assertEqual(entries[-1]["developer_feedback"]["outcome"], "accepted")
 
 
 class TestFeedbackCorrectionFields(unittest.TestCase):
 
-    def test_accepted_action_stored(self):
+    def test_accepted_outcome_stored(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             log_path = _write_runs([_make_entry()])
-            result = runner.invoke(cli, ["feedback", "--action", "accepted"])
+            result = runner.invoke(cli, ["feedback", "--outcome", "accepted"])
             self.assertEqual(result.exit_code, 0)
             entries = _read_entries(log_path)
-            self.assertEqual(entries[-1]["feedback"]["action"], "accepted")
-            self.assertNotIn("correction_reason", entries[-1]["feedback"])
+            self.assertEqual(entries[-1]["developer_feedback"]["outcome"], "accepted")
 
-    def test_edited_with_wrong_file_reason_stored(self):
+    def test_edited_flag_and_reason_stored(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             log_path = _write_runs([_make_entry()])
-            result = runner.invoke(cli, ["feedback", "--action", "edited", "--reason", "wrong-file"])
+            result = runner.invoke(cli, ["feedback", "--outcome", "partial", "--edited", "--reason", "wrong file targeted"])
             self.assertEqual(result.exit_code, 0)
             entries = _read_entries(log_path)
-            fb = entries[-1]["feedback"]
-            self.assertEqual(fb["action"], "edited")
-            self.assertEqual(fb["correction_reason"], "wrong-file")
+            df = entries[-1]["developer_feedback"]
+            self.assertIs(df["edited"], True)
+            self.assertEqual(df["reason"], "wrong file targeted")
 
-    def test_retried_with_note_stored(self):
+    def test_retried_with_reason_stored(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             log_path = _write_runs([_make_entry()])
             result = runner.invoke(
                 cli,
-                ["feedback", "--action", "retried", "--reason", "failed-tests", "--note", "missed fixture"],
+                ["feedback", "--outcome", "retried", "--reason", "failed tests missed fixture"],
             )
             self.assertEqual(result.exit_code, 0)
             entries = _read_entries(log_path)
-            fb = entries[-1]["feedback"]
-            self.assertEqual(fb["action"], "retried")
-            self.assertEqual(fb["correction_reason"], "failed-tests")
-            self.assertEqual(fb["note"], "missed fixture")
+            df = entries[-1]["developer_feedback"]
+            self.assertEqual(df["outcome"], "retried")
+            self.assertEqual(df["reason"], "failed tests missed fixture")
 
-    def test_invalid_action_rejected(self):
+    def test_invalid_outcome_rejected(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_runs([_make_entry()])
-            result = runner.invoke(cli, ["feedback", "--action", "bogus"])
+            result = runner.invoke(cli, ["feedback", "--outcome", "bogus"])
             self.assertNotEqual(result.exit_code, 0)
 
-    def test_invalid_reason_rejected(self):
+    def test_free_text_reason_accepted(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_runs([_make_entry()])
-            result = runner.invoke(cli, ["feedback", "--reason", "bogus"])
-            self.assertNotEqual(result.exit_code, 0)
+            result = runner.invoke(cli, ["feedback", "--outcome", "accepted", "--reason", "any free text is valid"])
+            self.assertEqual(result.exit_code, 0)
 
-    def test_no_args_fails_with_clear_error(self):
+    def test_no_args_fails_with_missing_outcome_error(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_runs([_make_entry()])
             result = runner.invoke(cli, ["feedback"])
             self.assertNotEqual(result.exit_code, 0)
-            self.assertIn("Provide at least one of", result.output)
 
-    def test_action_stored_lowercase(self):
+    def test_outcome_case_insensitive(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             log_path = _write_runs([_make_entry()])
-            runner.invoke(cli, ["feedback", "--action", "EDITED"])
+            runner.invoke(cli, ["feedback", "--outcome", "REJECTED"])
             entries = _read_entries(log_path)
-            self.assertEqual(entries[-1]["feedback"]["action"], "edited")
+            self.assertEqual(entries[-1]["developer_feedback"]["outcome"], "rejected")
 
     def test_old_entry_without_new_fields_renders_cleanly(self):
         runner = CliRunner()
