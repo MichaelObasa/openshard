@@ -4232,5 +4232,102 @@ class TestContextRepoAndBranchRendering(unittest.TestCase):
         self.assertIn("feat/x", out)
 
 
+def _review_checks_all_skipped() -> list[dict]:
+    return [
+        {"name": "terraform fmt", "status": "skipped", "command": "terraform fmt -check -recursive -no-color", "reason": "terraform not installed", "summary": "", "returncode": None},
+        {"name": "terraform validate", "status": "skipped", "command": "terraform validate -no-color", "reason": "terraform not installed", "summary": "", "returncode": None},
+        {"name": "tflint", "status": "skipped", "command": "tflint --no-color", "reason": "tflint not installed", "summary": "", "returncode": None},
+    ]
+
+
+def _review_checks_mixed() -> list[dict]:
+    return [
+        {"name": "terraform fmt", "status": "passed", "command": "terraform fmt -check -recursive -no-color", "reason": "", "summary": "formatting is clean", "returncode": 0},
+        {"name": "terraform validate", "status": "skipped", "command": "terraform validate -no-color", "reason": "terraform init required", "summary": "", "returncode": None},
+        {"name": "tflint", "status": "skipped", "command": "tflint --no-color", "reason": "tflint not installed", "summary": "", "returncode": None},
+    ]
+
+
+def _review_checks_failed() -> list[dict]:
+    return [
+        {"name": "terraform fmt", "status": "failed", "command": "terraform fmt -check -recursive -no-color", "reason": "", "summary": "main.tf needs formatting", "returncode": 1},
+        {"name": "terraform validate", "status": "skipped", "command": "terraform validate -no-color", "reason": "terraform init required", "summary": "", "returncode": None},
+        {"name": "tflint", "status": "skipped", "command": "tflint --no-color", "reason": "tflint not installed", "summary": "", "returncode": None},
+    ]
+
+
+def _iac_review_entry(**extra) -> dict:
+    return {
+        "task": "Review production IaC for hardening",
+        "timestamp": "2026-05-23T12:00:00Z",
+        "execution_model": "anthropic/claude-sonnet-4-6",
+        "summary": "Review completed.",
+        "is_review_task": True,
+        "verification_attempted": False,
+        **extra,
+    }
+
+
+class TestReviewChecksLastRendering(unittest.TestCase):
+
+    def test_compact_receipt_shows_not_run_without_review_checks(self):
+        entry = _iac_review_entry()
+        out = _render(entry, "default")
+        self.assertIn("Not run", out)
+
+    def test_compact_receipt_not_run_replaced_by_summary_when_all_skipped(self):
+        entry = _iac_review_entry(review_checks=_review_checks_all_skipped())
+        out = _render(entry, "default")
+        self.assertIn("skipped", out)
+        self.assertNotIn("Not run", out)
+
+    def test_compact_receipt_shows_passed_and_skipped_counts(self):
+        entry = _iac_review_entry(review_checks=_review_checks_mixed())
+        out = _render(entry, "default")
+        self.assertIn("passed", out)
+        self.assertIn("skipped", out)
+
+    def test_full_receipt_checks_section_has_per_check_lines(self):
+        entry = _iac_review_entry(review_checks=_review_checks_all_skipped())
+        out = _render(entry, "more")
+        self.assertIn("CHECKS", out)
+        self.assertIn("terraform fmt", out)
+        self.assertIn("terraform validate", out)
+        self.assertIn("tflint", out)
+
+    def test_full_receipt_skipped_check_shows_reason(self):
+        entry = _iac_review_entry(review_checks=_review_checks_all_skipped())
+        out = _render(entry, "more")
+        self.assertIn("terraform not installed", out)
+
+    def test_full_receipt_validate_skipped_init_required(self):
+        entry = _iac_review_entry(review_checks=_review_checks_mixed())
+        out = _render(entry, "more")
+        self.assertIn("terraform init required", out)
+
+    def test_full_receipt_passed_check_shows_summary(self):
+        entry = _iac_review_entry(review_checks=_review_checks_mixed())
+        out = _render(entry, "more")
+        self.assertIn("formatting is clean", out)
+
+    def test_full_receipt_failed_check_shows_summary(self):
+        entry = _iac_review_entry(review_checks=_review_checks_failed())
+        out = _render(entry, "more")
+        self.assertIn("main.tf needs formatting", out)
+
+    def test_old_entry_without_review_checks_renders_safely(self):
+        entry = _iac_review_entry()
+        out = _render(entry, "more")
+        self.assertIn("CHECKS", out)
+        self.assertIn("Not run", out)
+
+    def test_no_huge_output_in_rendering(self):
+        checks = _review_checks_all_skipped()
+        checks[0]["summary"] = "short summary"
+        entry = _iac_review_entry(review_checks=checks)
+        out = _render(entry, "more")
+        self.assertLess(len(out), 10000)
+
+
 if __name__ == "__main__":
     unittest.main()

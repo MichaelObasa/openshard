@@ -2054,6 +2054,7 @@ def render_post_run(
     generator_model: "str | None" = None,
     run_timeline: "list[dict] | None" = None,
     run_label: str = "",
+    review_checks: "list[dict] | None" = None,
 ) -> None:
     """Render the post-execution receipt in compact shard format."""
     import click
@@ -2105,6 +2106,7 @@ def render_post_run(
         result=_result_summary if _findings else None,
         agent_notes=list(notes) if notes else [],
         findings=_findings if _findings else None,
+        review_checks=review_checks if review_checks else None,
     )
     click.echo("")
     click.echo(render_compact_shard_receipt(receipt))
