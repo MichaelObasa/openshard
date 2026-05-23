@@ -2273,6 +2273,24 @@ def _serialize_verification_plan(plan: VerificationPlan) -> list[dict]:
     ]
 
 
+def _safe_git_info(path: Path) -> dict[str, object]:
+    repo_name: str = path.name
+    try:
+        r = subprocess.run(
+            ["git", "status", "--short", "--branch"],
+            cwd=str(path), capture_output=True, text=True, timeout=3,
+        )
+        if r.returncode != 0 or not r.stdout:
+            return {"repo_name": repo_name}
+        lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
+        branch_raw = lines[0].removeprefix("## ").strip()
+        branch = branch_raw.split("...")[0].split(" ")[0] or None
+        dirty = any(ln for ln in lines if not ln.startswith("##"))
+        return {"repo_name": repo_name, "git_branch": branch, "git_dirty": dirty}
+    except Exception:
+        return {"repo_name": repo_name}
+
+
 def _log_run(
     start: float,
     task: str,
@@ -2311,6 +2329,7 @@ def _log_run(
         "verification_attempted": verification_attempted,
         "verification_passed": verification_passed,
         "workspace_path": str(workspace) if workspace else None,
+        **_safe_git_info(workspace if workspace is not None else Path.cwd()),
         "summary": summary,
         "files_detail": [
             {"path": f.path, "change_type": f.change_type, "summary": f.summary or ""}

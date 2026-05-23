@@ -4,6 +4,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 _PROFILE_TO_STRATEGY: dict[str, str] = {
@@ -316,6 +317,7 @@ class ShardReceipt:
     context_quality: Optional[str] = None
     files_read_count: Optional[int] = None
     inspected_files: list[str] = field(default_factory=list)
+    files_referenced: list[str] = field(default_factory=list)
     files_touched: list[str] = field(default_factory=list)
     files_detail: list[dict] = field(default_factory=list)
     allowed_paths: list[str] = field(default_factory=list)
@@ -557,7 +559,10 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     findings = _extract_findings(entry)
     agent_notes = _safe_str_list(entry.get("agent_notes"))
 
-    repo = entry.get("workspace_path") or None
+    repo: Optional[str] = entry.get("repo_name") or None
+    if repo is None:
+        _wp = entry.get("workspace_path")
+        repo = Path(_wp).name or None if _wp else None
 
     obs = entry.get("observation") or {}
     _dirty = obs.get("dirty_diff_present")
@@ -567,6 +572,12 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         git_state = "Clean"
     else:
         git_state = None
+    if git_state is None:
+        _gd = entry.get("git_dirty")
+        if _gd is True:
+            git_state = "Changes pending"
+        elif _gd is False:
+            git_state = "Clean"
 
     cqs = entry.get("context_quality_score") or {}
     _cqs_level = cqs.get("level") if isinstance(cqs, dict) else None
@@ -589,6 +600,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         _snip = _fr2.get("snippet_files")
         files_read_count = _snip if type(_snip) is int else None
     inspected_files = [p for p in _fc_paths if isinstance(p, str)] if isinstance(_fc_paths, list) else []
+    files_referenced: list[str] = sorted({f.path for f in findings if f.path})
 
     return ShardReceipt(
         shard_id=_make_shard_id(timestamp, index),
@@ -608,11 +620,12 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         status=status,
         duration_seconds=entry.get("duration_seconds"),
         repo=repo,
-        branch=None,
+        branch=entry.get("git_branch") or None,
         git_state=git_state,
         context_quality=context_quality,
         files_read_count=files_read_count,
         inspected_files=inspected_files,
+        files_referenced=files_referenced,
         files_detail=files_detail_raw,
         files_touched=files_touched,
         diff_added=diff_added,
@@ -869,6 +882,14 @@ def render_full_shard_receipt(receipt: ShardReceipt) -> str:
     else:
         lines.append(f"{_INDENT}  Not recorded")
     lines.append("")
+
+    if receipt.files_referenced:
+        lines.append(f"{_INDENT}FILES WITH FINDINGS")
+        for _f in receipt.files_referenced[:10]:
+            lines.append(f"{_INDENT}  {_f}")
+        if len(receipt.files_referenced) > 10:
+            lines.append(f"{_INDENT}  (+{len(receipt.files_referenced) - 10} more)")
+        lines.append("")
 
     lines.append(f"{_INDENT}POLICY")
     lines.append(_row("Risk", receipt.risk))
