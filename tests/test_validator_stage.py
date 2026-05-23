@@ -310,19 +310,19 @@ class TestValidatorLastRendering(unittest.TestCase):
         }
 
     def test_more_shows_validator_verdict(self):
-        out = self._render(self._entry_with_validator("pass"), "more")
+        out = self._render(self._entry_with_validator("pass"), "full")
         self.assertIn("pass", out)
 
     def test_more_shows_warn_verdict(self):
-        out = self._render(self._entry_with_validator("warn"), "more")
+        out = self._render(self._entry_with_validator("warn"), "full")
         self.assertIn("warn", out)
 
     def test_more_shows_fail_verdict(self):
-        out = self._render(self._entry_with_validator("fail"), "more")
+        out = self._render(self._entry_with_validator("fail"), "full")
         self.assertIn("fail", out)
 
     def test_more_shows_reserved_when_no_validator_result(self):
-        out = self._render(self._entry_without_validator(), "more")
+        out = self._render(self._entry_without_validator(), "full")
         self.assertIn("reserved", out)
 
     def test_full_shows_verdict(self):

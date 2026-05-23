@@ -159,7 +159,7 @@ class TestSandboxRendering(unittest.TestCase):
 
     def test_more_shows_compact_worktree_sandbox(self):
         entry = _make_native_entry(sandbox=self._sandbox_dict())
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("sandbox: worktree (osn/run-20260515-103000)", out)
 
     def test_more_does_not_show_sandbox_path(self):
@@ -179,7 +179,7 @@ class TestSandboxRendering(unittest.TestCase):
         entry = _make_native_entry(sandbox=self._sandbox_dict(
             sandbox_type="temp", fallback="not a git repo"
         ))
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("sandbox: temp", out)
         self.assertIn("not a git repo", out)
 

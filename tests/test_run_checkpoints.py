@@ -446,7 +446,7 @@ class TestPrintRunCheckpointsBlock(TestCase):
         run_id = "2026-01-01T00:00:00Z"
         log_run_checkpoint_event(_make_event(run_id=run_id, stage="plan", status="passed"))
         entry = _make_run_entry(timestamp=run_id, workflow="native")
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("[checkpoints]", out)
 
     def test_full_shows_expanded_checkpoint_block(self):

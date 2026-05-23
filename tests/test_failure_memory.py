@@ -765,7 +765,7 @@ class TestRendering(TestCase):
         run_id = "2026-01-01T00:00:00Z"
         self._log_event_for_run(run_id, failure_type="test_failure", retry_succeeded=True)
         entry = _make_run_entry(timestamp=run_id, workflow="native")
-        out = _render(entry, detail="more")
+        out = _render(entry, detail="full")
         self.assertIn("[failure memory]", out)
         self.assertIn("test_failure", out)
 
