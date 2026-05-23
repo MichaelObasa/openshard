@@ -166,3 +166,49 @@ def test_slash_packs_alone_still_lists_packs():
     result = parse_tui_input("/packs")
     assert result.cmd == TuiCommand.PACKS
     assert result.pack_id is None
+
+
+# ── Feedback commands ──────────────────────────────────────────────────────
+
+
+def test_slash_feedback_accepted_parses():
+    result = parse_tui_input("/feedback accepted")
+    assert result.cmd == TuiCommand.FEEDBACK
+    assert result.feedback_outcome == "accepted"
+    assert result.feedback_reason is None
+
+
+def test_slash_feedback_rejected_with_reason():
+    result = parse_tui_input("/feedback rejected wording was wrong")
+    assert result.cmd == TuiCommand.FEEDBACK
+    assert result.feedback_outcome == "rejected"
+    assert result.feedback_reason == "wording was wrong"
+
+
+def test_slash_feedback_partial_no_reason():
+    result = parse_tui_input("/feedback partial")
+    assert result.cmd == TuiCommand.FEEDBACK
+    assert result.feedback_outcome == "partial"
+    assert result.feedback_reason is None
+
+
+def test_slash_feedback_no_outcome_is_unknown():
+    result = parse_tui_input("/feedback")
+    assert result.cmd == TuiCommand.UNKNOWN
+
+
+def test_slash_feedback_invalid_outcome_is_unknown():
+    result = parse_tui_input("/feedback badvalue")
+    assert result.cmd == TuiCommand.UNKNOWN
+
+
+def test_slash_feedback_abandoned_parses():
+    result = parse_tui_input("/feedback abandoned")
+    assert result.cmd == TuiCommand.FEEDBACK
+    assert result.feedback_outcome == "abandoned"
+
+
+def test_slash_feedback_retried_parses():
+    result = parse_tui_input("/feedback retried")
+    assert result.cmd == TuiCommand.FEEDBACK
+    assert result.feedback_outcome == "retried"

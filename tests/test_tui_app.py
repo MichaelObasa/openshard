@@ -845,3 +845,25 @@ def test_extract_run_display_does_not_contain_structured_findings_json():
     result = _extract_run_display(output)
     # The extraction starts at "Review complete", which is after the STRUCTURED_FINDINGS line
     assert "STRUCTURED_FINDINGS" not in result
+
+
+# ── Feedback TUI dispatch (parse-level) ───────────────────────────────────
+
+
+def test_feedback_parse_produces_expected_cli_args():
+    """Parse → build the CLI args the app would pass to _run_cli_async."""
+    from openshard.tui.commands import TuiCommand, parse_tui_input
+    parsed = parse_tui_input("/feedback accepted")
+    assert parsed.cmd == TuiCommand.FEEDBACK
+    args = ["feedback", "--outcome", parsed.feedback_outcome]
+    assert args == ["feedback", "--outcome", "accepted"]
+
+
+def test_feedback_with_reason_produces_expected_cli_args():
+    from openshard.tui.commands import TuiCommand, parse_tui_input
+    parsed = parse_tui_input("/feedback rejected wording wrong")
+    assert parsed.cmd == TuiCommand.FEEDBACK
+    args = ["feedback", "--outcome", parsed.feedback_outcome]
+    if parsed.feedback_reason:
+        args += ["--reason", parsed.feedback_reason]
+    assert args == ["feedback", "--outcome", "rejected", "--reason", "wording wrong"]

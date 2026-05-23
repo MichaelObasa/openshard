@@ -256,7 +256,7 @@ class TestFeedbackCorrectionIntegration(unittest.TestCase):
             _write_runs([_make_run_entry(timestamp="2025-06-01T12:00:00Z")])
             result = runner.invoke(
                 cli,
-                ["feedback", "--action", "rejected", "--reason", "wrong-file", "--rating", "bad"],
+                ["feedback", "--outcome", "rejected", "--reason", "wrong file targeted"],
             )
             self.assertEqual(result.exit_code, 0)
             events = load_interaction_events()
@@ -265,40 +265,39 @@ class TestFeedbackCorrectionIntegration(unittest.TestCase):
             self.assertEqual(evt.event_type, "feedback_rejected")
             self.assertIs(evt.accepted, False)
             self.assertEqual(evt.run_id, "2025-06-01T12:00:00Z")
-            self.assertEqual(evt.correction_reason, "wrong-file")
-            self.assertEqual(evt.metadata.get("rating"), "bad")
+            self.assertEqual(evt.correction_reason, "wrong file targeted")
             self.assertIs(evt.raw_content_stored, False)
 
     def test_feedback_accepted_logs_accepted_true(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_runs([_make_run_entry(timestamp="2025-06-01T12:00:00Z")])
-            result = runner.invoke(cli, ["feedback", "--action", "accepted", "--rating", "good"])
+            result = runner.invoke(cli, ["feedback", "--outcome", "accepted"])
             self.assertEqual(result.exit_code, 0)
             events = load_interaction_events()
             self.assertEqual(len(events), 1)
             self.assertIs(events[0].accepted, True)
             self.assertEqual(events[0].event_type, "feedback_accepted")
 
-    def test_feedback_note_only_logs_event(self):
+    def test_feedback_abandoned_logs_event(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_runs([_make_run_entry()])
-            result = runner.invoke(cli, ["feedback", "--note", "looks fine"])
+            result = runner.invoke(cli, ["feedback", "--outcome", "abandoned"])
             self.assertEqual(result.exit_code, 0)
             events = load_interaction_events()
             self.assertEqual(len(events), 1)
-            self.assertEqual(events[0].event_type, "feedback_noted")
+            self.assertEqual(events[0].event_type, "feedback_abandoned")
 
-    def test_feedback_partially_accepted_logs_accepted_true(self):
+    def test_feedback_partial_logs_accepted_true(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_runs([_make_run_entry()])
-            result = runner.invoke(cli, ["feedback", "--action", "partially-accepted"])
+            result = runner.invoke(cli, ["feedback", "--outcome", "partial"])
             self.assertEqual(result.exit_code, 0)
             events = load_interaction_events()
             self.assertIs(events[0].accepted, True)
-            self.assertEqual(events[0].event_type, "feedback_partially_accepted")
+            self.assertEqual(events[0].event_type, "feedback_partial")
 
 
 class TestRawContentStoredRemainsFalse(unittest.TestCase):

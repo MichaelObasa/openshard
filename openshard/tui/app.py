@@ -35,14 +35,15 @@ TAGLINE = "The control layer for AI coding agents"
 _MODE_STRIP_DEFAULT = "Auto mode"
 _STATUS_STRIP = "↳ Sandbox [OFF]     ↳ Receipts [ON]     ↳ Checks [AUTO]     ↳ Approval [SMART]"
 _SLASH_MENU_TEXT = (
-    "  /help          Show help\n"
-    "  /packs         List workflow packs\n"
-    "  /pack <id>     Load a workflow pack\n"
-    "  /last          Show most recent run\n"
-    "  /last more     Show more detail\n"
-    "  /last full     Show full debug/audit detail\n"
-    "  /clear         Clear output\n"
-    "  /quit          Exit"
+    "  /help                    Show help\n"
+    "  /packs                   List workflow packs\n"
+    "  /pack <id>               Load a workflow pack\n"
+    "  /last                    Show most recent run\n"
+    "  /last more               Show more detail\n"
+    "  /last full               Show full debug/audit detail\n"
+    "  /feedback <outcome>      Record outcome for last run\n"
+    "  /clear                   Clear output\n"
+    "  /quit                    Exit"
 )
 
 _GIT_STATE_LABELS = {
@@ -67,15 +68,17 @@ _STATUS_COLORS = {
 
 _HELP_TEXT = (
     "Supported commands:\n"
-    "  /help           Show this help\n"
-    "  /last           Show most recent run\n"
-    "  /last more      Show more detail\n"
-    "  /last full      Show full debug/audit detail\n"
-    "  /clear          Clear output area\n"
-    "  /quit           Exit the TUI\n"
-    "  /packs          List available workflow packs\n"
-    "  /pack <id>      Show a workflow pack prompt\n"
-    "  (plain text)    Run as openshard task\n"
+    "  /help                    Show this help\n"
+    "  /last                    Show most recent run\n"
+    "  /last more               Show more detail\n"
+    "  /last full               Show full debug/audit detail\n"
+    "  /feedback <outcome>      Record outcome for last run\n"
+    "  /feedback <outcome> <reason>  Record outcome with reason\n"
+    "  /clear                   Clear output area\n"
+    "  /quit                    Exit the TUI\n"
+    "  /packs                   List available workflow packs\n"
+    "  /pack <id>               Show a workflow pack prompt\n"
+    "  (plain text)             Run as openshard task\n"
     "\n"
     "Composer keys:\n"
     "  Enter           Submit task\n"
@@ -306,6 +309,11 @@ class OpenShardTui(App):
             self._run_cli_async(["last", "--more"])
         elif parsed.cmd == TuiCommand.LAST_FULL:
             self._run_cli_async(["last", "--full"])
+        elif parsed.cmd == TuiCommand.FEEDBACK:
+            _fb_args = ["feedback", "--outcome", parsed.feedback_outcome]
+            if parsed.feedback_reason:
+                _fb_args += ["--reason", parsed.feedback_reason]
+            self._run_cli_async(_fb_args)
         elif parsed.cmd == TuiCommand.RUN_TASK:
             self._append_output(f"> {raw}")
             self._start_run_status(raw)
