@@ -33,7 +33,7 @@ except Exception:
 TAGLINE = "The control layer for AI coding agents"
 
 _MODE_STRIP_DEFAULT = "Auto mode"
-_STATUS_STRIP = "↳ Sandbox [ON]     ↳ Receipts [ON]     ↳ Checks [AUTO]     ↳ Approval [SMART]"
+_STATUS_STRIP = "↳ Sandbox [OFF]     ↳ Receipts [ON]     ↳ Checks [AUTO]     ↳ Approval [SMART]"
 _SLASH_MENU_TEXT = (
     "  /help          Show help\n"
     "  /packs         List workflow packs\n"
@@ -131,6 +131,66 @@ def _extract_receipt_block(output: str) -> str | None:
     return None
 
 
+_REVIEW_MEMO_STARTERS = frozenset({"Review complete", "OpenShard completed the review"})
+
+_HIDDEN_SENTINELS = (
+    "\n\nAfter completing your analysis",
+    "STRUCTURED_FINDINGS",
+)
+
+
+def _sanitize_hidden_contract(text: str) -> str:
+    for sentinel in _HIDDEN_SENTINELS:
+        idx = text.find(sentinel)
+        if idx != -1:
+            text = text[:idx].rstrip()
+    return text
+
+
+def _safe_argv_preview(args: list[str]) -> str:
+    parts = [_sanitize_hidden_contract(str(a)) for a in args]
+    preview = " ".join(parts)
+    if len(preview) > 160:
+        preview = preview[:157] + "…"
+    return preview
+
+
+def _extract_run_display(output: str) -> str:
+    """Return the portion of CLI run output to show in the TUI.
+
+    For review runs: preserves the memo block + receipt that follows.
+    For normal runs with a receipt: receipt block only.
+    Fallback: last 30 lines.
+    """
+    lines = output.splitlines()
+
+    receipt_start: int | None = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("RECEIPT") and ("—" in stripped or "-" in stripped):
+            receipt_start = max(0, i - 1)
+            break
+    if receipt_start is None:
+        for i, line in enumerate(lines):
+            if "╭─ OpenShard Receipt" in line:
+                receipt_start = i
+                break
+
+    scan_limit = receipt_start if receipt_start is not None else len(lines)
+    for i in range(scan_limit):
+        stripped = lines[i].strip()
+        if (
+            any(stripped.startswith(m) for m in _REVIEW_MEMO_STARTERS)
+            or (stripped.startswith("Found ") and "issues" in stripped)
+        ):
+            return "\n".join(lines[i:])
+
+    if receipt_start is not None:
+        return "\n".join(lines[receipt_start:])
+
+    return "\n".join(lines[-30:])
+
+
 class TaskInput(TextArea):
     """Multi-line task composer. Enter submits; Ctrl+J / Shift+Enter insert newline."""
 
@@ -162,6 +222,8 @@ class OpenShardTui(App):
         self._output_lines: list[str] = []
         self._run_in_progress: bool = False
         self._run_start: float = 0.0
+        self._pack_suffix: str = ""
+        self._pack_workflow: str = ""
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="header-card"):
@@ -231,6 +293,8 @@ class OpenShardTui(App):
         if parsed.cmd == TuiCommand.HELP:
             self._append_output(_HELP_TEXT)
         elif parsed.cmd == TuiCommand.CLEAR:
+            self._pack_suffix = ""
+            self._pack_workflow = ""
             self._clear_output()
         elif parsed.cmd == TuiCommand.QUIT:
             self.exit()
@@ -241,7 +305,13 @@ class OpenShardTui(App):
         elif parsed.cmd == TuiCommand.RUN_TASK:
             self._append_output(f"> {raw}")
             self._start_run_status(raw)
-            self._run_cli_async(["run", parsed.task], refresh_after=True, is_run=True)
+            _suffix = self._pack_suffix
+            _pw = self._pack_workflow
+            self._pack_suffix = ""
+            self._pack_workflow = ""
+            _effective_task = parsed.task + _suffix if _suffix else parsed.task
+            _args = ["run", "--workflow", _pw, _effective_task] if _pw else ["run", _effective_task]
+            self._run_cli_async(_args, refresh_after=True, is_run=True)
         elif parsed.cmd == TuiCommand.PACKS:
             self._append_output(_render_packs_list())
         elif parsed.cmd == TuiCommand.PACK_SHOW:
@@ -250,9 +320,12 @@ class OpenShardTui(App):
                 try:
                     from openshard.workflow_packs.packs import get_pack
                     p = get_pack(parsed.pack_id)
+                    self._pack_suffix = p.execution_prompt_suffix
+                    self._pack_workflow = p.workflow
                     self.query_one("#task-input", TaskInput).load_text(p.prompt)
                 except KeyError:
-                    pass
+                    self._pack_suffix = ""
+                    self._pack_workflow = ""
         else:
             self._append_output(f"Unknown command: {raw}\nType /help for supported commands.")
 
@@ -289,8 +362,30 @@ class OpenShardTui(App):
 
         runner = CliRunner()
         result = runner.invoke(openshard_cli, args, input="", catch_exceptions=True)
-        output = result.output or (str(result.exception) if result.exception else "")
-        status = "Done." if result.exit_code == 0 else f"Failed (exit {result.exit_code})."
+        raw_output = result.output or ""
+        exc_str = str(result.exception) if result.exception else ""
+        if not raw_output and exc_str:
+            raw_output = exc_str
+
+        if result.exit_code == 0:
+            status = "Done."
+            output = raw_output
+        else:
+            status = f"Failed (exit {result.exit_code})."
+            _argv_preview = _safe_argv_preview(args)
+            _sanitized_output = _sanitize_hidden_contract(raw_output)
+            _tail = "\n".join(_sanitized_output.splitlines()[-20:]) if _sanitized_output else "(no output)"
+            _sanitized_exc = _sanitize_hidden_contract(exc_str) if exc_str else ""
+            _parts = [
+                f"[argv] {_argv_preview}",
+                f"[exit] {result.exit_code}",
+                "[output tail]",
+                _tail,
+            ]
+            if _sanitized_exc:
+                _parts.append(f"[exception] {_sanitized_exc}")
+            output = "\n".join(_parts)
+
         self.call_from_thread(self._on_cli_result, output, status, refresh_after, is_run)
 
     def _on_cli_result(
@@ -299,13 +394,9 @@ class OpenShardTui(App):
         self._run_in_progress = False
         self.query_one("#mode-strip-left", Static).update(_MODE_STRIP_DEFAULT)
 
-        if is_run:
-            receipt_block = _extract_receipt_block(output)
-            if receipt_block is not None:
-                display = receipt_block.rstrip("\n") + "\n" + status
-            else:
-                tail = "\n".join(output.splitlines()[-30:])
-                display = tail.rstrip("\n") + "\n" + status
+        failed = status.startswith("Failed")
+        if is_run and not failed:
+            display = _extract_run_display(output).rstrip("\n") + "\n" + status
         else:
             display = output.rstrip("\n") + "\n" + status
 

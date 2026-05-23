@@ -39,6 +39,12 @@ _MODEL_FRIENDLY_NAMES: dict[str, str] = {
     "anthropic/claude-opus-4-7": "Claude Opus 4.7",
     "anthropic/claude-haiku-4.5": "Claude Haiku 4.5",
     "anthropic/claude-haiku-4-5": "Claude Haiku 4.5",
+    "claude-sonnet-4-6": "Claude Sonnet 4.6",
+    "claude-sonnet-4.6": "Claude Sonnet 4.6",
+    "claude-opus-4-7": "Claude Opus 4.7",
+    "claude-opus-4.7": "Claude Opus 4.7",
+    "claude-haiku-4-5": "Claude Haiku 4.5",
+    "claude-haiku-4.5": "Claude Haiku 4.5",
     "openai/gpt-5.5": "GPT-5.5",
     "openai/gpt-5.5-thinking": "GPT-5.5 Thinking",
     "z-ai/glm-5.1": "GLM-5.1",
@@ -108,6 +114,107 @@ def _coerce_finding_list(val: object, default_severity: str = "Note") -> list[Sh
         elif isinstance(item, str):
             out.append(ShardFinding(severity=default_severity, message=item))
     return out
+
+
+_METADATA_NOISE_PHRASES: tuple[str, ...] = (
+    "has no tags block",
+    "has no labels block",
+    "missing required tags",
+    "missing required labels",
+    "add owner and environment",
+)
+
+_DEFAULT_FINDING_CAPS: dict[str, int] = {"Critical": 3, "High": 3, "Medium": 2, "Low": 1}
+
+
+def _is_metadata_noise(f: ShardFinding) -> bool:
+    msg = f.message.lower()
+    return any(p in msg for p in _METADATA_NOISE_PHRASES)
+
+
+def group_review_findings(
+    findings: list[ShardFinding],
+    *,
+    caps: "dict[str, int] | None" = None,
+) -> "tuple[list[ShardFinding], ShardFinding | None, int, int]":
+    """Group and rank findings for compact display.
+
+    Returns (visible_substantive, grouped_metadata_or_None, hidden_substantive_count, raw_total).
+
+    visible_substantive: deduplicated non-metadata findings sorted Critical→Low,
+        each severity capped by *caps* (defaults to Critical=3, High=3, Medium=2, Low=1).
+    grouped_metadata_or_None: a single synthetic ShardFinding (severity=Medium) that
+        summarises all metadata-noise findings, or None if none found.
+    hidden_substantive_count: substantive findings cut by the cap.
+    raw_total: len(findings) before any grouping.
+    """
+    effective_caps = dict(_DEFAULT_FINDING_CAPS)
+    if caps:
+        effective_caps.update(caps)
+
+    raw_total = len(findings)
+
+    # Deduplicate by (severity, message)
+    seen: set[tuple[str, str]] = set()
+    deduped: list[ShardFinding] = []
+    for f in findings:
+        key = (f.severity, f.message)
+        if key not in seen:
+            seen.add(key)
+            deduped.append(f)
+
+    substantive = [f for f in deduped if not _is_metadata_noise(f)]
+    metadata    = [f for f in deduped if _is_metadata_noise(f)]
+
+    # Sort substantive by severity order
+    substantive.sort(
+        key=lambda f: _SEVERITY_ORDER.index(f.severity) if f.severity in _SEVERITY_ORDER else len(_SEVERITY_ORDER),
+    )
+
+    # Apply per-severity caps
+    visible: list[ShardFinding] = []
+    hidden_count = 0
+    by_sev: dict[str, list[ShardFinding]] = {}
+    for f in substantive:
+        by_sev.setdefault(f.severity, []).append(f)
+    for sev in _SEVERITY_ORDER:
+        group = by_sev.get(sev, [])
+        cap = effective_caps.get(sev, 1)
+        visible.extend(group[:cap])
+        hidden_count += max(0, len(group) - cap)
+
+    # Build grouped metadata finding
+    meta_group: "ShardFinding | None" = None
+    if metadata:
+        # Detect term (labels vs tags) from messages
+        uses_labels = any("label" in f.message.lower() for f in metadata)
+        has_gcp     = any("google_" in f.message for f in metadata)
+        term   = "labels" if uses_labels else "tags"
+        prefix = "GCP " if has_gcp else ""
+
+        # Extract up to 3 resource names from messages (pattern: "Resource TYPE.NAME ...")
+        examples: list[str] = []
+        seen_ex: set[str] = set()
+        for f in metadata:
+            parts = f.message.split()
+            if len(parts) >= 2 and parts[0].lower() == "resource":
+                name = parts[1]
+                if name not in seen_ex:
+                    seen_ex.add(name)
+                    examples.append(name)
+                    if len(examples) >= 3:
+                        break
+        ex_str = ", ".join(examples)
+        n = len(metadata)
+        msg = (
+            f"{n} {prefix}resources are missing ownership/environment {term}, "
+            "making cost tracking and incident response harder."
+        )
+        if ex_str:
+            msg += f"\n  Examples: {ex_str}"
+        meta_group = ShardFinding(severity="Medium", message=msg)
+
+    return visible, meta_group, hidden_count, raw_total
 
 
 def _extract_findings(entry: dict) -> list[ShardFinding]:
@@ -297,10 +404,17 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
 
     routing_model = entry.get("routing_selected_model")
     exec_model = entry.get("execution_model")
+    _sr_quick = entry.get("stage_runs") or []
+    _first_stage_model = next(
+        (_display_model_name(s["model"]) for s in _sr_quick if isinstance(s, dict) and s.get("model")),
+        None,
+    )
     if routing_model:
         model_display = f"Auto → {_display_model_name(routing_model)}"
     elif exec_model:
         model_display = _display_model_name(exec_model)
+    elif _first_stage_model:
+        model_display = _first_stage_model
     else:
         model_display = "Not recorded"
 
@@ -308,6 +422,9 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     plan = entry.get("plan") or {}
     risk_raw = form_factor.get("risk_level") or plan.get("risk")
     risk = _RISK_LABELS.get(str(risk_raw).lower(), str(risk_raw).capitalize()) if risk_raw else "Not recorded"
+    # Mirror the live-receipt review task risk floor: review runs are always at least High
+    if entry.get("is_review_task") and risk in ("Not recorded", "Low"):
+        risk = "High"
 
     write_path = entry.get("write_path")
     ff_read_only = form_factor.get("read_only")
@@ -315,8 +432,8 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         sandbox = "On"
     elif write_path == "pipeline":
         sandbox = "Off"
-    elif ff_read_only:
-        sandbox = "Not required"
+    elif ff_read_only or entry.get("is_review_task"):
+        sandbox = "Off"
     else:
         sandbox = "Not recorded"
 
@@ -367,10 +484,38 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         approval = "Not recorded"
 
     cost_raw = entry.get("estimated_cost")
+    if cost_raw is None:
+        _sr_costs = [
+            s["cost"] for s in (entry.get("stage_runs") or [])
+            if isinstance(s, dict) and s.get("cost") is not None
+        ]
+        if _sr_costs:
+            cost_raw = sum(_sr_costs)
     cost_display = f"${cost_raw:.4f}" if cost_raw is not None else "Not recorded"
 
     summary = entry.get("summary") or ""
-    result = _result_display(summary) or "Not recorded"
+    _review_findings_raw = entry.get("findings") or []
+    if _review_findings_raw:
+        _fp_for_result = [
+            f["path"] for f in (entry.get("files_detail") or [])
+            if isinstance(f, dict) and f.get("path")
+        ]
+        _findings_objs = [
+            ShardFinding(severity=f.get("severity", "Note"), message=f.get("message", ""))
+            for f in _review_findings_raw if isinstance(f, dict)
+        ]
+        _vis_sub, _meta_g, _, _raw_total = group_review_findings(_findings_objs)
+        _vis_areas = len(_vis_sub) + (1 if _meta_g else 0)
+        _base = (
+            f"{_raw_total} {'issue' if _raw_total == 1 else 'issues'} found"
+            if _raw_total == _vis_areas
+            else f"{_vis_areas} issue areas found. {_raw_total} raw findings recorded"
+        )
+        result = _base + ("; review files created." if _fp_for_result else ".")
+    elif entry.get("is_review_task"):
+        result = "Review completed."
+    else:
+        result = _result_display(summary) or "Not recorded"
 
     files_detail_raw = entry.get("files_detail") or []
     files_touched = [f["path"] for f in files_detail_raw if isinstance(f, dict) and "path" in f]
@@ -497,6 +642,17 @@ def _models_label_and_value(receipt: ShardReceipt) -> tuple[str, str]:
     return "Model", receipt.model_display
 
 
+def _truncate_compact(text: str, max_chars: int) -> str:
+    """Return first line of text, word-safely truncated to max_chars with … if cut."""
+    line = text.split("\n")[0]
+    if len(line) <= max_chars:
+        return line
+    cut = line.rfind(" ", 0, max_chars)
+    if cut > 0:
+        return line[:cut] + "…"
+    return line[:max_chars] + "…"
+
+
 def render_compact_shard_receipt(receipt: ShardReceipt) -> str:
     """Render a bordered, column-aligned RECEIPT block. Pure, no I/O."""
     file_str = f"{receipt.files_changed} file{'s' if receipt.files_changed != 1 else ''}"
@@ -507,7 +663,7 @@ def render_compact_shard_receipt(receipt: ShardReceipt) -> str:
         f"{_INDENT}RECEIPT {_EM} {receipt.shard_id}",
         _SEP,
         _row("Task", receipt.task_short),
-        _row("Agent", receipt.agent),
+        _row("Executor", receipt.agent),
         _row(model_label, model_value),
         _row("Risk", receipt.risk),
         _row("Sandbox", receipt.sandbox),
@@ -519,17 +675,26 @@ def render_compact_shard_receipt(receipt: ShardReceipt) -> str:
     ]
 
     _TOP_SEVERITIES = {"Critical", "High", "Medium"}
-    top_findings = [f for f in receipt.findings if f.severity in _TOP_SEVERITIES]
-    if top_findings:
-        top_findings = sorted(
-            top_findings,
-            key=lambda f: _SEVERITY_ORDER.index(f.severity) if f.severity in _SEVERITY_ORDER else len(_SEVERITY_ORDER),
+    top_raw = [f for f in receipt.findings if f.severity in _TOP_SEVERITIES]
+    if top_raw:
+        # Use generous per-severity caps — the hard limit is the total of 5 visible slots.
+        # group_review_findings handles dedup and metadata grouping.
+        visible_sub, meta_group, _, _ = group_review_findings(
+            top_raw,
+            caps={"Critical": 5, "High": 5, "Medium": 5, "Low": 0},
         )
+        compact_list: list[ShardFinding] = list(visible_sub)
+        if meta_group and len(compact_list) < 5:
+            compact_list.append(meta_group)
+        compact_list = compact_list[:5]
+        hidden_receipt = max(0, len(top_raw) - len(compact_list))
         lines.append(_SEP)
         lines.append(f"{_INDENT}FINDINGS")
-        icon = "⚠" if _UNICODE_OK else "!"
-        for f in top_findings:
-            lines.append(f"{_INDENT}{icon}  {f.message[:80]}")
+        for f in compact_list:
+            icon = _FINDING_ICONS.get(f.severity, "⚠" if _UNICODE_OK else "!")
+            lines.append(f"{_INDENT}{icon}  {_truncate_compact(f.message, 79)}")
+        if hidden_receipt > 0:
+            lines.append(f"{_INDENT}+{hidden_receipt} more findings recorded.")
 
     # Warning line: only shown when a note contains an explicit blocker keyword
     _WARNING_KEYWORDS = ("DO NOT RUN", "WARNING:", "BLOCKER:", "DANGER:", "DO NOT APPLY")
@@ -560,10 +725,16 @@ def build_live_run_receipt(
     approval: str,
     estimated_cost: "Optional[float]",
     result_summary: str,
+    result: "Optional[str]" = None,
     agent_notes: "Optional[list[str]]" = None,
     findings: "Optional[list[ShardFinding]]" = None,
 ) -> ShardReceipt:
-    """Build a ShardReceipt from live run metadata (before log write). Pure, no I/O."""
+    """Build a ShardReceipt from live run metadata (before log write). Pure, no I/O.
+
+    result: pre-formatted result string that bypasses _result_display() processing.
+            Use when the caller has already computed a clean result (e.g. two-count
+            review format "N issue areas found. M raw findings recorded.").
+    """
     _model_stages: list[tuple[str, str]] = [
         (
             _STAGE_DISPLAY_LABELS.get(
@@ -576,6 +747,8 @@ def build_live_run_receipt(
         if getattr(getattr(sr, "stage", None), "stage_type", None) and getattr(sr, "model", None)
     ]
     _model_display = _display_model_name(routing_model) if routing_model else "Not recorded"
+    if _model_display == "Not recorded" and _model_stages:
+        _model_display = _model_stages[0][1]
 
     if verification_attempted is None or not verification_attempted:
         _checks = "Not run"
@@ -591,7 +764,7 @@ def build_live_run_receipt(
         _status = "No checks run"
 
     _cost_display = f"${estimated_cost:.4f}" if estimated_cost is not None else "Not recorded"
-    _result = _result_display(result_summary or "") or "Not recorded"
+    _result = result if result is not None else (_result_display(result_summary or "") or "Not recorded")
 
     return ShardReceipt(
         shard_id=_make_shard_id(run_id, run_index),
@@ -635,7 +808,7 @@ def render_full_shard_receipt(receipt: ShardReceipt) -> str:
     lines += [f"{_INDENT}TASK", f"{_INDENT}{receipt.task_full}", ""]
 
     lines.append(f"{_INDENT}EXECUTION")
-    lines.append(_row("Agent", receipt.agent))
+    lines.append(_row("Executor", receipt.agent))
     lines.append(_row("Strategy", receipt.strategy))
 
     if receipt.model_stages:
@@ -703,8 +876,13 @@ def render_full_shard_receipt(receipt: ShardReceipt) -> str:
 
     lines.append(f"{_INDENT}FINDINGS")
     if receipt.findings:
+        # Show substantive findings (no cap in full receipt) grouped by severity.
+        visible_sub, meta_group, _, _ = group_review_findings(
+            receipt.findings,
+            caps={"Critical": 999, "High": 999, "Medium": 999, "Low": 999},
+        )
         current_severity: str | None = None
-        for finding in receipt.findings:
+        for finding in visible_sub:
             if finding.severity != current_severity:
                 if current_severity is not None:
                     lines.append("")
@@ -716,6 +894,32 @@ def render_full_shard_receipt(receipt: ShardReceipt) -> str:
                 loc = f"{finding.path}:{finding.line}" if finding.line is not None else finding.path
                 msg = f"{msg}  [{loc}]"
             lines.append(f"{_INDENT}  {icon} {msg}")
+        # Metadata section: show all examples (up to 10)
+        if meta_group:
+            if current_severity is not None:
+                lines.append("")
+            lines.append(f"{_INDENT}METADATA")
+            # Collect all metadata findings for the expanded view
+            meta_findings = [f for f in receipt.findings if _is_metadata_noise(f)]
+            n = len(meta_findings)
+            uses_labels = any("label" in f.message.lower() for f in meta_findings)
+            has_gcp     = any("google_" in f.message for f in meta_findings)
+            term   = "labels" if uses_labels else "tags"
+            prefix = "GCP " if has_gcp else ""
+            lines.append(f"{_INDENT}  ~ {n} {prefix}resources missing ownership/environment {term}")
+            examples: list[str] = []
+            seen_ex: set[str] = set()
+            for f in meta_findings:
+                parts = f.message.split()
+                if len(parts) >= 2 and parts[0].lower() == "resource":
+                    name = parts[1]
+                    if name not in seen_ex:
+                        seen_ex.add(name)
+                        examples.append(name)
+            for ex in examples[:10]:
+                lines.append(f"{_INDENT}    {ex}")
+            if len(examples) > 10:
+                lines.append(f"{_INDENT}    ...and {len(examples) - 10} more")
     else:
         lines.append(f"{_INDENT}  No structured findings recorded.")
     lines.append("")

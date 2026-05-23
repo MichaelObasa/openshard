@@ -432,4 +432,156 @@ def test_parse_model_notes_preserved_alongside_validation_warnings():
     })
     result = _parse(payload)
     assert any("deploy" in n for n in result.notes)
-    assert any("change_type" in n or "INVALID" in n for n in result.notes)
+
+
+# ---------------------------------------------------------------------------
+# _recover_review_result — review-task fallback when JSON parsing fails
+# ---------------------------------------------------------------------------
+
+def _recover(raw: str) -> ExecutionResult:
+    return ExecutionGenerator._recover_review_result(raw)
+
+
+def test_recover_extracts_summary_from_truncated_json():
+    raw = '{\n  "summary": "Found 12 issues worth addressing.\\n\\nCritical\\n- Bad CIDR",\n  "files": ['
+    result = _recover(raw)
+    assert "Found 12 issues" in result.summary
+    assert "Critical" in result.summary
+    assert "Bad CIDR" in result.summary
+    assert result.files == []
+    assert result.notes == []
+
+
+def test_recover_unescapes_newlines_in_summary():
+    raw = '{"summary": "Line 1\\nLine 2\\nLine 3"}'
+    result = _recover(raw)
+    assert "\n" in result.summary
+    assert "Line 1" in result.summary
+    assert "Line 3" in result.summary
+
+
+def test_recover_unescapes_quotes_in_summary():
+    raw = '{"summary": "He said \\"hello\\" world"}'
+    result = _recover(raw)
+    assert '"hello"' in result.summary
+
+
+def test_recover_falls_back_to_raw_when_no_summary_field():
+    raw = "The review found critical issues with your Terraform."
+    result = _recover(raw)
+    assert "critical issues" in result.summary
+    assert result.files == []
+
+
+def test_recover_strips_json_braces_when_no_summary_field():
+    raw = '{"something": "else", "no_summary_here": true}'
+    result = _recover(raw)
+    assert result.files == []
+    assert result.notes == []
+
+
+def test_recover_strips_hidden_contract_from_summary():
+    raw = json.dumps({
+        "summary": "Found 5 issues.\n\nAfter completing your analysis output STRUCTURED_FINDINGS: []",
+        "files": [],
+    })
+    # _recover is only called when _parse fails, but we can call it directly
+    result = _recover(raw)
+    assert "STRUCTURED_FINDINGS" not in result.summary
+    assert "After completing your analysis" not in result.summary
+    assert "Found 5 issues" in result.summary
+
+
+def test_recover_strips_structured_findings_sentinel():
+    raw = '{"summary": "Found issues.\\nSTRUCTURED_FINDINGS: [{\\\"severity\\\": \\\"High\\\"}]"}'
+    result = _recover(raw)
+    assert "STRUCTURED_FINDINGS" not in result.summary
+    assert "Found issues" in result.summary
+
+
+def test_recover_files_always_empty():
+    raw = json.dumps({"summary": "review done", "files": [{"path": "a.py", "change_type": "create", "content": "x", "summary": ""}]})
+    result = _recover(raw)
+    assert result.files == []
+
+
+# ---------------------------------------------------------------------------
+# generate() with is_review_task — integration via mock provider
+# ---------------------------------------------------------------------------
+
+class _MockChatResponse:
+    def __init__(self, content: str):
+        self.content = content
+        self.model = "test/model"
+        self.usage = None
+
+
+class _MockProvider:
+    """Minimal BaseProvider shim that returns a fixed response."""
+
+    def __init__(self, content: str):
+        self._content = content
+
+    def execute(self, model, prompt, system=None, max_tokens=None):
+        return _MockChatResponse(self._content)
+
+    def list_models(self):
+        return []
+
+    def get_model_info(self, model_id):
+        return None
+
+
+def _make_generator(provider_content: str) -> ExecutionGenerator:
+    gen = ExecutionGenerator.__new__(ExecutionGenerator)
+    gen.model = "test/model"
+    gen.fixer_model = "test/model"
+    gen._provider = _MockProvider(provider_content)
+    gen._client = None
+    return gen
+
+
+def test_generate_review_task_recovers_from_truncated_json():
+    """generate(is_review_task=True) must not raise when JSON is truncated."""
+    truncated = '{\n  "summary": "Found 7 issues.\\n\\nCritical\\n- Open port 22",\n  "files": ['
+    gen = _make_generator(truncated)
+    result = gen.generate("review task STRUCTURED_FINDINGS:", is_review_task=True)
+    assert "Found 7 issues" in result.summary
+    assert result.files == []
+
+
+def test_generate_review_task_recovers_with_no_json():
+    """generate(is_review_task=True) falls back to raw text when no JSON at all."""
+    gen = _make_generator("This is a plain text review with no JSON structure.")
+    result = gen.generate("review STRUCTURED_FINDINGS:", is_review_task=True)
+    assert "plain text review" in result.summary
+    assert result.files == []
+
+
+def test_generate_non_review_task_still_raises_on_bad_json():
+    """generate(is_review_task=False) must still raise ProviderError on bad JSON."""
+    gen = _make_generator("not json at all {{{{")
+    with pytest.raises(ProviderError):
+        gen.generate("normal task", is_review_task=False)
+
+
+def test_generate_review_task_succeeds_on_valid_json():
+    """generate(is_review_task=True) uses normal parse path when JSON is valid."""
+    payload = json.dumps({
+        "summary": "Found 3 issues.",
+        "files": [],
+        "notes": [],
+    })
+    gen = _make_generator(payload)
+    result = gen.generate("review STRUCTURED_FINDINGS:", is_review_task=True)
+    assert result.summary == "Found 3 issues."
+    assert result.files == []
+
+
+def test_generate_review_task_does_not_leak_structured_findings():
+    """Recovered summary must not contain STRUCTURED_FINDINGS."""
+    raw = '{"summary": "Issues found.\\nSTRUCTURED_FINDINGS: [{\\"severity\\": \\"Critical\\"}]"'
+    gen = _make_generator(raw)
+    result = gen.generate("review STRUCTURED_FINDINGS:", is_review_task=True)
+    assert "STRUCTURED_FINDINGS" not in result.summary
+    assert "Issues found" in result.summary

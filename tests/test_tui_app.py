@@ -6,7 +6,7 @@ import pytest
 from textual.containers import ScrollableContainer
 from textual.widgets import Label, Static
 
-from openshard.tui.app import OpenShardTui, TaskInput, _extract_receipt_block
+from openshard.tui.app import OpenShardTui, TaskInput, _extract_receipt_block, _extract_run_display
 from openshard.tui.state import get_guardrails
 
 _SIZE = (120, 55)
@@ -97,7 +97,7 @@ async def test_status_strip_shows_expected_content(tmp_path):
     app = _make_app(tmp_path)
     async with app.run_test(size=_SIZE) as _:
         text = _text(app.query_one("#status-strip", Static))
-        for term in ("Sandbox [ON]", "Receipts [ON]", "Checks [AUTO]", "Approval [SMART]"):
+        for term in ("Sandbox [OFF]", "Receipts [ON]", "Checks [AUTO]", "Approval [SMART]"):
             assert term in text
 
 
@@ -360,6 +360,95 @@ async def test_failed_run_shows_failure_status(tmp_path):
             await pilot.pause(delay=0.3)
             text = _text(app.query_one("#output-content", Static))
         assert "Failed" in text
+
+
+@pytest.mark.asyncio
+async def test_failed_run_shows_diagnostic_tail(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    # Error buried beyond the last-30-line fallback of _extract_run_display
+    lines = [f"  line {i}" for i in range(40)]
+    lines.append("Error: Authentication failed. Check that your provider API key is valid.")
+    mock_result.output = "\n".join(lines) + "\n"
+    mock_result.exit_code = 1
+    mock_result.exception = None
+
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("do something that fails")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "Failed (exit 1)" in text
+    assert "[argv]" in text
+    assert "[exit] 1" in text
+    assert "Authentication failed" in text
+
+
+@pytest.mark.asyncio
+async def test_failed_run_diagnostic_does_not_expose_structured_findings_in_argv(tmp_path):
+    # Simulate the pack flow: suffix is stored in _pack_suffix, NOT typed by the user.
+    # The input field holds only the visible prompt; the hidden suffix is appended
+    # programmatically so it must never appear in the diagnostic argv preview.
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Error: something went wrong\n"
+    mock_result.exit_code = 1
+    mock_result.exception = None
+
+    hidden_suffix = (
+        "\n\nAfter completing your analysis, put the following content "
+        'in the JSON `summary` field:\nSTRUCTURED_FINDINGS: [{"severity": "Critical"}]'
+    )
+
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            # Inject pack state the same way PACK_SHOW would set it
+            app._pack_suffix = hidden_suffix
+            app._pack_workflow = "native"
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("Review this Terraform config")  # visible prompt only
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "[argv]" in text
+    assert "STRUCTURED_FINDINGS" not in text
+    assert "After completing your analysis" not in text
+
+
+@pytest.mark.asyncio
+async def test_failed_run_diagnostic_does_not_expose_structured_findings_in_output(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    # output itself leaks STRUCTURED_FINDINGS (e.g. task text echoed in a Click error)
+    mock_result.output = (
+        "Running task: review stuff\n"
+        'STRUCTURED_FINDINGS: [{"severity": "High", "message": "leaked secret"}]\n'
+        "Error: something went wrong\n"
+    )
+    mock_result.exit_code = 1
+    mock_result.exception = None
+
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("plain task text")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "[exit] 1" in text
+    assert "STRUCTURED_FINDINGS" not in text
+    assert "leaked secret" not in text
 
 
 @pytest.mark.asyncio
@@ -640,3 +729,78 @@ def test_extract_receipt_separator_preferred_over_rich_box():
     result = _extract_receipt_block(output)
     assert result is not None
     assert result.startswith("━")
+
+
+# ── _extract_run_display() unit tests ─────────────────────────────────────
+
+
+def test_extract_run_display_preserves_review_complete_and_receipt():
+    output = (
+        "Bootstrap noise...\n"
+        "\n"
+        "Review complete\n"
+        "Found 3 issues worth addressing.\n"
+        "\n"
+        "Critical\n"
+        "✖  Something bad\n"
+        "\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "RECEIPT — shard-20260520-0001\n"
+        "3 issues found; review files created.\n"
+    )
+    result = _extract_run_display(output)
+    assert "Review complete" in result
+    assert "Found 3 issues" in result
+    assert "Critical" in result
+    assert "RECEIPT" in result
+    assert "Bootstrap noise" not in result
+
+
+def test_extract_run_display_preserves_openshard_completed_fallback():
+    # No-files fallback: "no structured findings were captured" (not "generated review files")
+    output = (
+        "Noise before\n"
+        "OpenShard completed the review, but no structured findings were captured for this run.\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "RECEIPT — shard-20260520-0002\n"
+        "Review run. Receipt saved.\n"
+    )
+    result = _extract_run_display(output)
+    assert "OpenShard completed the review" in result
+    assert "RECEIPT" in result
+    assert "Noise before" not in result
+
+
+def test_extract_run_display_no_memo_falls_back_to_receipt():
+    output = (
+        "Planning - step 1...\n"
+        "Executing - step 2...\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "RECEIPT — shard-20260520-0003\n"
+        "1 file changed. Receipt saved.\n"
+    )
+    result = _extract_run_display(output)
+    assert "RECEIPT" in result
+    assert "1 file changed" in result
+    assert "Planning" not in result
+
+
+def test_extract_run_display_no_receipt_no_memo_returns_tail():
+    output = "\n".join(f"line {i}" for i in range(50))
+    result = _extract_run_display(output)
+    assert "line 49" in result
+    assert "line 0" not in result
+
+
+def test_extract_run_display_does_not_contain_structured_findings_json():
+    output = (
+        'STRUCTURED_FINDINGS: [{"severity": "Critical", "message": "Bad thing"}]\n'
+        "Review complete\n"
+        "Found 1 issue worth addressing.\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "RECEIPT — shard-20260520-0004\n"
+        "1 issue found.\n"
+    )
+    result = _extract_run_display(output)
+    # The extraction starts at "Review complete", which is after the STRUCTURED_FINDINGS line
+    assert "STRUCTURED_FINDINGS" not in result

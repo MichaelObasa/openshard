@@ -74,7 +74,8 @@ class OpenAIProvider(BaseProvider):
             raise ProviderError(str(exc)) from exc
 
     def execute(
-        self, model: str, prompt: str, system: str | None = None
+        self, model: str, prompt: str, system: str | None = None,
+        max_tokens: int | None = None,
     ) -> ChatResponse:
         """Send *prompt* to *model* via the OpenAI chat completions API."""
         native_model = _normalize_model_id(model)
@@ -83,11 +84,11 @@ class OpenAIProvider(BaseProvider):
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
+        kwargs: dict = {"model": native_model, "messages": messages}
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
         try:
-            response = self._client.chat.completions.create(
-                model=native_model,
-                messages=messages,
-            )
+            response = self._client.chat.completions.create(**kwargs)
         except _sdk.AuthenticationError as exc:
             raise ProviderAuthError(str(exc)) from exc
         except _sdk.RateLimitError as exc:

@@ -204,6 +204,8 @@ class ExecutionGenerator:
         model: str | None = None,
         repo_facts: RepoFacts | None = None,
         skills_context: str = "",
+        max_tokens: int | None = None,
+        is_review_task: bool = False,
     ) -> ExecutionResult:
         """Call the model and return a parsed :class:`ExecutionResult`.
 
@@ -211,6 +213,9 @@ class ExecutionGenerator:
         *repo_facts* appends repo stack context to the prompt so the model
         generates files that match the detected language and test tooling.
         *skills_context* prepends matched skill hints before repo context.
+        *max_tokens* caps the completion length; None lets the provider decide.
+        *is_review_task* enables a recovery fallback when JSON parsing fails
+        so review runs do not exit 1 on imperfect model output.
         """
         prompt = task
         if repo_facts is not None:
@@ -223,8 +228,15 @@ class ExecutionGenerator:
             model=model or self.model,
             prompt=prompt,
             system=_SYSTEM_PROMPT,
+            max_tokens=max_tokens,
         )
-        result = self._parse(response.content)
+        try:
+            result = self._parse(response.content)
+        except ProviderError:
+            if is_review_task:
+                result = self._recover_review_result(response.content)
+            else:
+                raise
         result.usage = response.usage
         return result
 
@@ -349,3 +361,43 @@ class ExecutionGenerator:
             summary = ""
 
         return ExecutionResult(summary=summary, files=files, notes=notes)
+
+    @staticmethod
+    def _recover_review_result(raw: str) -> ExecutionResult:
+        """Fallback for review tasks when strict JSON parsing fails.
+
+        Tries to extract the summary from partial or malformed JSON so the run
+        completes successfully instead of exiting 1.  Files are always [].
+        """
+        # Strip code fences
+        text = re.sub(r"^```(?:json)?\s*", "", raw.strip())
+        text = re.sub(r"\s*```$", "", text)
+
+        # Try to recover summary from a partial JSON object.
+        # Handles truncated JSON (missing closing brace) and most escape sequences.
+        m = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', text, re.DOTALL)
+        if m:
+            summary = (
+                m.group(1)
+                .replace("\\n", "\n")
+                .replace("\\r", "\r")
+                .replace('\\"', '"')
+                .replace("\\\\", "\\")
+                .replace("\\t", "\t")
+            )
+        else:
+            # No summary field — strip JSON structure and use the raw content.
+            summary = text.strip()
+            if summary.startswith("{"):
+                summary = summary[1:]
+            if summary.endswith("}"):
+                summary = summary[:-1]
+            summary = summary.strip()
+
+        # Strip the hidden STRUCTURED_FINDINGS contract from the recovered text.
+        for _sentinel in ("\n\nAfter completing your analysis", "STRUCTURED_FINDINGS:"):
+            _idx = summary.find(_sentinel)
+            if _idx != -1:
+                summary = summary[:_idx].rstrip()
+
+        return ExecutionResult(summary=summary.strip(), files=[], notes=[])

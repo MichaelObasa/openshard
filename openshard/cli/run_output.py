@@ -1,3 +1,4 @@
+import json
 import re
 import sys
 import threading
@@ -157,6 +158,15 @@ _PUBLIC_MODE_LABEL: dict[str, str] = {
     "run":      "Run",
     "deep-run": "Deep Run",
     "osn-run":  "OSN Run",
+}
+
+# Maps internal_form_factor to a user-facing executor label for --more display.
+_FF_EXECUTOR_DISPLAY: dict[str, str] = {
+    "native-loop-candidate": "OpenShard Native",
+    "direct":                "OpenShard",
+    "staged":                "OpenShard",
+    "subagent-candidate":    "OpenShard (multi-agent)",
+    "swarm-candidate":       "OpenShard (swarm)",
 }
 
 
@@ -1719,6 +1729,271 @@ def build_stage_displays(
     return stages
 
 
+_STRUCTURED_FINDINGS_TAG = "STRUCTURED_FINDINGS:"
+
+
+def _extract_structured_findings(summary: str) -> "tuple[str, list]":
+    """Parse STRUCTURED_FINDINGS: [...] from summary. Returns (clean_summary, findings).
+
+    If no tag is found or JSON is malformed, returns (summary, []) — never raises.
+    The tag line (and any continuation lines for multi-line JSON) is stripped from the
+    returned summary.  Handles models that output the JSON across multiple lines.
+    """
+    from openshard.history.shard_contract import ShardFinding, _SEVERITY_ORDER
+
+    if not summary or _STRUCTURED_FINDINGS_TAG not in summary:
+        return summary, []
+
+    lines = summary.splitlines()
+    findings: list[ShardFinding] = []
+    kept: list[str] = []
+    i = 0
+
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if stripped.startswith(_STRUCTURED_FINDINGS_TAG):
+            raw_json = stripped[len(_STRUCTURED_FINDINGS_TAG):].strip()
+            # Accumulate lines until the JSON array brackets are balanced
+            j = i + 1
+            while raw_json.count("[") > raw_json.count("]") and j < len(lines):
+                raw_json += " " + lines[j].strip()
+                j += 1
+            i = j  # skip all consumed continuation lines
+            raw_json = raw_json.rstrip(".,;")
+            try:
+                items = json.loads(raw_json)
+                if isinstance(items, list):
+                    for item in items:
+                        if isinstance(item, dict) and "message" in item:
+                            sev = item.get("severity", "Note")
+                            if sev not in _SEVERITY_ORDER:
+                                sev = "Note"
+                            findings.append(ShardFinding(severity=sev, message=str(item["message"])))
+            except (json.JSONDecodeError, ValueError):
+                pass
+        else:
+            kept.append(lines[i])
+            i += 1
+
+    clean = "\n".join(kept).strip()
+    return clean, findings
+
+
+def _extract_findings_from_review_files(files: list) -> "list":
+    """Parse generated review Markdown files for findings in severity-named sections.
+
+    Looks for headings ## Critical, ## High, ## Medium, ## Low (and variants like
+    ## Critical Issues, ## High Risk) and extracts bullet/numbered list items below them.
+    Falls back to reading the file from disk when in-memory content is unavailable.
+    Returns a list of ShardFinding objects.
+    """
+    import re as _re
+    from pathlib import Path as _Path
+    from openshard.history.shard_contract import ShardFinding, _SEVERITY_ORDER
+
+    findings: list[ShardFinding] = []
+    _valid_sevs = {s.lower(): s for s in _SEVERITY_ORDER if s != "Note"}
+    _HEADING_RE = _re.compile(r'^#{1,3}\s+(.+)$')
+    _BULLET_RE = _re.compile(r'^[\-\*•]\s+(.+)$')
+    _NUM_RE = _re.compile(r'^\d+[.)]\s+(.+)$')
+
+    for f in files:
+        path = getattr(f, "path", None) or (f if isinstance(f, str) else "")
+        if not isinstance(path, str) or not path.lower().endswith(".md"):
+            continue
+        content = getattr(f, "content", None) or ""
+        if not content:
+            try:
+                disk_path = _Path(path)
+                if disk_path.is_file():
+                    content = disk_path.read_text(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
+        if not content:
+            continue
+
+        current_sev: "str | None" = None
+        for line in content.splitlines():
+            stripped = line.strip()
+            heading_m = _HEADING_RE.match(stripped)
+            if heading_m:
+                text = heading_m.group(1).strip().lower()
+                matched = None
+                for sev_lower, sev in _valid_sevs.items():
+                    if text == sev_lower or text.startswith(sev_lower + " "):
+                        matched = sev
+                        break
+                current_sev = matched
+                continue
+            if current_sev is None:
+                continue
+            bullet_m = _BULLET_RE.match(stripped)
+            if bullet_m:
+                msg = bullet_m.group(1).strip()
+                if msg and len(msg) > 4:
+                    findings.append(ShardFinding(severity=current_sev, message=msg))
+                continue
+            num_m = _NUM_RE.match(stripped)
+            if num_m:
+                msg = num_m.group(1).strip()
+                if msg and len(msg) > 4:
+                    findings.append(ShardFinding(severity=current_sev, message=msg))
+
+    return findings
+
+
+def _extract_findings_from_model_answer(text: str) -> "list":
+    """Extract findings from a plain-text model answer using severity heading + bullet format.
+
+    Recognised heading styles (all map to the corresponding severity):
+      Critical / Critical: / ## Critical / ### Critical Issues /
+      **Critical** / Critical findings / High risk / Medium issues / Low priority
+
+    Only bullet (-, *, •) and numbered list items beneath a heading are extracted.
+    Prose lines are ignored.
+    """
+    import re as _re
+    from openshard.history.shard_contract import ShardFinding, _SEVERITY_ORDER
+
+    if not text:
+        return []
+
+    _valid_sevs = {s.lower(): s for s in _SEVERITY_ORDER if s != "Note"}
+    _SUFFIX_WORDS = frozenset({
+        "issue", "issues", "risk", "risks",
+        "finding", "findings", "priority", "priorities",
+    })
+    _STRIP_RE = _re.compile(r'^#+\s*|\*+')
+    _BULLET_RE = _re.compile(r'^[\-\*•]\s+(.+)$')
+    _NUM_RE = _re.compile(r'^\d+[.)]\s+(.+)$')
+
+    findings: list[ShardFinding] = []
+    current_sev: "str | None" = None
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        clean = _STRIP_RE.sub("", stripped).rstrip(":").strip()
+        parts = clean.split()
+        if parts:
+            first = parts[0].lower()
+            if first in _valid_sevs:
+                rest = [w.lower() for w in parts[1:]]
+                if not rest or all(w in _SUFFIX_WORDS for w in rest):
+                    current_sev = _valid_sevs[first]
+                    continue
+
+        if current_sev is None:
+            continue
+
+        bullet_m = _BULLET_RE.match(stripped)
+        if bullet_m:
+            msg = bullet_m.group(1).strip()
+            if msg and len(msg) > 4:
+                findings.append(ShardFinding(severity=current_sev, message=msg))
+            continue
+        num_m = _NUM_RE.match(stripped)
+        if num_m:
+            msg = num_m.group(1).strip()
+            if msg and len(msg) > 4:
+                findings.append(ShardFinding(severity=current_sev, message=msg))
+
+    return findings
+
+
+def render_review_tldr_memo(findings: list, files: list) -> str:
+    """Return a plain-English findings memo to display before the receipt. Pure, no I/O.
+
+    Groups findings by severity (Critical → High → Medium → Low), caps each severity,
+    groups repeated metadata findings into one line, then lists files created.
+    """
+    from openshard.history.shard_contract import (
+        _FINDING_ICONS,
+        _SEVERITY_ORDER,
+        _UNICODE_OK as _UNIC,
+        group_review_findings,
+    )
+
+    if not findings:
+        return ""
+
+    visible, meta_group, hidden, raw_total = group_review_findings(findings)
+
+    lines: list[str] = []
+
+    visible_areas = len(visible) + (1 if meta_group else 0)
+    if raw_total == visible_areas:
+        lines.append(f"Found {visible_areas} {'issue' if visible_areas == 1 else 'issues'} worth addressing.")
+    else:
+        lines.append(
+            f"Found {visible_areas} issue {'area' if visible_areas == 1 else 'areas'} worth addressing. "
+            f"{raw_total} raw findings recorded."
+        )
+
+    by_severity: dict[str, list] = {}
+    for f in visible:
+        by_severity.setdefault(f.severity, []).append(f)
+
+    rendered_sevs: set[str] = set()
+    for sev in _SEVERITY_ORDER:
+        group = by_severity.get(sev)
+        if not group:
+            continue
+        lines.append("")
+        lines.append(sev)
+        rendered_sevs.add(sev)
+        icon = _FINDING_ICONS.get(sev, "⚠" if _UNIC else "!")
+        for f in group:
+            lines.append(f"{icon}  {f.message}")
+
+    if meta_group:
+        if "Medium" not in rendered_sevs:
+            lines.append("")
+            lines.append("Medium")
+        icon_m = _FINDING_ICONS.get("Medium", "~")
+        lines.append(f"{icon_m}  {meta_group.message}")
+
+    if hidden > 0:
+        lines.append("")
+        lines.append(f"+{hidden} more detailed findings available in /last --more")
+
+    if files:
+        lines.append("")
+        lines.append("Files created")
+        for f in files:
+            path = getattr(f, "path", None) or (f if isinstance(f, str) else "")
+            if path:
+                lines.append(f"  {path}")
+
+    return "\n".join(lines)
+
+
+def render_review_fallback_memo(files: list, *, include_diagnostic: bool = False) -> str:
+    """Return a fallback review memo when no structured findings were captured. Pure, no I/O.
+
+    When files were created, mentions them and the generated review files.
+    When no files exist, does not mention generated review files.
+    """
+    if files:
+        lines: list[str] = ["OpenShard completed the review."]
+        if include_diagnostic:
+            lines.append("Structured findings were not captured for this run.")
+        lines.append("Detailed findings are available in the generated review files.")
+        lines.append("")
+        lines.append("Files created")
+        for f in files:
+            path = getattr(f, "path", None) or (f if isinstance(f, str) else "")
+            if path:
+                lines.append(f"  {path}")
+    else:
+        lines = [
+            "OpenShard completed the review, but no structured findings were captured for this run."
+        ]
+    return "\n".join(lines)
+
+
 def render_post_run(
     *,
     stage_runs: list[StageRun],
@@ -1742,18 +2017,43 @@ def render_post_run(
     approval: str = "Not recorded",
     is_native: bool = False,
     exec_result_summary: str = "",
+    findings: "list | None" = None,
+    is_review_task: bool = False,
+    generator_model: "str | None" = None,
 ) -> None:
     """Render the post-execution receipt in compact shard format."""
     import click
     from openshard.history.shard_contract import build_live_run_receipt, render_compact_shard_receipt
 
+    _findings = list(findings) if findings else []
+
+    _result_summary = exec_result_summary
+    if _findings:
+        from openshard.history.shard_contract import group_review_findings
+        _visible_sub, _meta_grp, _, _raw_total = group_review_findings(_findings)
+        _visible_areas = len(_visible_sub) + (1 if _meta_grp else 0)
+        if _raw_total == _visible_areas:
+            _result_summary = f"{_visible_areas} {'issue' if _visible_areas == 1 else 'issues'} found."
+        else:
+            _result_summary = f"{_visible_areas} issue areas found. {_raw_total} raw findings recorded."
+        memo = render_review_tldr_memo(_findings, final_files or [])
+        click.echo(memo)
+    elif is_review_task:
+        _result_summary = "Review completed."
+        fallback = render_review_fallback_memo(
+            final_files or [],
+            include_diagnostic=(detail in ("more", "full")),
+        )
+        click.echo(fallback)
+
+    _routing_model = getattr(routing_decision, "model", None) or generator_model
     receipt = build_live_run_receipt(
         task=task,
         run_id=run_id,
         run_index=run_index,
         agent="OpenShard Native" if is_native else "OpenShard",
         stage_runs=stage_runs or [],
-        routing_model=getattr(routing_decision, "model", None),
+        routing_model=_routing_model,
         risk=risk,
         sandbox=sandbox,
         files_changed=len(final_files) if final_files else 0,
@@ -1761,8 +2061,10 @@ def render_post_run(
         verification_passed=verification_passed,
         approval=approval,
         estimated_cost=getattr(usage, "estimated_cost", None) if usage is not None else None,
-        result_summary=exec_result_summary,
+        result_summary=_result_summary,
+        result=_result_summary if _findings else None,
         agent_notes=list(notes) if notes else [],
+        findings=_findings if _findings else None,
     )
     click.echo("")
     click.echo(render_compact_shard_receipt(receipt))

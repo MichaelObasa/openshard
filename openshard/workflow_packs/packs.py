@@ -28,6 +28,8 @@ class WorkflowPack:
     expected_receipt_value: str
     safety_notes: str
     tags: list[str]
+    execution_prompt_suffix: str = ""
+    workflow: str = ""
 
 
 def _validate_pack(raw: dict) -> WorkflowPack:
@@ -44,6 +46,8 @@ def _validate_pack(raw: dict) -> WorkflowPack:
         expected_receipt_value=raw["expected_receipt_value"],
         safety_notes=raw["safety_notes"],
         tags=raw["tags"],
+        execution_prompt_suffix=raw.get("execution_prompt_suffix", ""),
+        workflow=raw.get("workflow", ""),
     )
 
 

@@ -72,13 +72,14 @@ class AnthropicProvider(BaseProvider):
             raise ProviderError(str(exc)) from exc
 
     def execute(
-        self, model: str, prompt: str, system: str | None = None
+        self, model: str, prompt: str, system: str | None = None,
+        max_tokens: int | None = None,
     ) -> ChatResponse:
         """Send *prompt* to *model* via the Anthropic messages API."""
         native_model = _normalize_model_id(model)
         kwargs: dict = {
             "model": native_model,
-            "max_tokens": _DEFAULT_MAX_TOKENS,
+            "max_tokens": max_tokens if max_tokens is not None else _DEFAULT_MAX_TOKENS,
             "messages": [{"role": "user", "content": prompt}],
         }
         if system:

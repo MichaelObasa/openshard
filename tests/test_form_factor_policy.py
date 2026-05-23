@@ -56,7 +56,7 @@ def test_native_loop_enabled_helper_negative_values(value):
 # _derive_risk_level helper
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("category", ["security", "auth", "payments", "infra", "migration"])
+@pytest.mark.parametrize("category", ["security", "auth", "payments", "infra", "migration", "infrastructure"])
 def test_derive_risk_high_for_risk_categories(category):
     assert _derive_risk_level(category, None, write_requested=False) == "high"
 

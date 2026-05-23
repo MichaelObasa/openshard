@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Literal
 if TYPE_CHECKING:
     from openshard.analysis.repo import RepoFacts
 
-_HIGH_RISK_CATEGORIES = {"security", "auth", "payments", "infra", "migration"}
+_HIGH_RISK_CATEGORIES = {"security", "auth", "payments", "infra", "migration", "infrastructure"}
 _MEDIUM_RISK_CATEGORIES = {"complex"}
 
 

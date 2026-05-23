@@ -17,6 +17,9 @@ from openshard.cli.run_output import (
     _Spinner,
     _build_routing_line,
     _exec_message,
+    _extract_structured_findings,
+    _extract_findings_from_model_answer,
+    _extract_findings_from_review_files,
     _model_label,
     _profile_display_label,
     _print_dry_run,
@@ -134,6 +137,62 @@ def _build_explicit_file_context(task: str, *, root: Path | None = None) -> str:
         limit=3000,
         max_lines_per_snippet=25,
     )
+
+
+def _emit_review_debug(
+    *,
+    effective_executor: str,
+    selected_workflow: str,
+    opencode_explicit: bool,
+    task: str,
+    exec_result_summary: str,
+    exec_result_files_count: int,
+    exec_result_notes: list,
+    usage_info: Any,
+    extraction_source: "str | None",
+    findings_count: int,
+) -> None:
+    import os as _os
+    if _os.environ.get("OPENSHARD_DEBUG_REVIEW", "").strip() != "1":
+        return
+    _public_label = "OpenCode" if effective_executor == "opencode" else "OpenShard Native"
+    lines = [
+        "=== OPENSHARD_DEBUG_REVIEW ===",
+        f"executor_path:     {effective_executor}",
+        f"public_label:      {_public_label}",
+        f"selected_workflow: {selected_workflow}",
+        f"opencode_explicit: {opencode_explicit}",
+        f"is_review_task:    {'STRUCTURED_FINDINGS:' in task}",
+        f"task_has_suffix:   {'After completing your analysis' in task}",
+        f"task_preview:      {task[:500]!r}",
+        "---",
+        f"summary_len:       {len(exec_result_summary)}",
+        f"summary_preview:   {exec_result_summary[:3000]!r}",
+        "---",
+        f"files_count:       {exec_result_files_count}",
+        f"notes:             {exec_result_notes!r}",
+        f"usage:             {usage_info!r}",
+        "---",
+        f"extraction_source: {extraction_source or 'none (fallback)'}",
+        f"findings_count:    {findings_count}",
+        "=== END DEBUG ===",
+    ]
+    block = "\n".join(lines) + "\n"
+    sys.stderr.write(block)
+    sys.stderr.flush()
+    _dot_openshard = Path.cwd() / ".openshard"
+    if _dot_openshard.is_dir():
+        _log_dir = _dot_openshard / "debug"
+        _log_dir.mkdir(parents=True, exist_ok=True)
+        _log_file = _log_dir / "review-debug.log"
+    else:
+        import tempfile as _tmp
+        _log_file = Path(_tmp.gettempdir()) / "openshard-review-debug.log"
+    try:
+        with _log_file.open("a", encoding="utf-8") as _f:
+            _f.write(block)
+    except OSError:
+        pass
 
 
 @dataclass
@@ -525,6 +584,8 @@ class RunPipeline:
             pass
 
         _readonly_task = is_readonly_task(task)
+        _is_sf_task = "STRUCTURED_FINDINGS:" in task
+        _generation_max_tokens: int = 8192 if _is_sf_task else 16384
 
         _verification_plan = build_verification_plan(_cfg, _repo_facts)
 
@@ -699,17 +760,29 @@ class RunPipeline:
             if _explicit_ctx:
                 _skills_ctx = f"{_skills_ctx}\n\n{_explicit_ctx}" if _skills_ctx else _explicit_ctx
 
-        if _readonly_task and not dry_run:
-            _ro_instruction = (
-                "\n\n[IMPORTANT] This is a read-only analysis/explanation task. "
-                "Do not propose file changes. Do not create, update, delete, or rewrite files. "
-                "The `files` field in your response must be empty ([]). "
-                "Write your response as a third-person explanation of what the code does "
-                "(e.g. 'This file handles…', 'The function does…'). "
-                "Do NOT use phrases like 'Implemented', 'Updated', 'Created', or 'Added' "
-                "in your summary — those imply you made changes."
-            )
-            _skills_ctx = f"{_skills_ctx}{_ro_instruction}" if _skills_ctx else _ro_instruction
+        if (_readonly_task or _is_sf_task) and not dry_run:
+            if "STRUCTURED_FINDINGS:" in task:
+                # Review/security pack: model must put COMPLETE multi-line analysis in summary field.
+                # The generic "one sentence, third-person" instruction conflicts with this requirement.
+                _rv_instruction = (
+                    "\n\n[IMPORTANT] This is a read-only security/configuration review task. "
+                    "Do not propose file changes. The `files` array must be empty ([]). "
+                    "Your `summary` field must contain your COMPLETE multi-line analysis — "
+                    "severity sections and the STRUCTURED_FINDINGS line must be inside the summary. "
+                    "Do NOT truncate the summary to one sentence for this task."
+                )
+                _skills_ctx = f"{_skills_ctx}{_rv_instruction}" if _skills_ctx else _rv_instruction
+            else:
+                _ro_instruction = (
+                    "\n\n[IMPORTANT] This is a read-only analysis/explanation task. "
+                    "Do not propose file changes. Do not create, update, delete, or rewrite files. "
+                    "The `files` field in your response must be empty ([]). "
+                    "Write your response as a third-person explanation of what the code does "
+                    "(e.g. 'This file handles…', 'The function does…'). "
+                    "Do NOT use phrases like 'Implemented', 'Updated', 'Created', or 'Added' "
+                    "in your summary — those imply you made changes."
+                )
+                _skills_ctx = f"{_skills_ctx}{_ro_instruction}" if _skills_ctx else _ro_instruction
 
         if detail != "default":
             if _force_stages is None:
@@ -899,7 +972,7 @@ class RunPipeline:
                         routing_decision.rationale if routing_decision else "",
                     ))
                     try:
-                        exec_result = generator.generate(_impl_task, model=_stage_model, repo_facts=_repo_facts, skills_context=_skills_ctx)
+                        exec_result = generator.generate(_impl_task, model=_stage_model, repo_facts=_repo_facts, skills_context=_skills_ctx, max_tokens=_generation_max_tokens, is_review_task=_is_sf_task)
                     except RuntimeError as exc:
                         raise click.ClickException(str(exc))
                     except ProviderAuthError:
@@ -940,7 +1013,7 @@ class RunPipeline:
                 if opencode_mode:
                     exec_result = generator.generate(task, workspace=workspace)
                 else:
-                    exec_result = generator.generate(task, model=_effective_model, repo_facts=_repo_facts, skills_context=_skills_ctx)
+                    exec_result = generator.generate(task, model=_effective_model, repo_facts=_repo_facts, skills_context=_skills_ctx, max_tokens=_generation_max_tokens, is_review_task=_is_sf_task)
             except RuntimeError as exc:
                 raise click.ClickException(str(exc))
             except ProviderAuthError:
@@ -1108,7 +1181,7 @@ class RunPipeline:
         # Safety net: discard generated file changes for read-only tasks even if the
         # model ignored the read-only instruction injected into the context.
         # For dry-run, exec_result.files is already [] so this block never fires.
-        if _readonly_task and exec_result.files:
+        if (_readonly_task or _is_sf_task) and exec_result.files:
             click.echo(f"\nRead-only task — {len(exec_result.files)} generated change(s) discarded.")
             exec_result = ExecutionResult(
                 summary=exec_result.summary,
@@ -1126,8 +1199,76 @@ class RunPipeline:
                 _lang_str = ", ".join(_repo_facts.languages) if _repo_facts.languages else "unknown"
                 confirm_or_abort(f"{_sm_dec.reason} (repo stack: {_lang_str})")
 
-        click.echo("\nDone")
-        click.echo(exec_result.summary)
+        _is_review_task = "STRUCTURED_FINDINGS:" in task
+        _TASK_SUFFIX_STRIP = "\n\nAfter completing your analysis"
+        _task_display = task[:task.index(_TASK_SUFFIX_STRIP)].rstrip() if _TASK_SUFFIX_STRIP in task else task
+        _clean_summary, _extracted_findings = _extract_structured_findings(exec_result.summary)
+        _extraction_source: "str | None" = None
+        if _extracted_findings:
+            _extraction_source = "STRUCTURED_FINDINGS"
+        elif _is_review_task:
+            _extracted_findings = _extract_findings_from_model_answer(_clean_summary)
+            if _extracted_findings:
+                _extraction_source = "plain-text"
+            elif final_files:
+                _extracted_findings = _extract_findings_from_review_files(final_files)
+                if _extracted_findings:
+                    _extraction_source = "markdown-files"
+
+        # Deterministic static analysis for Terraform review packs.
+        # Runs unconditionally when this is a review task so the demo is reliable
+        # even when the model does not produce valid STRUCTURED_FINDINGS JSON.
+        # Static findings are merged AFTER model findings so model context is preserved.
+        if _is_review_task:
+            try:
+                from openshard.review.terraform_checker import scan_terraform
+                _static_findings = scan_terraform(Path.cwd())
+                if _static_findings:
+                    # Merge: keep model findings first, then append static ones that
+                    # are not exact message duplicates.
+                    _existing_msgs = {f.message for f in _extracted_findings}
+                    _new_static = [
+                        f for f in _static_findings if f.message not in _existing_msgs
+                    ]
+                    _extracted_findings = list(_extracted_findings) + _new_static
+                    if _new_static:
+                        _extraction_source = _extraction_source or "static-review"
+            except Exception:
+                pass
+
+        if _is_review_task:
+            _emit_review_debug(
+                effective_executor=effective_executor,
+                selected_workflow=effective_workflow,
+                opencode_explicit=(effective_executor == "opencode"),
+                task=task,
+                exec_result_summary=exec_result.summary,
+                exec_result_files_count=len(exec_result.files),
+                exec_result_notes=exec_result.notes or [],
+                usage_info=exec_result.usage,
+                extraction_source=_extraction_source,
+                findings_count=len(_extracted_findings),
+            )
+        _findings_extra: dict = {}
+        if _is_review_task:
+            _findings_extra["is_review_task"] = True
+        if _extracted_findings:
+            _findings_extra["findings"] = [
+                {
+                    "severity": f.severity,
+                    "message": f.message,
+                    **({"path": f.path} if f.path else {}),
+                    **({"line": f.line} if f.line is not None else {}),
+                    "source": "static-review" if f.path else "model",
+                }
+                for f in _extracted_findings
+            ]
+            click.echo("\nReview complete")
+        elif _is_review_task:
+            click.echo("\nReview complete")
+        else:
+            click.echo("\nDone")
+            click.echo(_clean_summary)
         _tier_validated = _validator_result is not None
         _tier_passed = (
             _validator_result.get("verdict", "fail") in ("pass", "warn")
@@ -1142,7 +1283,10 @@ class RunPipeline:
             if _form_factor_decision and _form_factor_decision.risk_level
             else "Not recorded"
         )
-        _receipt_sandbox = "Not required" if _readonly_task else "Not recorded"
+        # Review tasks are always at least High risk regardless of routing category
+        if _is_review_task and _receipt_risk in ("Not recorded", "Low"):
+            _receipt_risk = "High"
+        _receipt_sandbox = "Off" if (_readonly_task or _is_review_task) else "Not recorded"
         _receipt_approval = "Not required" if _readonly_task else "Not recorded"
         _receipt_index: "int | None" = None
         try:
@@ -1165,15 +1309,18 @@ class RunPipeline:
             notes=exec_result.notes or [],
             repo_facts=_repo_facts,
             mode_label=_mode_label,
+            task=_task_display,
             usage=usage,
-            task=task,
             run_id=_run_id,
             run_index=_receipt_index,
             risk=_receipt_risk,
             sandbox=_receipt_sandbox,
             approval=_receipt_approval,
             is_native=(effective_executor == "native"),
-            exec_result_summary=exec_result.summary,
+            exec_result_summary=_clean_summary,
+            findings=_extracted_findings if _extracted_findings else None,
+            is_review_task=_is_review_task,
+            generator_model=getattr(generator, "model", None),
         )
 
         if dry_run:
@@ -1197,11 +1344,15 @@ class RunPipeline:
                 if _dr_extra is None:
                     _dr_extra = {}
                 _dr_extra.update(_feedback_receipt)
+            if _findings_extra:
+                if _dr_extra is None:
+                    _dr_extra = {}
+                _dr_extra.update(_findings_extra)
             try:
-                _log_run(start, task, generator, retry_triggered, final_files,
+                _log_run(start, _task_display, generator, retry_triggered, final_files,
                          verification_attempted=False, verification_passed=None,
                          workspace=None, usage=usage, model=_routed_model,
-                         summary=exec_result.summary, notes=exec_result.notes,
+                         summary=_clean_summary, notes=exec_result.notes,
                          stage_runs=stage_runs, routing_decision=routing_decision,
                          _scored=_scored, repo_facts=_repo_facts,
                          matched_skills=_matched_skills,
@@ -1517,10 +1668,14 @@ class RunPipeline:
                         if _vf_extra is None:
                             _vf_extra = {}
                         _vf_extra.update(_feedback_receipt)
-                    _log_run(start, task, generator, retry_triggered, final_files,
+                    if _findings_extra:
+                        if _vf_extra is None:
+                            _vf_extra = {}
+                        _vf_extra.update(_findings_extra)
+                    _log_run(start, _task_display, generator, retry_triggered, final_files,
                              verification_attempted=True, verification_passed=False,
                              workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
-                             summary=exec_result.summary, notes=exec_result.notes,
+                             summary=_clean_summary, notes=exec_result.notes,
                              stage_runs=stage_runs, routing_decision=routing_decision,
                              _scored=_scored, repo_facts=_repo_facts,
                              matched_skills=_matched_skills,
@@ -1947,12 +2102,16 @@ class RunPipeline:
                     if _native_meta.osn_loop_summary is not None
                     else None
                 )
+        if _findings_extra:
+            if _extra_metadata is None:
+                _extra_metadata = {}
+            _extra_metadata.update(_findings_extra)
         try:
-            _log_run(start, task, generator, retry_triggered, final_files,
+            _log_run(start, _task_display, generator, retry_triggered, final_files,
                      verification_attempted=(write and verify),
                      verification_passed=verification_passed,
                      workspace=workspace, usage=usage, retry_usage=retry_usage, model=_routed_model,
-                     summary=exec_result.summary, notes=exec_result.notes,
+                     summary=_clean_summary, notes=exec_result.notes,
                      stage_runs=stage_runs, routing_decision=routing_decision,
                      _scored=_scored, repo_facts=_repo_facts,
                      matched_skills=_matched_skills,
@@ -2001,7 +2160,7 @@ class RunPipeline:
 
 _LOG_PATH = Path(".openshard") / "runs.jsonl"
 
-_OPENCODE_SIGNALS: list[tuple[list[str], str]] = [
+_NATIVE_SIGNALS: list[tuple[list[str], str]] = [
     (["all files", "every file", "multiple files", "many files"], "multi-file scope"),
     (["throughout the", "across the codebase", "across all files"], "multi-file scope"),
     # refactor / architecture / codebase are now handled in direct mode via minimax
@@ -2012,14 +2171,15 @@ def _suggest_executor(task: str) -> tuple[str, str]:
     """Return ``(executor, reason)`` recommendation for *task*.
 
     - Defaults to ``"direct"`` for short, focused tasks.
-    - Returns ``"opencode"`` for large, multi-file, or ambiguous tasks.
+    - Returns ``"native"`` for large, multi-file, or complex tasks.
+    - ``"opencode"`` is never returned here; it requires explicit ``--workflow opencode``.
     """
     lower = task.lower()
     if len(task.split()) > 60:
-        return "opencode", "large or complex task"
-    for keywords, label in _OPENCODE_SIGNALS:
+        return "native", "large or complex task"
+    for keywords, label in _NATIVE_SIGNALS:
         if any(kw in lower for kw in keywords):
-            return "opencode", label
+            return "native", label
     return "direct", "focused task"
 
 

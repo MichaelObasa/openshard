@@ -229,7 +229,7 @@ class TestCompactReceiptFields(unittest.TestCase):
         self.assertIn("Task", self.out)
 
     def test_agent_field(self):
-        self.assertIn("Agent", self.out)
+        self.assertIn("Executor", self.out)
 
     def test_strategy_field_absent(self):
         self.assertNotIn("Strategy", self.out)
@@ -465,7 +465,7 @@ class TestReadOnlySandboxNotFalsified(unittest.TestCase):
             "workspace_path": "/tmp/some-workspace",
         }
         receipt = build_shard_receipt(entry)
-        self.assertEqual(receipt.sandbox, "Not required")
+        self.assertEqual(receipt.sandbox, "Off")
         self.assertNotEqual(receipt.sandbox, "On")
 
     def test_workspace_path_alone_does_not_imply_on(self):
@@ -1218,7 +1218,7 @@ class TestCompactReceiptExactFormat(unittest.TestCase):
 
     def test_all_required_fields_present(self):
         out = render_compact_shard_receipt(self._make_receipt())
-        for field in ("Task", "Agent", "Model", "Risk", "Sandbox",
+        for field in ("Task", "Executor", "Model", "Risk", "Sandbox",
                       "Changed", "Checks", "Approval", "Cost", "Result"):
             self.assertIn(field, out, f"Required field {field!r} missing from compact receipt")
 
@@ -1255,7 +1255,7 @@ class TestCompactReceiptExactFormat(unittest.TestCase):
             "  RECEIPT — shard-20260519-0042",
             sep,
             "  Task        Review Terraform networking change",
-            "  Agent       OpenShard Native",
+            "  Executor    OpenShard Native",
             "  Model       claude-sonnet-4-5",
             "  Risk        High",
             "  Sandbox     On",
@@ -1430,3 +1430,65 @@ class TestResultDisplay(unittest.TestCase):
         out = render_compact_shard_receipt(receipt)
         self.assertIn("FINDINGS", out)
         self.assertIn("Open port 22 detected", out)
+
+
+class TestBuildShardReceiptStageRunsFallback(unittest.TestCase):
+    """build_shard_receipt falls back to stage_runs for model and cost when top-level fields are absent."""
+
+    def _entry_with_stage_runs(self, model="anthropic/claude-sonnet-4-6", cost=0.0123):
+        return {
+            "task": "review this codebase",
+            "timestamp": "2026-05-22T00:00:00Z",
+            "stage_runs": [
+                {"stage_type": "implementation", "model": model, "cost": cost, "duration": 5.0},
+            ],
+        }
+
+    def test_model_from_stage_runs_when_no_top_level_model(self):
+        receipt = build_shard_receipt(self._entry_with_stage_runs())
+        self.assertNotEqual(receipt.model_display, "Not recorded")
+        self.assertIn("Claude Sonnet 4.6", receipt.model_display)
+
+    def test_cost_from_stage_runs_when_no_estimated_cost(self):
+        receipt = build_shard_receipt(self._entry_with_stage_runs(cost=0.0123))
+        self.assertNotEqual(receipt.cost_display, "Not recorded")
+        self.assertIn("0.0123", receipt.cost_display)
+
+    def test_cost_summed_across_multiple_stage_runs(self):
+        entry = {
+            "task": "review",
+            "timestamp": "2026-05-22T00:00:00Z",
+            "stage_runs": [
+                {"stage_type": "planning", "model": "anthropic/claude-sonnet-4-6", "cost": 0.01, "duration": 2.0},
+                {"stage_type": "implementation", "model": "anthropic/claude-sonnet-4-6", "cost": 0.02, "duration": 3.0},
+            ],
+        }
+        receipt = build_shard_receipt(entry)
+        self.assertIn("0.0300", receipt.cost_display)
+
+    def test_model_not_recorded_when_stage_runs_empty(self):
+        entry = {"task": "t", "timestamp": "2026-05-22T00:00:00Z", "stage_runs": []}
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.model_display, "Not recorded")
+
+    def test_is_review_task_result_when_no_findings(self):
+        entry = {
+            "task": "review iac",
+            "timestamp": "2026-05-22T00:00:00Z",
+            "is_review_task": True,
+        }
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.result, "Review completed.")
+
+    def test_findings_count_result_when_findings_present(self):
+        entry = {
+            "task": "review iac",
+            "timestamp": "2026-05-22T00:00:00Z",
+            "is_review_task": True,
+            "findings": [
+                {"severity": "Critical", "message": "Public bucket"},
+                {"severity": "High", "message": "Wildcard IAM"},
+            ],
+        }
+        receipt = build_shard_receipt(entry)
+        self.assertIn("2 issues", receipt.result)
