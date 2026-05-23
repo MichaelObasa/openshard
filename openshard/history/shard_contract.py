@@ -4,7 +4,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Optional
 
 _PROFILE_TO_STRATEGY: dict[str, str] = {
@@ -393,6 +393,17 @@ def _result_display(summary: str) -> str:
     return clipped or line[:_MAX_RESULT]
 
 
+def _workspace_folder_name(raw: object) -> str | None:
+    if not raw:
+        return None
+    value = str(raw).rstrip("\\/")
+    if not value:
+        return None
+    if "\\" in value:
+        return PureWindowsPath(value).name or None
+    return Path(value).name or None
+
+
 def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceipt:
     """Convert a raw run-history entry dict into a ShardReceipt. Never raises."""
     timestamp = entry.get("timestamp") or ""
@@ -561,8 +572,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
 
     repo: Optional[str] = entry.get("repo_name") or None
     if repo is None:
-        _wp = entry.get("workspace_path")
-        repo = Path(_wp).name or None if _wp else None
+        repo = _workspace_folder_name(entry.get("workspace_path"))
 
     obs = entry.get("observation") or {}
     _dirty = obs.get("dirty_diff_present")
