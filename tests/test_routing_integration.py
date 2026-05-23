@@ -87,7 +87,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
 
         self._run([task], manager, generator)
 
-        generator.generate.assert_called_once_with(task, model="openrouter/fast-model", repo_facts=ANY, skills_context="")
+        generator.generate.assert_called_once_with(task, model="openrouter/fast-model", repo_facts=ANY, skills_context="", max_tokens=16384, is_review_task=False)
 
     def test_fallback_when_no_candidate(self):
         """When the only inventory entry fails hard filter, routing decision model is used."""
@@ -100,7 +100,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
         self._run([task], manager, generator)
 
         # routing_decision.model for "visual" category is moonshotai/kimi-k2.5
-        generator.generate.assert_called_once_with(task, model="moonshotai/kimi-k2.5", repo_facts=ANY, skills_context="")
+        generator.generate.assert_called_once_with(task, model="moonshotai/kimi-k2.5", repo_facts=ANY, skills_context="", max_tokens=16384, is_review_task=False)
 
     def test_provider_manager_failure_uses_fallback(self):
         """When ProviderManager.get_inventory raises, routing decision model is used."""
@@ -112,7 +112,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
         self._run([task], manager, generator)
 
         # standard task → MODEL_MAIN
-        generator.generate.assert_called_once_with(task, model="z-ai/glm-5.1", repo_facts=ANY, skills_context="")
+        generator.generate.assert_called_once_with(task, model="z-ai/glm-5.1", repo_facts=ANY, skills_context="", max_tokens=16384, is_review_task=False)
 
     def test_provider_flag_restricts_candidates(self):
         """With --provider openrouter, only openrouter entries are considered.
@@ -132,7 +132,7 @@ class TestScoredRoutingIntegration(unittest.TestCase):
 
         self._run([task, "--provider", "openrouter"], manager, generator)
 
-        generator.generate.assert_called_once_with(task, model="openrouter/basic", repo_facts=ANY, skills_context="")
+        generator.generate.assert_called_once_with(task, model="openrouter/basic", repo_facts=ANY, skills_context="", max_tokens=16384, is_review_task=False)
 
     def test_scored_routing_logged(self):
         """_log_run is called with a ScoredRoutingResult that reflects the winning candidate."""
