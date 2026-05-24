@@ -1072,6 +1072,20 @@ _FAKE_ENTRY_EMPTY = {
     "review_checks": [],
 }
 
+_FAKE_ENTRY_WITH_EVIDENCE = {
+    "run_timeline": [{"label": "Scanned repo", "status": "completed"}],
+    "review_checks": [],
+    "file_context": {"paths": ["src/main.py", "demo-task.md"]},
+    "findings": [{"severity": "High", "message": "Bad config", "path": "database.tf"}],
+}
+
+_FAKE_ENTRY_NO_EVIDENCE = {
+    "run_timeline": [{"label": "Scanned repo", "status": "completed"}],
+    "review_checks": [],
+    "file_context": {"paths": []},
+    "findings": [],
+}
+
 
 @pytest.mark.asyncio
 async def test_action_blocks_appear_after_successful_run(tmp_path):
@@ -1275,6 +1289,134 @@ async def test_clear_still_empties_output_after_action_blocks(tmp_path):
             text = _text(app.query_one("#output-content", Static))
 
     assert text.strip() == ""
+
+
+# ---------------------------------------------------------------------------
+# Evidence block integration tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_evidence_block_appears_after_successful_run(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "RECEIPT — shard-20260524-0001\nDone.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_EVIDENCE),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "EVIDENCE" in text
+    assert "Read src/main.py" in text
+    assert "Finding source database.tf" in text
+
+
+@pytest.mark.asyncio
+async def test_evidence_absent_when_no_file_evidence(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "RECEIPT — shard-20260524-0001\nDone.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_NO_EVIDENCE),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "EVIDENCE" not in text
+
+
+@pytest.mark.asyncio
+async def test_failed_run_does_not_show_evidence(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Error: something went wrong\n"
+    mock_result.exit_code = 1
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_EVIDENCE),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "EVIDENCE" not in text
+    assert "Failed" in text
+
+
+@pytest.mark.asyncio
+async def test_last_more_does_not_show_evidence(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "RECEIPT — shard-20260524-0001\nFull details here.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_EVIDENCE),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/last more")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "EVIDENCE" not in text
+
+
+@pytest.mark.asyncio
+async def test_evidence_ordering_after_actions(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "RECEIPT — shard-20260524-0001\nDone.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_EVIDENCE),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert text.index("ACTIONS") < text.index("EVIDENCE")
 
 
 # ---------------------------------------------------------------------------

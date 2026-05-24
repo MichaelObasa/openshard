@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+_MAX_INSPECTED = 5
+_MAX_FINDINGS = 8
+
 
 def render_action_block(title: str, detail: str | None = None) -> str:
     lines = [f"  {title}"]
@@ -61,4 +64,32 @@ def render_check_actions_section(checks: list[dict]) -> str:
         lines.append(render_action_block(f"{icon} {name}", detail))
     if len(lines) == 1:
         return ""
+    return "\n".join(lines) + "\n"
+
+
+def render_evidence_section(
+    inspected_files: list[str], files_with_findings: list[str]
+) -> str:
+    if not inspected_files and not files_with_findings:
+        return ""
+    lines = ["[bold]EVIDENCE[/bold]"]
+
+    shown_i = inspected_files[:_MAX_INSPECTED]
+    for p in shown_i:
+        lines.append(render_action_block(f"Read {p}", "inspected file"))
+        lines.append("")
+    if len(inspected_files) > _MAX_INSPECTED:
+        lines.append(f"  +{len(inspected_files) - _MAX_INSPECTED} more inspected files")
+        lines.append("")
+
+    shown_f = files_with_findings[:_MAX_FINDINGS]
+    for p in shown_f:
+        lines.append(render_action_block(f"Finding source {p}", "file with findings"))
+        lines.append("")
+    if len(files_with_findings) > _MAX_FINDINGS:
+        lines.append(f"  +{len(files_with_findings) - _MAX_FINDINGS} more files with findings")
+        lines.append("")
+
+    while lines and lines[-1] == "":
+        lines.pop()
     return "\n".join(lines) + "\n"

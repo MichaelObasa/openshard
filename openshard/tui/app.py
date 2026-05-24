@@ -466,7 +466,11 @@ class OpenShardTui(App):
 
         failed = status.startswith("Failed")
         if is_run and not failed:
-            from openshard.tui.action_blocks import render_actions_section, render_check_actions_section
+            from openshard.tui.action_blocks import (
+                render_actions_section,
+                render_check_actions_section,
+                render_evidence_section,
+            )
             from openshard.tui.state import load_last_run_entry
 
             _entry = load_last_run_entry(self._path)
@@ -474,10 +478,14 @@ class OpenShardTui(App):
             if _entry:
                 _actions = render_actions_section(_entry.get("run_timeline") or [])
                 _check_actions = render_check_actions_section(_entry.get("review_checks") or [])
-                if _actions:
-                    _action_parts.append(_actions)
-                if _check_actions:
-                    _action_parts.append(_check_actions)
+                from openshard.history.shard_contract import build_shard_receipt
+                _receipt = build_shard_receipt(_entry)
+                _evidence = render_evidence_section(
+                    _receipt.inspected_files, _receipt.files_referenced
+                )
+                for _part in (_actions, _check_actions, _evidence):
+                    if _part:
+                        _action_parts.append(_part)
             _action_summary = "\n".join(_action_parts)
 
             _raw_display = _extract_run_display(output)
