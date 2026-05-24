@@ -204,7 +204,10 @@ def _format_model_slug(raw: str) -> str:
 
 
 def _model_label(model: str) -> str:
-    return _MODEL_SHORT.get(model, _format_model_slug(model))
+    if model in _MODEL_SHORT:
+        return _MODEL_SHORT[model]
+    from openshard.models.registry import display_name_for
+    return display_name_for(model, fallback=_format_model_slug(model))
 
 
 def _profile_display_label(profile: str | None, is_readonly: bool = False) -> str:

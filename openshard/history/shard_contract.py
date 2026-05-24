@@ -297,6 +297,11 @@ def _display_model_name(slug: str) -> str:
     name_key = key.split("/", 1)[-1]
     if name_key in _MODEL_FRIENDLY_NAMES:
         return _MODEL_FRIENDLY_NAMES[name_key]
+    # Fall back to centralized registry for models not in the local table.
+    from openshard.models.registry import display_name_for as _reg_display
+    reg_name = _reg_display(slug)
+    if reg_name != slug:
+        return reg_name
     return _format_model_slug_shard(slug.split("/", 1)[-1])
 
 
