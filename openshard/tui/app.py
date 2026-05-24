@@ -470,20 +470,22 @@ class OpenShardTui(App):
                 render_actions_section,
                 render_check_actions_section,
                 render_evidence_section,
+                render_result_section,
             )
             from openshard.tui.state import load_last_run_entry
 
             _entry = load_last_run_entry(self._path)
             _action_parts: list[str] = []
             if _entry:
-                _actions = render_actions_section(_entry.get("run_timeline") or [])
-                _check_actions = render_check_actions_section(_entry.get("review_checks") or [])
                 from openshard.history.shard_contract import build_shard_receipt
                 _receipt = build_shard_receipt(_entry)
+                _result = render_result_section(_receipt)
+                _actions = render_actions_section(_entry.get("run_timeline") or [])
+                _check_actions = render_check_actions_section(_entry.get("review_checks") or [])
                 _evidence = render_evidence_section(
                     _receipt.inspected_files, _receipt.files_referenced
                 )
-                for _part in (_actions, _check_actions, _evidence):
+                for _part in (_result, _actions, _check_actions, _evidence):
                     if _part:
                         _action_parts.append(_part)
             _action_summary = "\n".join(_action_parts)

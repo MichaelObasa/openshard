@@ -1573,3 +1573,193 @@ async def test_spacing_blank_line_between_openshard_and_actions(tmp_path):
     actions_pos = text.find("ACTIONS")
     between = text[openshard_pos:actions_pos]
     assert between.count("\n") >= 2
+
+
+# ---------------------------------------------------------------------------
+# RESULT block integration tests
+# ---------------------------------------------------------------------------
+
+_FAKE_ENTRY_WITH_SUMMARY = {
+    "run_timeline": [
+        {"label": "Scanned repo", "status": "completed"},
+    ],
+    "review_checks": [],
+    "summary": "All security checks passed with no critical findings.",
+    "form_factor": {"risk_level": "low"},
+    "write_path": "pipeline",
+    "estimated_cost": 0.048,
+}
+
+
+@pytest.mark.asyncio
+async def test_result_block_appears_on_fresh_successful_run(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Review complete\nDone.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_SUMMARY),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "RESULT" in text
+    assert "OPENSHARD" in text
+
+
+@pytest.mark.asyncio
+async def test_result_block_appears_before_actions_on_fresh_run(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Review complete\nDone.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_SUMMARY),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "RESULT" in text
+    assert "ACTIONS" in text
+    assert text.find("RESULT") < text.find("ACTIONS")
+
+
+@pytest.mark.asyncio
+async def test_result_block_not_shown_on_failed_run(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Error: something went wrong\n"
+    mock_result.exit_code = 1
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_SUMMARY),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "RESULT" not in text
+    assert "Failed" in text
+
+
+@pytest.mark.asyncio
+async def test_result_block_not_shown_when_no_entry(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Review complete\nDone.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=None),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "RESULT" not in text
+
+
+@pytest.mark.asyncio
+async def test_result_block_shows_cost_when_present(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Review complete\nDone.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_SUMMARY),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "Cost" in text
+    assert "$0.0480" in text
+
+
+@pytest.mark.asyncio
+async def test_original_output_preserved_alongside_result_block(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Review complete\nAll checks passed.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_SUMMARY),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "RESULT" in text
+    assert "All checks passed." in text
+
+
+@pytest.mark.asyncio
+async def test_last_more_output_has_no_result_block(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "RECEIPT — shard-20260524-0001\nFull details here.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_SUMMARY),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/last more")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "RESULT" not in text
