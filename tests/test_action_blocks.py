@@ -4,7 +4,9 @@ from openshard.tui.action_blocks import (
     render_action_block,
     render_actions_section,
     render_check_actions_section,
+polish/tui-file-evidence-blocks
     render_evidence_section,
+main
 )
 
 
@@ -168,6 +170,7 @@ def test_render_check_actions_section_multiple_checks():
     assert "[green]✓[/green]" in result
     assert "[dim]-[/dim]" in result
     assert "[red]✗[/red]" in result
+polish/tui-file-evidence-blocks
 
 
 # ---------------------------------------------------------------------------
@@ -248,3 +251,4 @@ def test_render_evidence_section_both_sections_present():
     result = render_evidence_section(["src/main.py"], ["database.tf"])
     assert "Read src/main.py" in result
     assert "Finding source database.tf" in result
+main
