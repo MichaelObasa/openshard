@@ -473,3 +473,8 @@ def supports(model_id: str, capability: str) -> bool:
     if attr is None:
         return False
     return bool(getattr(entry, attr))
+
+
+def all_models() -> list[ModelEntry]:
+    """Return all registered models as a list."""
+    return list(_REGISTRY)
