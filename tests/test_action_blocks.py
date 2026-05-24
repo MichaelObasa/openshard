@@ -4,6 +4,7 @@ from openshard.tui.action_blocks import (
     render_action_block,
     render_actions_section,
     render_check_actions_section,
+    render_evidence_section,
 )
 
 
@@ -167,3 +168,83 @@ def test_render_check_actions_section_multiple_checks():
     assert "[green]✓[/green]" in result
     assert "[dim]-[/dim]" in result
     assert "[red]✗[/red]" in result
+
+
+# ---------------------------------------------------------------------------
+# render_evidence_section
+# ---------------------------------------------------------------------------
+
+
+def test_render_evidence_section_both_empty_returns_empty():
+    assert render_evidence_section([], []) == ""
+
+
+def test_render_evidence_section_inspected_only():
+    result = render_evidence_section(["src/main.py"], [])
+    assert "Read src/main.py" in result
+    assert "↳ [dim]inspected file[/dim]" in result
+    assert "Finding source" not in result
+
+
+def test_render_evidence_section_findings_only():
+    result = render_evidence_section([], ["database.tf"])
+    assert "Finding source database.tf" in result
+    assert "↳ [dim]file with findings[/dim]" in result
+    assert "Read" not in result
+
+
+def test_render_evidence_section_header_is_bold():
+    result = render_evidence_section(["foo.py"], [])
+    assert "[bold]EVIDENCE[/bold]" in result
+
+
+def test_render_evidence_section_ends_with_newline():
+    result = render_evidence_section(["foo.py"], [])
+    assert result.endswith("\n")
+
+
+def test_render_evidence_section_blank_lines_between_items():
+    result = render_evidence_section(["a.py", "b.py"], [])
+    assert "\n\n" in result
+
+
+def test_render_evidence_section_limits_inspected_to_max():
+    files = [f"file{i}.py" for i in range(6)]
+    result = render_evidence_section(files, [])
+    assert result.count("Read file") == 5
+    assert "+1 more inspected files" in result
+
+
+def test_render_evidence_section_no_overflow_at_exact_limit():
+    files = [f"file{i}.py" for i in range(5)]
+    result = render_evidence_section(files, [])
+    assert "more inspected" not in result
+
+
+def test_render_evidence_section_limits_findings_to_max():
+    paths = [f"file{i}.tf" for i in range(9)]
+    result = render_evidence_section([], paths)
+    assert result.count("Finding source") == 8
+    assert "+1 more files with findings" in result
+
+
+def test_render_evidence_section_no_overflow_at_exact_findings_limit():
+    paths = [f"file{i}.tf" for i in range(8)]
+    result = render_evidence_section([], paths)
+    assert "more files with findings" not in result
+
+
+def test_render_evidence_section_read_label_format():
+    result = render_evidence_section(["demo-task.md"], [])
+    assert "Read demo-task.md" in result
+
+
+def test_render_evidence_section_finding_label_format():
+    result = render_evidence_section([], ["iam.tf"])
+    assert "Finding source iam.tf" in result
+
+
+def test_render_evidence_section_both_sections_present():
+    result = render_evidence_section(["src/main.py"], ["database.tf"])
+    assert "Read src/main.py" in result
+    assert "Finding source database.tf" in result
