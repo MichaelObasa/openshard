@@ -397,10 +397,12 @@ def _render_native_receipt(native_meta: Any) -> str:
         )
 
     approval_receipt = getattr(native_meta, "approval_receipt", None)
-    if approval_receipt is not None and getattr(approval_receipt, "granted", False):
+    if approval_receipt is None:
+        parts.append("No risky writes")
+    elif getattr(approval_receipt, "granted", False):
         parts.append("Write approved")
     else:
-        parts.append("No risky writes")
+        parts.append("Writes blocked")
 
     parts.append("Receipt saved")
     return ". ".join(parts) + "."

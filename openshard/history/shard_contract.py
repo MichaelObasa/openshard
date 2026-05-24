@@ -333,6 +333,9 @@ class ShardReceipt:
     agent_notes: list[str] = field(default_factory=list)
     run_timeline: list = field(default_factory=list)
     developer_feedback: Optional[dict] = None
+    approval_required: bool = False
+    approval_granted: Optional[bool] = None
+    approval_reason: str = ""
 
 
 def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
@@ -498,11 +501,16 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         if approval_receipt_raw.get("granted"):
             approval = "Required → Granted"
         else:
-            approval = "Required → Pending"
+            approval = "Required → Denied"
     elif ff_read_only or write_path == "pipeline":
         approval = "Not required"
     else:
         approval = "Not recorded"
+    _approval_required = bool(approval_receipt_raw)
+    _approval_granted: Optional[bool] = (
+        approval_receipt_raw.get("granted") if approval_receipt_raw else None
+    )
+    _approval_reason: str = approval_receipt_raw.get("reason", "") if approval_receipt_raw else ""
 
     cost_raw = entry.get("estimated_cost")
     if cost_raw is None:
@@ -632,6 +640,9 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         files_changed=files_changed,
         checks_display=checks_display,
         approval=approval,
+        approval_required=_approval_required,
+        approval_granted=_approval_granted,
+        approval_reason=_approval_reason,
         cost_display=cost_display,
         result=result,
         status=status,
@@ -965,6 +976,16 @@ def render_full_shard_receipt(receipt: ShardReceipt) -> str:
         lines.append(_row("Commands", f"{len(receipt.blocked_commands)} blocked"))
     lines.append(_row("Approval", receipt.approval))
     lines.append("")
+
+    if receipt.approval_required:
+        lines.append(f"{_INDENT}APPROVAL")
+        lines.append(_row("Required", "yes"))
+        lines.append(_row("Status", "granted" if receipt.approval_granted else "denied"))
+        if receipt.approval_reason:
+            lines.append(_row("Reason", receipt.approval_reason))
+        if not receipt.approval_granted:
+            lines.append(_row("Result", "Writes blocked"))
+        lines.append("")
 
     lines.append(f"{_INDENT}CHECKS")
     if receipt.check_results:

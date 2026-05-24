@@ -1384,10 +1384,63 @@ class TestNativeApprovalReceiptRendering(unittest.TestCase):
         self.assertEqual(getattr(receipt, "source", None), "change_budget_soft_gate")
         self.assertTrue(getattr(receipt, "granted", None))
 
-    def test_reason_not_rendered_by_default(self):
+    def test_reason_shown_in_approval_section(self):
         entry = self._entry_with_receipt(granted=True)
         out = _render(entry, detail="more")
-        self.assertNotIn("proposal exceeds advisory change budget", out)
+        self.assertIn("proposal exceeds advisory change budget", out)
+
+
+class TestApprovalSectionInMore(unittest.TestCase):
+    """APPROVAL section in /last --more when approval data exists."""
+
+    def _entry_with_receipt(self, granted: bool, reason: str = "risky write task") -> dict:
+        return {
+            "workflow": "native",
+            "executor": "native",
+            "native_loop_steps": [],
+            "native_loop_trace": [],
+            "approval_receipt": {
+                "source": "change_budget_soft_gate",
+                "requested": True,
+                "granted": granted,
+                "action": "allow" if granted else "block",
+                "reason": reason,
+            },
+        }
+
+    def _entry_without_receipt(self) -> dict:
+        return {
+            "workflow": "native",
+            "executor": "native",
+            "native_loop_steps": [],
+            "native_loop_trace": [],
+        }
+
+    def test_approval_section_granted_in_more(self):
+        out = _render(self._entry_with_receipt(granted=True), detail="more")
+        self.assertIn("APPROVAL", out)
+        self.assertIn("granted", out)
+
+    def test_approval_section_denied_in_more(self):
+        out = _render(self._entry_with_receipt(granted=False), detail="more")
+        self.assertIn("APPROVAL", out)
+        self.assertIn("denied", out)
+
+    def test_approval_section_denied_shows_writes_blocked(self):
+        out = _render(self._entry_with_receipt(granted=False), detail="more")
+        self.assertIn("Writes blocked", out)
+
+    def test_approval_section_granted_no_writes_blocked(self):
+        out = _render(self._entry_with_receipt(granted=True), detail="more")
+        self.assertNotIn("Writes blocked", out)
+
+    def test_approval_section_reason_shown(self):
+        out = _render(self._entry_with_receipt(granted=True, reason="risky write task"), detail="more")
+        self.assertIn("risky write task", out)
+
+    def test_no_approval_section_without_receipt(self):
+        out = _render(self._entry_without_receipt(), detail="more")
+        self.assertNotIn("Writes blocked", out)
 
 
 class TestBaselineLineInLastDefault(unittest.TestCase):
