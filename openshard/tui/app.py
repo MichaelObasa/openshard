@@ -482,9 +482,7 @@ class OpenShardTui(App):
                 _result = render_result_section(_receipt)
                 _actions = render_actions_section(_entry.get("run_timeline") or [])
                 _check_actions = render_check_actions_section(_entry.get("review_checks") or [])
-                _evidence = render_evidence_section(
-                    _receipt.inspected_files, _receipt.files_referenced
-                )
+                _evidence = render_evidence_section(_receipt.file_evidence)
                 for _part in (_result, _actions, _check_actions, _evidence):
                     if _part:
                         _action_parts.append(_part)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openshard.history.shard_contract import ShardReceipt
+from openshard.history.shard_contract import FileEvidence, ShardReceipt
 from openshard.tui.action_blocks import (
     render_action_block,
     render_actions_section,
@@ -177,77 +177,91 @@ def test_render_check_actions_section_multiple_checks():
 # ---------------------------------------------------------------------------
 
 
-def test_render_evidence_section_both_empty_returns_empty():
-    assert render_evidence_section([], []) == ""
+def test_render_evidence_section_empty_list_returns_empty():
+    assert render_evidence_section([]) == ""
 
 
-def test_render_evidence_section_inspected_only():
-    result = render_evidence_section(["src/main.py"], [])
+def test_render_evidence_section_inspected_single_role():
+    fe = [FileEvidence("src/main.py", ["inspected"])]
+    result = render_evidence_section(fe)
     assert "Read src/main.py" in result
-    assert "↳ [dim]inspected file[/dim]" in result
+    assert "↳ [dim]inspected/read context[/dim]" in result
     assert "Finding source" not in result
 
 
-def test_render_evidence_section_findings_only():
-    result = render_evidence_section([], ["database.tf"])
+def test_render_evidence_section_finding_source_single_role():
+    fe = [FileEvidence("database.tf", ["finding_source"])]
+    result = render_evidence_section(fe)
     assert "Finding source database.tf" in result
-    assert "↳ [dim]file with findings[/dim]" in result
+    assert "↳ [dim]finding source[/dim]" in result
     assert "Read" not in result
 
 
+def test_render_evidence_section_changed_single_role():
+    fe = [FileEvidence("main.py", ["changed"])]
+    result = render_evidence_section(fe)
+    assert "Changed main.py" in result
+    assert "↳ [dim]changed[/dim]" in result
+
+
 def test_render_evidence_section_header_is_bold():
-    result = render_evidence_section(["foo.py"], [])
+    fe = [FileEvidence("foo.py", ["inspected"])]
+    result = render_evidence_section(fe)
     assert "[bold]EVIDENCE[/bold]" in result
 
 
 def test_render_evidence_section_ends_with_newline():
-    result = render_evidence_section(["foo.py"], [])
+    fe = [FileEvidence("foo.py", ["inspected"])]
+    result = render_evidence_section(fe)
     assert result.endswith("\n")
 
 
 def test_render_evidence_section_blank_lines_between_items():
-    result = render_evidence_section(["a.py", "b.py"], [])
+    fe = [FileEvidence("a.py", ["inspected"]), FileEvidence("b.py", ["inspected"])]
+    result = render_evidence_section(fe)
     assert "\n\n" in result
 
 
-def test_render_evidence_section_limits_inspected_to_max():
-    files = [f"file{i}.py" for i in range(6)]
-    result = render_evidence_section(files, [])
-    assert result.count("Read file") == 5
-    assert "+1 more inspected files" in result
+def test_render_evidence_section_multi_role_uses_bare_path_as_title():
+    fe = [FileEvidence("db.tf", ["inspected", "finding_source"])]
+    result = render_evidence_section(fe)
+    assert "  db.tf\n" in result
+    assert "Read db.tf" not in result
+    assert "Finding source db.tf" not in result
+
+
+def test_render_evidence_section_multi_role_shows_all_role_lines():
+    fe = [FileEvidence("db.tf", ["inspected", "finding_source"])]
+    result = render_evidence_section(fe)
+    assert "↳ [dim]inspected/read context[/dim]" in result
+    assert "↳ [dim]finding source[/dim]" in result
+
+
+def test_render_evidence_section_multi_role_no_duplicate_block():
+    fe = [FileEvidence("db.tf", ["inspected", "finding_source"])]
+    result = render_evidence_section(fe)
+    assert result.count("db.tf") == 1
+
+
+def test_render_evidence_section_truncates_at_max():
+    fe = [FileEvidence(f"file{i}.py", ["inspected"]) for i in range(11)]
+    result = render_evidence_section(fe)
+    assert result.count("Read file") == 10
+    assert "+1 more files" in result
 
 
 def test_render_evidence_section_no_overflow_at_exact_limit():
-    files = [f"file{i}.py" for i in range(5)]
-    result = render_evidence_section(files, [])
-    assert "more inspected" not in result
+    fe = [FileEvidence(f"file{i}.py", ["inspected"]) for i in range(10)]
+    result = render_evidence_section(fe)
+    assert "more files" not in result
 
 
-def test_render_evidence_section_limits_findings_to_max():
-    paths = [f"file{i}.tf" for i in range(9)]
-    result = render_evidence_section([], paths)
-    assert result.count("Finding source") == 8
-    assert "+1 more files with findings" in result
-
-
-def test_render_evidence_section_no_overflow_at_exact_findings_limit():
-    paths = [f"file{i}.tf" for i in range(8)]
-    result = render_evidence_section([], paths)
-    assert "more files with findings" not in result
-
-
-def test_render_evidence_section_read_label_format():
-    result = render_evidence_section(["demo-task.md"], [])
-    assert "Read demo-task.md" in result
-
-
-def test_render_evidence_section_finding_label_format():
-    result = render_evidence_section([], ["iam.tf"])
-    assert "Finding source iam.tf" in result
-
-
-def test_render_evidence_section_both_sections_present():
-    result = render_evidence_section(["src/main.py"], ["database.tf"])
+def test_render_evidence_section_mixed_roles_present():
+    fe = [
+        FileEvidence("src/main.py", ["inspected"]),
+        FileEvidence("database.tf", ["finding_source"]),
+    ]
+    result = render_evidence_section(fe)
     assert "Read src/main.py" in result
     assert "Finding source database.tf" in result
 
