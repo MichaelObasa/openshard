@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import uuid
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from textual.events import Key
 from textual.message import Message
 from textual.widgets import Label, Static, TextArea
 
+from openshard.history.session_events import SessionEventWriter, _truncate
 from openshard.tui.commands import TuiCommand, parse_tui_input
 
 _BRAND_ANSI_SHADOW = (
@@ -284,6 +286,8 @@ class OpenShardTui(App):
         self._run_start: float = 0.0
         self._pack_suffix: str = ""
         self._pack_workflow: str = ""
+        self._session_id: str = str(uuid.uuid4())
+        self._session_writer: SessionEventWriter = SessionEventWriter(base_path=self._path)
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="header-card"):
@@ -313,6 +317,7 @@ class OpenShardTui(App):
 
         self._refresh_widgets()
         self._update_brand()
+        self._session_writer.write("session_started", self._session_id, summary="TUI session started")
 
     def on_resize(self, event) -> None:
         self._update_brand()
@@ -353,6 +358,25 @@ class OpenShardTui(App):
         _no_echo = {TuiCommand.CLEAR, TuiCommand.QUIT}
         if parsed.cmd not in _no_echo:
             self._append_output(_render_user_block(raw))
+
+        if parsed.cmd == TuiCommand.RUN_TASK:
+            self._session_writer.write(
+                "user_message", self._session_id, summary=_truncate(raw, 300)
+            )
+        elif parsed.cmd == TuiCommand.FEEDBACK:
+            self._session_writer.write(
+                "feedback_recorded",
+                self._session_id,
+                command=raw.strip(),
+                metadata={"outcome": parsed.feedback_outcome},
+            )
+        else:
+            self._session_writer.write(
+                "command_invoked",
+                self._session_id,
+                command=raw.strip(),
+                summary=parsed.cmd.name.lower(),
+            )
 
         if parsed.cmd == TuiCommand.HELP:
             self._append_output(_render_openshard_block(_HELP_TEXT))
@@ -456,15 +480,18 @@ class OpenShardTui(App):
                 _parts.append(f"[exception] {_sanitized_exc}")
             output = "\n".join(_parts)
 
-        self.call_from_thread(self._on_cli_result, output, status, refresh_after, is_run)
+        self.call_from_thread(self._on_cli_result, output, status, refresh_after, is_run, result.exit_code)
 
     def _on_cli_result(
-        self, output: str, status: str, refresh_after: bool, is_run: bool = False
+        self, output: str, status: str, refresh_after: bool, is_run: bool = False, exit_code: int = 0
     ) -> None:
         self._run_in_progress = False
         self.query_one("#mode-strip-left", Static).update(_MODE_STRIP_DEFAULT)
 
         failed = status.startswith("Failed")
+        _session_run_id: str | None = None
+        _session_shard_id: str | None = None
+
         if is_run and not failed:
             from openshard.tui.action_blocks import (
                 render_actions_section,
@@ -479,6 +506,8 @@ class OpenShardTui(App):
             if _entry:
                 from openshard.history.shard_contract import build_shard_receipt
                 _receipt = build_shard_receipt(_entry)
+                _session_run_id = _entry.get("timestamp")
+                _session_shard_id = _receipt.shard_id
                 _result = render_result_section(_receipt)
                 _actions = render_actions_section(_entry.get("run_timeline") or [])
                 _check_actions = render_check_actions_section(_entry.get("review_checks") or [])
@@ -497,6 +526,15 @@ class OpenShardTui(App):
             display = output.rstrip("\n") + "\n" + status
 
         self._append_output(_render_openshard_block(display))
+
+        self._session_writer.write(
+            "openshard_response",
+            self._session_id,
+            run_id=_session_run_id,
+            shard_id=_session_shard_id,
+            summary="OpenShard response completed",
+            metadata={"exit_code": exit_code, "is_run": is_run},
+        )
 
         if refresh_after:
             from openshard.tui.state import load_recent_runs
