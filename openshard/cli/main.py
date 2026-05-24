@@ -401,6 +401,107 @@ def models_stats():
         click.echo(f"  {mid:<{col_model}}  {runs_n:>5}  {avg_cost:>9}  {avg_dur:>8}  {pass_rate:>9}  {retry:>6}")
 
 
+# ---------------------------------------------------------------------------
+# Registry inspection helpers and commands.
+# ---------------------------------------------------------------------------
+
+_COL_ID = 45
+_COL_PROV = 12
+_COL_TIER = 17
+
+
+def _print_registry_table(entries: list) -> None:
+    header = (
+        f"  {'ID':<{_COL_ID}}  {'Provider':<{_COL_PROV}}  {'Tier':<{_COL_TIER}}  Experimental"
+    )
+    click.echo(header)
+    click.echo("  " + "-" * (len(header) - 2))
+    for entry in entries:
+        exp = "yes" if entry.experimental else "no"
+        mid = entry.id if len(entry.id) <= _COL_ID else entry.id[: _COL_ID - 1] + "..."
+        click.echo(f"  {mid:<{_COL_ID}}  {entry.provider:<{_COL_PROV}}  {entry.tier:<{_COL_TIER}}  {exp}")
+
+
+@models.command("list")
+def models_list():
+    """List all registered models."""
+    from openshard.models.registry import all_models
+
+    _print_registry_table(all_models())
+
+
+@models.command("show")
+@click.argument("model_id")
+def models_show(model_id: str):
+    """Show full details for a model."""
+    from openshard.models.registry import get_model
+
+    entry = get_model(model_id)
+    if entry is None:
+        raise click.ClickException(f"Model not found: {model_id}")
+    w = 12
+    roles_str = ", ".join(entry.roles) if entry.roles else "-"
+    ctx_str = str(entry.context_length) if entry.context_length is not None else "-"
+    click.echo(f"  {'Model':<{w}}  {entry.display_name}")
+    click.echo(f"  {'ID':<{w}}  {entry.id}")
+    click.echo(f"  {'Provider':<{w}}  {entry.provider}")
+    click.echo(f"  {'Tier':<{w}}  {entry.tier}")
+    click.echo(f"  {'Roles':<{w}}  {roles_str}")
+    click.echo(f"  {'Experimental':<{w}}  {'yes' if entry.experimental else 'no'}")
+    click.echo(f"  {'Context':<{w}}  {ctx_str}")
+    click.echo(f"  {'Tools':<{w}}  {'yes' if entry.supports_tools else 'no'}")
+    click.echo(f"  {'Structured':<{w}}  {'yes' if entry.supports_structured_outputs else 'no'}")
+    click.echo(f"  {'Reasoning':<{w}}  {'yes' if entry.supports_reasoning else 'no'}")
+    click.echo(f"  {'Multimodal':<{w}}  {'yes' if entry.supports_multimodal else 'no'}")
+    click.echo(f"  {'Latency':<{w}}  {entry.latency_class}")
+    click.echo(f"  {'Cost class':<{w}}  {entry.cost_class}")
+
+
+@models.command("role")
+@click.argument("role")
+def models_role(role: str):
+    """List models that have the given role."""
+    from openshard.models.registry import models_by_role
+
+    entries = models_by_role(role)
+    if not entries:
+        click.echo(f"No models found for role: {role}")
+        return
+    _print_registry_table(entries)
+
+
+_VALID_CAPABILITIES = ("tools", "structured_outputs", "reasoning", "multimodal")
+
+
+@models.command("capabilities")
+@click.argument("capability")
+def models_capabilities(capability: str):
+    """List models that support a capability (tools, structured_outputs, reasoning, multimodal)."""
+    from openshard.models.registry import models_by_capability
+
+    if capability not in _VALID_CAPABILITIES:
+        click.echo(f"Unknown capability: {capability}")
+        click.echo(f"Accepted: {', '.join(_VALID_CAPABILITIES)}")
+        return
+    entries = models_by_capability(capability)
+    if not entries:
+        click.echo(f"No models found for capability: {capability}")
+        return
+    _print_registry_table(entries)
+
+
+@models.command("experimental")
+def models_experimental():
+    """List all experimental models."""
+    from openshard.models.registry import all_models
+
+    entries = [e for e in all_models() if e.experimental]
+    if not entries:
+        click.echo("No experimental models registered.")
+        return
+    _print_registry_table(entries)
+
+
 @cli.group(invoke_without_command=True)
 @click.pass_context
 def profiles(ctx: click.Context):
