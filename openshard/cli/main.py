@@ -2328,5 +2328,25 @@ def packs_prompt(pack_id: str):
     )
 
 
+@cli.group()
+def session() -> None:
+    """Local session utilities."""
+
+
+@session.command("infer")
+@click.option(
+    "--path",
+    default=None,
+    help="Override base directory (default: current working directory).",
+)
+def session_infer(path: str | None) -> None:
+    """Infer behavioural signals from session events and write to session_signals.jsonl."""
+    from openshard.history.session_signals import run_inference
+
+    base_path = Path(path) if path else None
+    signals = run_inference(base_path)
+    click.echo(f"Inferred {len(signals)} signal(s).")
+
+
 if __name__ == "__main__":
     cli()
