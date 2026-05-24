@@ -210,6 +210,47 @@ def _extract_run_display(output: str) -> str:
     return "\n".join(lines[-30:])
 
 
+_TL_SYMBOLS = frozenset("✓✖→-+x>")
+
+
+def _is_timeline_row(line: str) -> bool:
+    """True when line is an indented CLI timeline row: '  {symbol} {label}'."""
+    return len(line) >= 4 and line[:2] == "  " and line[2] in _TL_SYMBOLS and line[3] == " "
+
+
+def _strip_run_timeline_block(text: str) -> str:
+    """Remove the 'Running …' live-checklist block from run display text.
+
+    The block is emitted by render_run_timeline() after the review memo and
+    duplicates the structured ACTIONS summary.  Only strips when the line
+    matches the exact CLI format: a bare 'Running …' header immediately
+    followed by a blank line, then indented symbol rows ('  ✓/✖/→/- label').
+    Conservative — does not touch lines that don't fit this pattern.
+    """
+    lines = text.splitlines()
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("Running "):
+            # Peek ahead past blank lines to see if timeline rows follow
+            j = i + 1
+            while j < len(lines) and lines[j] == "":
+                j += 1
+            if j < len(lines) and _is_timeline_row(lines[j]):
+                # Confirmed: skip "Running …", blank lines, timeline rows, trailing blanks
+                while j < len(lines) and (lines[j] == "" or _is_timeline_row(lines[j])):
+                    j += 1
+                # Drop the blank line before "Running …" that we already added, if present
+                if result and result[-1] == "":
+                    result.pop()
+                i = j
+                continue
+        result.append(line)
+        i += 1
+    return "\n".join(result)
+
+
 class TaskInput(TextArea):
     """Multi-line task composer. Enter submits; Ctrl+J / Shift+Enter insert newline."""
 
@@ -425,7 +466,25 @@ class OpenShardTui(App):
 
         failed = status.startswith("Failed")
         if is_run and not failed:
-            display = _extract_run_display(output).rstrip("\n") + "\n" + status
+            from openshard.tui.action_blocks import render_actions_section, render_check_actions_section
+            from openshard.tui.state import load_last_run_entry
+
+            _entry = load_last_run_entry(self._path)
+            _action_parts: list[str] = []
+            if _entry:
+                _actions = render_actions_section(_entry.get("run_timeline") or [])
+                _check_actions = render_check_actions_section(_entry.get("review_checks") or [])
+                if _actions:
+                    _action_parts.append(_actions)
+                if _check_actions:
+                    _action_parts.append(_check_actions)
+            _action_summary = "\n".join(_action_parts)
+
+            _raw_display = _extract_run_display(output)
+            if _action_summary:
+                _raw_display = _strip_run_timeline_block(_raw_display)
+            _run_display = _raw_display.rstrip("\n") + "\n" + status
+            display = ("\n" + _action_summary + "\n" + _run_display) if _action_summary else _run_display
         else:
             display = output.rstrip("\n") + "\n" + status
 

@@ -13,6 +13,7 @@ from openshard.tui.app import (
     _extract_run_display,
     _render_openshard_block,
     _render_user_block,
+    _strip_run_timeline_block,
 )
 from openshard.tui.state import get_guardrails
 
@@ -1040,3 +1041,393 @@ def test_render_openshard_block_does_not_indent_body():
     body_lines = [ln for ln in lines if "RECEIPT" in ln or "1 file" in ln]
     for line in body_lines:
         assert not line.startswith(" "), f"Body line was unexpectedly indented: {line!r}"
+
+
+# ---------------------------------------------------------------------------
+# Action block integration tests
+# ---------------------------------------------------------------------------
+
+_FAKE_ENTRY_WITH_TIMELINE = {
+    "run_timeline": [
+        {"label": "Loaded workflow pack", "status": "completed"},
+        {"label": "Scanned repo", "status": "completed"},
+        {"label": "Found raw findings", "status": "completed", "count": 5},
+        {"label": "Saved Shard receipt", "status": "completed"},
+    ],
+    "review_checks": [],
+}
+
+_FAKE_ENTRY_WITH_CHECKS = {
+    "run_timeline": [
+        {"label": "Scanned repo", "status": "completed"},
+    ],
+    "review_checks": [
+        {"name": "terraform fmt", "status": "skipped", "reason": "terraform not installed"},
+        {"name": "tflint", "status": "skipped", "reason": "tflint not installed"},
+    ],
+}
+
+_FAKE_ENTRY_EMPTY = {
+    "run_timeline": [],
+    "review_checks": [],
+}
+
+
+@pytest.mark.asyncio
+async def test_action_blocks_appear_after_successful_run(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Result: all good\nDone.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_TIMELINE),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "ACTIONS" in text
+    assert "Loaded workflow pack" in text
+    assert "Scanned repo" in text
+    assert "OPENSHARD" in text
+
+
+@pytest.mark.asyncio
+async def test_check_actions_appear_after_run_with_checks(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Result: all good\nDone.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_CHECKS),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "CHECK ACTIONS" in text
+    assert "terraform fmt" in text
+    assert "tflint" in text
+
+
+@pytest.mark.asyncio
+async def test_action_blocks_absent_when_no_timeline(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Result: all good\nDone.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_EMPTY),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "ACTIONS" not in text
+    assert "CHECK ACTIONS" not in text
+
+
+@pytest.mark.asyncio
+async def test_action_blocks_absent_when_entry_missing(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Result: all good\nDone.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=None),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "ACTIONS" not in text
+
+
+@pytest.mark.asyncio
+async def test_original_output_preserved_after_action_blocks(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "RECEIPT — shard-20260523-0001\nAll checks passed.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_TIMELINE),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "ACTIONS" in text
+    assert "Done." in text
+
+
+@pytest.mark.asyncio
+async def test_action_blocks_absent_on_failed_run(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Error: something went wrong\n"
+    mock_result.exit_code = 1
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_TIMELINE),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "ACTIONS" not in text
+    assert "Failed" in text
+
+
+@pytest.mark.asyncio
+async def test_last_more_output_has_no_action_blocks(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "RECEIPT — shard-20260523-0001\nFull details here.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_TIMELINE),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/last more")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert "ACTIONS" not in text
+
+
+@pytest.mark.asyncio
+async def test_clear_still_empties_output_after_action_blocks(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Result: all good\nDone.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_WITH_TIMELINE),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            # now clear
+            ta.load_text("/clear")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.1)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert text.strip() == ""
+
+
+# ---------------------------------------------------------------------------
+# _strip_run_timeline_block unit tests
+# ---------------------------------------------------------------------------
+
+_TIMELINE_BLOCK = (
+    "\nRunning Production IaC hardening review\n"
+    "\n"
+    "  ✓ Loaded workflow pack\n"
+    "  ✓ Scanned repo\n"
+    "  ✓ Routed to Sonnet 4.6\n"
+    "  ✓ Saved Shard receipt\n"
+)
+
+_TIMELINE_BLOCK_ASCII = (
+    "\nRunning my task\n"
+    "\n"
+    "  + Loaded workflow pack\n"
+    "  - tflint\n"
+)
+
+
+def test_strip_run_timeline_block_removes_block():
+    text = "Review complete\nFound 5 issues." + _TIMELINE_BLOCK + "\nRECEIPT — shard-001"
+    result = _strip_run_timeline_block(text)
+    assert "Running Production IaC hardening review" not in result
+    assert "Loaded workflow pack" not in result
+    assert "Review complete" in result
+    assert "RECEIPT — shard-001" in result
+
+
+def test_strip_run_timeline_block_ascii_symbols():
+    text = "Review complete\n" + _TIMELINE_BLOCK_ASCII + "\nRECEIPT — shard-001"
+    result = _strip_run_timeline_block(text)
+    assert "Running my task" not in result
+    assert "RECEIPT — shard-001" in result
+
+
+def test_strip_run_timeline_block_no_false_positive():
+    # "Running" as part of a sentence, not a standalone header
+    text = "Review complete\nRunning total: 5\n  indented but no symbol pattern"
+    result = _strip_run_timeline_block(text)
+    assert "Running total: 5" in result
+
+
+def test_strip_run_timeline_block_passthrough_when_no_block():
+    text = "Review complete\nFound 5 issues.\n\nRECEIPT — shard-001"
+    result = _strip_run_timeline_block(text)
+    assert result == text
+
+
+def test_strip_run_timeline_block_preserves_content_before_and_after():
+    before = "Review complete\nSome memo content."
+    after = "\nRECEIPT — shard-001\nAll good."
+    text = before + _TIMELINE_BLOCK + after
+    result = _strip_run_timeline_block(text)
+    assert "Review complete" in result
+    assert "Some memo content." in result
+    assert "RECEIPT — shard-001" in result
+    assert "All good." in result
+
+
+def test_strip_run_timeline_block_cleans_preceding_blank():
+    # The blank line before "Running …" should also be cleaned up
+    text = "Some content.\n\nRunning my run\n\n  ✓ Step one\n  ✓ Step two\n\nNext section"
+    result = _strip_run_timeline_block(text)
+    assert "Running my run" not in result
+    # Should not have double-blank where the block was
+    assert "\n\n\n" not in result
+
+
+# ---------------------------------------------------------------------------
+# Integration: duplicate timeline stripped when action_summary present
+# ---------------------------------------------------------------------------
+
+_FAKE_ENTRY_FOR_STRIP = {
+    "run_timeline": [
+        {"label": "Loaded workflow pack", "status": "completed"},
+        {"label": "Scanned repo", "status": "completed"},
+    ],
+    "review_checks": [],
+}
+
+_RUN_OUTPUT_WITH_TIMELINE = (
+    "\nReview complete\n"
+    "Found 5 issues worth addressing.\n"
+    "\nRunning Production IaC hardening review\n"
+    "\n"
+    "  ✓ Loaded workflow pack\n"
+    "  ✓ Scanned repo\n"
+    "\n"
+    "RECEIPT — shard-20260523-0001\n"
+    "result: 5 issues\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_timeline_block_stripped_when_action_summary_present(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = _RUN_OUTPUT_WITH_TIMELINE
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_FOR_STRIP),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    # Structured ACTIONS block still present
+    assert "ACTIONS" in text
+    # Duplicate "Running Production IaC hardening review" checklist is gone
+    assert "Running Production IaC hardening review" not in text
+    # Original result content preserved
+    assert "Review complete" in text
+    assert "RECEIPT" in text
+
+
+@pytest.mark.asyncio
+async def test_spacing_blank_line_between_openshard_and_actions(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "Review complete\nAll good.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_FOR_STRIP),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    # The display string has a leading "\n" before ACTIONS, so in the raw content
+    # the OPENSHARD label and ACTIONS are separated by at least one blank line
+    assert "OPENSHARD" in text
+    assert "ACTIONS" in text
+    openshard_pos = text.find("OPENSHARD")
+    actions_pos = text.find("ACTIONS")
+    between = text[openshard_pos:actions_pos]
+    assert between.count("\n") >= 2
