@@ -90,6 +90,40 @@ class ShardFinding:
     line: int | None = None
 
 
+@dataclass
+class FileEvidence:
+    path: str
+    roles: list[str]  # ordered subset of: inspected, finding_source, changed
+
+
+_ROLE_ORDER = ["inspected", "finding_source", "changed"]
+
+_ROLE_LABELS: dict[str, str] = {
+    "inspected": "inspected/read context",
+    "finding_source": "finding source",
+    "changed": "changed",
+}
+
+
+def _build_file_evidence(
+    inspected: list[str],
+    referenced: list[str],
+    touched: list[str],
+) -> list[FileEvidence]:
+    acc: dict[str, set[str]] = {}
+    for p in inspected:
+        acc.setdefault(p, set()).add("inspected")
+    for p in referenced:
+        acc.setdefault(p, set()).add("finding_source")
+    for p in touched:
+        acc.setdefault(p, set()).add("changed")
+    result = [
+        FileEvidence(path=p, roles=[r for r in _ROLE_ORDER if r in roles])
+        for p, roles in acc.items()
+    ]
+    return sorted(result, key=lambda e: e.path)
+
+
 def _safe_str_list(val: object) -> list[str]:
     if not isinstance(val, list):
         return []
@@ -336,6 +370,7 @@ class ShardReceipt:
     approval_required: bool = False
     approval_granted: Optional[bool] = None
     approval_reason: str = ""
+    file_evidence: list[FileEvidence] = field(default_factory=list)
 
 
 def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
@@ -626,6 +661,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         files_read_count = _snip if type(_snip) is int else None
     inspected_files = [p for p in _fc_paths if isinstance(p, str)] if isinstance(_fc_paths, list) else []
     files_referenced: list[str] = sorted({f.path for f in findings if f.path})
+    file_evidence = _build_file_evidence(inspected_files, files_referenced, files_touched)
 
     return ShardReceipt(
         shard_id=_make_shard_id(timestamp, index),
@@ -668,6 +704,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         check_results=check_results,
         run_timeline=[e for e in (entry.get("run_timeline") or []) if isinstance(e, dict) and e.get("label")],
         developer_feedback=entry.get("developer_feedback") or None,
+        file_evidence=file_evidence,
     )
 
 
@@ -947,22 +984,19 @@ def render_full_shard_receipt(receipt: ShardReceipt) -> str:
         lines.append(_row("Touched", "-"))
     lines.append("")
 
-    lines.append(f"{_INDENT}INSPECTED FILES")
-    if receipt.inspected_files:
-        for f in receipt.inspected_files[:10]:
-            lines.append(f"{_INDENT}  {f}")
-        if len(receipt.inspected_files) > 10:
-            lines.append(f"{_INDENT}  (+{len(receipt.inspected_files) - 10} more)")
+    lines.append(f"{_INDENT}FILE EVIDENCE")
+    if receipt.file_evidence:
+        _fe_cap = 12
+        for _fe in receipt.file_evidence[:_fe_cap]:
+            lines.append(f"{_INDENT}  {_fe.path}")
+            for _role in _fe.roles:
+                lines.append(f"{_INDENT}    {_ROLE_LABELS[_role]}")
+            lines.append("")
+        if len(receipt.file_evidence) > _fe_cap:
+            lines.append(f"{_INDENT}  (+{len(receipt.file_evidence) - _fe_cap} more)")
+            lines.append("")
     else:
         lines.append(f"{_INDENT}  Not recorded")
-    lines.append("")
-
-    if receipt.files_referenced:
-        lines.append(f"{_INDENT}FILES WITH FINDINGS")
-        for _f in receipt.files_referenced[:10]:
-            lines.append(f"{_INDENT}  {_f}")
-        if len(receipt.files_referenced) > 10:
-            lines.append(f"{_INDENT}  (+{len(receipt.files_referenced) - 10} more)")
         lines.append("")
 
     lines.append(f"{_INDENT}POLICY")

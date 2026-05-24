@@ -8,6 +8,7 @@ from click.testing import CliRunner
 from openshard.history.shard_contract import (
     ShardFinding,
     ShardReceipt,
+    _build_file_evidence,
     _extract_findings,
     _result_display,
     build_live_run_receipt,
@@ -1003,31 +1004,33 @@ class TestContextProvenancePolish(unittest.TestCase):
         entry["file_context"] = {"files_read": 2, "paths": ["openshard/cli/main.py", "tests/test_shard_contract.py"]}
         receipt = build_shard_receipt(entry)
         out = render_full_shard_receipt(receipt)
-        self.assertIn("INSPECTED FILES", out)
+        self.assertIn("FILE EVIDENCE", out)
         self.assertIn("openshard/cli/main.py", out)
         self.assertIn("tests/test_shard_contract.py", out)
 
-    def test_inspected_files_capped_at_10(self):
+    def test_file_evidence_capped_at_12(self):
         entry = dict(_minimal_entry())
-        paths = [f"file_{i}.py" for i in range(15)]
+        # zero-padded names guarantee deterministic alphabetical order
+        paths = [f"file_{i:02d}.py" for i in range(15)]
         entry["file_context"] = {"files_read": 15, "paths": paths}
         receipt = build_shard_receipt(entry)
         out = render_full_shard_receipt(receipt)
-        self.assertIn("(+5 more)", out)
-        self.assertIn("file_0.py", out)
-        self.assertNotIn("file_10.py", out)
+        self.assertIn("(+3 more)", out)
+        self.assertIn("file_00.py", out)
+        self.assertNotIn("file_12.py", out)
 
-    def test_diff_review_changed_files_not_in_inspected_files(self):
+    def test_diff_review_changed_files_appear_with_changed_role(self):
         entry = dict(_minimal_entry())
         entry["diff_review"] = {"changed_files": ["a.py", "b.py"]}
         receipt = build_shard_receipt(entry)
         out = render_full_shard_receipt(receipt)
         self.assertEqual(receipt.inspected_files, [])
-        inspected_idx = out.index("INSPECTED FILES")
+        fe_idx = out.index("FILE EVIDENCE")
         policy_idx = out.index("POLICY")
-        inspected_block = out[inspected_idx:policy_idx]
-        self.assertNotIn("a.py", inspected_block)
-        self.assertIn("Not recorded", inspected_block)
+        fe_block = out[fe_idx:policy_idx]
+        self.assertIn("a.py", fe_block)
+        self.assertIn("changed", fe_block)
+        self.assertNotIn("inspected/read context", fe_block)
 
     def test_diff_review_used_as_touched_fallback(self):
         entry = dict(_minimal_entry())
@@ -1093,7 +1096,7 @@ class TestContextProvenancePolish(unittest.TestCase):
         receipt = build_shard_receipt(_rich_native_entry())
         out = render_compact_shard_receipt(receipt)
         self.assertNotIn("CONTEXT", out)
-        self.assertNotIn("INSPECTED FILES", out)
+        self.assertNotIn("FILE EVIDENCE", out)
         self.assertIn("RECEIPT", out)
 
     def test_findings_and_inspected_files_coexist(self):
@@ -1105,7 +1108,7 @@ class TestContextProvenancePolish(unittest.TestCase):
         self.assertIn("FINDINGS", out)
         self.assertIn("Exposed credentials", out)
         self.assertIn("CONTEXT", out)
-        self.assertIn("INSPECTED FILES", out)
+        self.assertIn("FILE EVIDENCE", out)
         self.assertIn("secrets.py", out)
 
     def test_section_order_in_full_receipt(self):
@@ -1116,12 +1119,97 @@ class TestContextProvenancePolish(unittest.TestCase):
         entry["file_context"] = {"files_read": 2, "paths": ["a.py", "b.py"]}
         receipt = build_shard_receipt(entry)
         out = render_full_shard_receipt(receipt)
-        idx = {s: out.index(s) for s in ["CONTEXT", "INSPECTED FILES", "POLICY", "CHECKS", "FINDINGS", "CHANGES"]}
-        self.assertLess(idx["CONTEXT"], idx["INSPECTED FILES"])
-        self.assertLess(idx["INSPECTED FILES"], idx["POLICY"])
+        idx = {s: out.index(s) for s in ["CONTEXT", "FILE EVIDENCE", "POLICY", "CHECKS", "FINDINGS", "CHANGES"]}
+        self.assertLess(idx["CONTEXT"], idx["FILE EVIDENCE"])
+        self.assertLess(idx["FILE EVIDENCE"], idx["POLICY"])
         self.assertLess(idx["POLICY"], idx["CHECKS"])
         self.assertLess(idx["CHECKS"], idx["FINDINGS"])
         self.assertLess(idx["FINDINGS"], idx["CHANGES"])
+
+
+class TestFileEvidence(unittest.TestCase):
+    """FileEvidence provenance layer: builder and receipt field."""
+
+    def test_inspected_only(self):
+        result = _build_file_evidence(["a.py"], [], [])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].path, "a.py")
+        self.assertEqual(result[0].roles, ["inspected"])
+
+    def test_finding_source_only(self):
+        result = _build_file_evidence([], ["db.tf"], [])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].path, "db.tf")
+        self.assertEqual(result[0].roles, ["finding_source"])
+
+    def test_changed_only(self):
+        result = _build_file_evidence([], [], ["main.py"])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].path, "main.py")
+        self.assertEqual(result[0].roles, ["changed"])
+
+    def test_deduplicates_multi_role(self):
+        result = _build_file_evidence(["db.tf"], ["db.tf"], [])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].path, "db.tf")
+        self.assertEqual(result[0].roles, ["inspected", "finding_source"])
+
+    def test_all_three_roles_on_one_file(self):
+        result = _build_file_evidence(["x.py"], ["x.py"], ["x.py"])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].roles, ["inspected", "finding_source", "changed"])
+
+    def test_sorted_alphabetically(self):
+        result = _build_file_evidence(["z.py", "a.py", "m.py"], [], [])
+        self.assertEqual([e.path for e in result], ["a.py", "m.py", "z.py"])
+
+    def test_empty_for_bare_entry(self):
+        entry = dict(_minimal_entry())
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.file_evidence, [])
+
+    def test_populated_from_entry_fields(self):
+        entry = dict(_minimal_entry())
+        entry["file_context"] = {"files_read": 1, "paths": ["src/auth.py"]}
+        entry["findings"] = [{"severity": "High", "message": "Bad", "path": "iam.tf"}]
+        receipt = build_shard_receipt(entry)
+        paths = [e.path for e in receipt.file_evidence]
+        self.assertIn("src/auth.py", paths)
+        self.assertIn("iam.tf", paths)
+        inspected = next(e for e in receipt.file_evidence if e.path == "src/auth.py")
+        self.assertIn("inspected", inspected.roles)
+        finding = next(e for e in receipt.file_evidence if e.path == "iam.tf")
+        self.assertIn("finding_source", finding.roles)
+
+    def test_full_receipt_file_evidence_section_not_recorded_when_empty(self):
+        entry = dict(_minimal_entry())
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        fe_idx = out.index("FILE EVIDENCE")
+        policy_idx = out.index("POLICY")
+        fe_block = out[fe_idx:policy_idx]
+        self.assertIn("Not recorded", fe_block)
+
+    def test_full_receipt_multi_role_file_shows_both_role_labels(self):
+        entry = dict(_minimal_entry())
+        entry["file_context"] = {"files_read": 1, "paths": ["db.tf"]}
+        entry["findings"] = [{"severity": "High", "message": "Open", "path": "db.tf"}]
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        fe_idx = out.index("FILE EVIDENCE")
+        policy_idx = out.index("POLICY")
+        fe_block = out[fe_idx:policy_idx]
+        self.assertIn("inspected/read context", fe_block)
+        self.assertIn("finding source", fe_block)
+        self.assertEqual(fe_block.count("db.tf"), 1)
+
+    def test_full_receipt_no_old_section_names(self):
+        entry = dict(_minimal_entry())
+        entry["file_context"] = {"files_read": 1, "paths": ["a.py"]}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("INSPECTED FILES", out)
+        self.assertNotIn("FILES WITH FINDINGS", out)
 
 
 class TestCompactReceiptFindingsGrouped(unittest.TestCase):
@@ -1731,74 +1819,83 @@ class TestFilesReferencedFromFindings(unittest.TestCase):
 
 
 class TestFilesWithFindingsRender(unittest.TestCase):
-    """FILES WITH FINDINGS section appears only when findings have file paths."""
+    """FILE EVIDENCE section shows finding-source and inspected paths."""
 
-    def test_section_present_when_files_referenced_non_empty(self):
+    def test_file_evidence_present_when_finding_has_path(self):
         entry = dict(_minimal_entry())
         entry["findings"] = [{"severity": "High", "message": "x", "path": "iam.tf"}]
         receipt = build_shard_receipt(entry)
         out = render_full_shard_receipt(receipt)
-        self.assertIn("FILES WITH FINDINGS", out)
+        self.assertIn("FILE EVIDENCE", out)
         self.assertIn("iam.tf", out)
 
-    def test_section_absent_when_no_finding_paths(self):
+    def test_file_evidence_not_recorded_when_no_finding_paths(self):
         entry = dict(_minimal_entry())
         entry["findings"] = [{"severity": "Note", "message": "general note"}]
         receipt = build_shard_receipt(entry)
         out = render_full_shard_receipt(receipt)
-        self.assertNotIn("FILES WITH FINDINGS", out)
+        fe_idx = out.index("FILE EVIDENCE")
+        policy_idx = out.index("POLICY")
+        self.assertIn("Not recorded", out[fe_idx:policy_idx])
 
-    def test_section_absent_when_no_findings(self):
+    def test_file_evidence_not_recorded_when_no_findings(self):
         out = render_full_shard_receipt(build_shard_receipt(_minimal_entry()))
-        self.assertNotIn("FILES WITH FINDINGS", out)
+        fe_idx = out.index("FILE EVIDENCE")
+        policy_idx = out.index("POLICY")
+        self.assertIn("Not recorded", out[fe_idx:policy_idx])
 
-    def test_inspected_files_always_present(self):
+    def test_file_evidence_always_present_section(self):
         entry = dict(_minimal_entry())
         entry["findings"] = [{"severity": "High", "message": "x", "path": "iam.tf"}]
         out = render_full_shard_receipt(build_shard_receipt(entry))
-        self.assertIn("INSPECTED FILES", out)
+        self.assertIn("FILE EVIDENCE", out)
 
-    def test_both_sections_simultaneously(self):
+    def test_inspected_and_finding_source_unified(self):
         entry = dict(_minimal_entry())
         entry["file_context"] = {"files_read": 1, "paths": ["demo-task.md"]}
         entry["findings"] = [{"severity": "Critical", "message": "root", "path": "iam.tf"}]
         receipt = build_shard_receipt(entry)
         out = render_full_shard_receipt(receipt)
-        self.assertIn("INSPECTED FILES", out)
+        self.assertIn("FILE EVIDENCE", out)
         self.assertIn("demo-task.md", out)
-        self.assertIn("FILES WITH FINDINGS", out)
         self.assertIn("iam.tf", out)
-        inspected_idx = out.index("INSPECTED FILES")
-        findings_file_idx = out.index("FILES WITH FINDINGS")
+        fe_idx = out.index("FILE EVIDENCE")
         policy_idx = out.index("POLICY")
-        self.assertLess(inspected_idx, findings_file_idx)
-        self.assertLess(findings_file_idx, policy_idx)
+        fe_block = out[fe_idx:policy_idx]
+        self.assertIn("inspected/read context", fe_block)
+        self.assertIn("finding source", fe_block)
+        self.assertNotIn("FILES WITH FINDINGS", fe_block)
+        self.assertNotIn("INSPECTED FILES", fe_block)
 
-    def test_files_not_swapped_between_sections(self):
+    def test_roles_correct_per_file(self):
         entry = dict(_minimal_entry())
         entry["file_context"] = {"files_read": 1, "paths": ["demo-task.md"]}
         entry["findings"] = [{"severity": "Critical", "message": "x", "path": "iam.tf"}]
         out = render_full_shard_receipt(build_shard_receipt(entry))
-        inspected_block_end = out.index("FILES WITH FINDINGS")
-        inspected_block = out[out.index("INSPECTED FILES"):inspected_block_end]
-        self.assertIn("demo-task.md", inspected_block)
-        self.assertNotIn("iam.tf", inspected_block)
+        fe_idx = out.index("FILE EVIDENCE")
+        policy_idx = out.index("POLICY")
+        fe_block = out[fe_idx:policy_idx]
+        demo_pos = fe_block.index("demo-task.md")
+        iam_pos = fe_block.index("iam.tf")
+        # demo-task.md should have inspected/read context near it
+        # iam.tf should have finding source near it
+        self.assertIn("inspected/read context", fe_block[demo_pos:demo_pos + 60])
+        self.assertIn("finding source", fe_block[iam_pos:iam_pos + 60])
 
-    def test_cap_at_10_with_overflow(self):
+    def test_cap_at_12_with_overflow(self):
         entry = dict(_minimal_entry())
         entry["findings"] = [
             {"severity": "High", "message": f"issue {i}", "path": f"file_{i:02d}.tf"}
-            for i in range(12)
+            for i in range(15)
         ]
         receipt = build_shard_receipt(entry)
         out = render_full_shard_receipt(receipt)
-        # Isolate the FILES WITH FINDINGS block only
-        block_start = out.index("FILES WITH FINDINGS")
-        block_end = out.index("POLICY")
-        block = out[block_start:block_end]
-        self.assertIn("(+2 more)", block)
+        fe_idx = out.index("FILE EVIDENCE")
+        policy_idx = out.index("POLICY")
+        block = out[fe_idx:policy_idx]
+        self.assertIn("(+3 more)", block)
         self.assertIn("file_00.tf", block)
-        self.assertNotIn("file_10.tf", block)
+        self.assertNotIn("file_12.tf", block)
 
 
 # ---------------------------------------------------------------------------

@@ -3,11 +3,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from openshard.history.shard_contract import ShardReceipt
+    from openshard.history.shard_contract import FileEvidence, ShardReceipt
 
-_MAX_INSPECTED = 5
-_MAX_FINDINGS = 8
+_MAX_EVIDENCE = 10
 _NOT_RECORDED = frozenset({"Not recorded", "Not run"})
+
+_ROLE_LABELS: dict[str, str] = {
+    "inspected": "inspected/read context",
+    "finding_source": "finding source",
+    "changed": "changed",
+}
 
 
 def render_action_block(title: str, detail: str | None = None) -> str:
@@ -73,27 +78,30 @@ def render_check_actions_section(checks: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_evidence_section(
-    inspected_files: list[str], files_with_findings: list[str]
-) -> str:
-    if not inspected_files and not files_with_findings:
+def render_evidence_section(evidence: list["FileEvidence"]) -> str:
+    if not evidence:
         return ""
     lines = ["[bold]EVIDENCE[/bold]"]
 
-    shown_i = inspected_files[:_MAX_INSPECTED]
-    for p in shown_i:
-        lines.append(render_action_block(f"Read {p}", "inspected file"))
-        lines.append("")
-    if len(inspected_files) > _MAX_INSPECTED:
-        lines.append(f"  +{len(inspected_files) - _MAX_INSPECTED} more inspected files")
+    shown = evidence[:_MAX_EVIDENCE]
+    for fe in shown:
+        if len(fe.roles) == 1:
+            role = fe.roles[0]
+            if role == "inspected":
+                title = f"Read {fe.path}"
+            elif role == "finding_source":
+                title = f"Finding source {fe.path}"
+            else:
+                title = f"Changed {fe.path}"
+            lines.append(render_action_block(title, _ROLE_LABELS[role]))
+        else:
+            lines.append(f"  {fe.path}")
+            for role in fe.roles:
+                lines.append(f"    ↳ [dim]{_ROLE_LABELS[role]}[/dim]")
         lines.append("")
 
-    shown_f = files_with_findings[:_MAX_FINDINGS]
-    for p in shown_f:
-        lines.append(render_action_block(f"Finding source {p}", "file with findings"))
-        lines.append("")
-    if len(files_with_findings) > _MAX_FINDINGS:
-        lines.append(f"  +{len(files_with_findings) - _MAX_FINDINGS} more files with findings")
+    if len(evidence) > _MAX_EVIDENCE:
+        lines.append(f"  +{len(evidence) - _MAX_EVIDENCE} more files")
         lines.append("")
 
     while lines and lines[-1] == "":

@@ -387,9 +387,11 @@ class TestLastNativeInspection(unittest.TestCase):
         entry = _native_entry()
         entry["diff_review"]["output_chars"] = 9999
         out = _render(entry, detail="full")
-        self.assertNotIn("a.py", out)
-        self.assertNotIn("b.py", out)
+        # a.py / b.py now correctly appear in FILE EVIDENCE (changed role) —
+        # the test guards against raw diff content, not structured file names
         self.assertIn("2 files", out)
+        self.assertNotIn("diff --git", out)
+        self.assertNotIn("@@", out)
 
     def test_loop_steps_rendered_in_native_block(self):
         entry = _native_entry()

@@ -1079,6 +1079,13 @@ _FAKE_ENTRY_WITH_EVIDENCE = {
     "findings": [{"severity": "High", "message": "Bad config", "path": "database.tf"}],
 }
 
+_FAKE_ENTRY_MULTI_ROLE = {
+    "run_timeline": [{"label": "Scanned repo", "status": "completed"}],
+    "review_checks": [],
+    "file_context": {"paths": ["shared.tf"]},
+    "findings": [{"severity": "High", "message": "Open port", "path": "shared.tf"}],
+}
+
 _FAKE_ENTRY_NO_EVIDENCE = {
     "run_timeline": [{"label": "Scanned repo", "status": "completed"}],
     "review_checks": [],
@@ -1417,6 +1424,30 @@ async def test_evidence_ordering_after_actions(tmp_path):
             text = _text(app.query_one("#output-content", Static))
 
     assert text.index("ACTIONS") < text.index("EVIDENCE")
+
+
+@pytest.mark.asyncio
+async def test_evidence_multi_role_file_renders_once(tmp_path):
+    app = _make_app(tmp_path)
+    mock_result = MagicMock()
+    mock_result.output = "RECEIPT — shard-20260524-0001\nDone.\n"
+    mock_result.exit_code = 0
+    mock_result.exception = None
+
+    with (
+        patch("openshard.tui.app.CliRunner") as mock_runner_cls,
+        patch("openshard.tui.state.load_last_run_entry", return_value=_FAKE_ENTRY_MULTI_ROLE),
+    ):
+        mock_runner_cls.return_value.invoke.return_value = mock_result
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("review this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+            text = _text(app.query_one("#output-content", Static))
+
+    assert text.count("shared.tf") == 1
 
 
 # ---------------------------------------------------------------------------
