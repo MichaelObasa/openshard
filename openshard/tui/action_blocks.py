@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-polish/tui-file-evidence-blocks
 _MAX_INSPECTED = 5
 _MAX_FINDINGS = 8
 
-main
 
 def render_action_block(title: str, detail: str | None = None) -> str:
     lines = [f"  {title}"]
@@ -67,7 +65,6 @@ def render_check_actions_section(checks: list[dict]) -> str:
     if len(lines) == 1:
         return ""
     return "\n".join(lines) + "\n"
-polish/tui-file-evidence-blocks
 
 
 def render_evidence_section(
@@ -96,4 +93,3 @@ def render_evidence_section(
     while lines and lines[-1] == "":
         lines.pop()
     return "\n".join(lines) + "\n"
-main

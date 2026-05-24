@@ -1072,7 +1072,6 @@ _FAKE_ENTRY_EMPTY = {
     "review_checks": [],
 }
 
-polish/tui-file-evidence-blocks
 _FAKE_ENTRY_WITH_EVIDENCE = {
     "run_timeline": [{"label": "Scanned repo", "status": "completed"}],
     "review_checks": [],
@@ -1087,7 +1086,6 @@ _FAKE_ENTRY_NO_EVIDENCE = {
     "findings": [],
 }
 
-main
 
 @pytest.mark.asyncio
 async def test_action_blocks_appear_after_successful_run(tmp_path):
@@ -1294,7 +1292,6 @@ async def test_clear_still_empties_output_after_action_blocks(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-polish/tui-file-evidence-blocks
 # Evidence block integration tests
 # ---------------------------------------------------------------------------
 
@@ -1423,7 +1420,6 @@ async def test_evidence_ordering_after_actions(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-main
 # _strip_run_timeline_block unit tests
 # ---------------------------------------------------------------------------
 
