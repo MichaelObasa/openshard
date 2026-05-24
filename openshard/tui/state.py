@@ -80,6 +80,19 @@ def load_recent_runs(path: Path, limit: int = 5) -> list[dict]:
     return result
 
 
+def load_last_run_entry(path: Path) -> dict | None:
+    jsonl_path = path / ".openshard" / "runs.jsonl"
+    if not jsonl_path.exists():
+        return None
+    lines = [ln.strip() for ln in jsonl_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    if not lines:
+        return None
+    try:
+        return json.loads(lines[-1])
+    except json.JSONDecodeError:
+        return None
+
+
 def get_guardrails() -> dict:
     return {
         "Agent": "OpenShard Native",
