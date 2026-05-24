@@ -1990,3 +1990,91 @@ class TestFullReceiptStatusConsistency(unittest.TestCase):
         entry = {**_minimal_entry(), "verification_attempted": False}
         receipt = build_shard_receipt(entry)
         self.assertEqual(receipt.status, "No checks run")
+
+
+def _entry_with_approval_receipt(granted: bool, reason: str = "risky write task") -> dict:
+    return {
+        **_minimal_entry(),
+        "approval_receipt": {
+            "source": "change_budget_soft_gate",
+            "requested": True,
+            "granted": granted,
+            "action": "allow" if granted else "block",
+            "reason": reason,
+        },
+    }
+
+
+class TestApprovalReceiptSurface(unittest.TestCase):
+    """Approval string, new fields, and full-receipt APPROVAL section."""
+
+    def test_denied_approval_string(self):
+        receipt = build_shard_receipt(_entry_with_approval_receipt(granted=False))
+        self.assertEqual(receipt.approval, "Required → Denied")
+
+    def test_granted_approval_string(self):
+        receipt = build_shard_receipt(_entry_with_approval_receipt(granted=True))
+        self.assertEqual(receipt.approval, "Required → Granted")
+
+    def test_approval_required_true_when_receipt_present(self):
+        receipt = build_shard_receipt(_entry_with_approval_receipt(granted=True))
+        self.assertTrue(receipt.approval_required)
+
+    def test_approval_required_false_without_receipt(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertFalse(receipt.approval_required)
+
+    def test_approval_granted_field_true(self):
+        receipt = build_shard_receipt(_entry_with_approval_receipt(granted=True))
+        self.assertIs(receipt.approval_granted, True)
+
+    def test_approval_granted_field_false(self):
+        receipt = build_shard_receipt(_entry_with_approval_receipt(granted=False))
+        self.assertIs(receipt.approval_granted, False)
+
+    def test_approval_granted_field_none_without_receipt(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertIsNone(receipt.approval_granted)
+
+    def test_approval_reason_populated(self):
+        receipt = build_shard_receipt(_entry_with_approval_receipt(granted=True, reason="risky write task"))
+        self.assertEqual(receipt.approval_reason, "risky write task")
+
+    def test_approval_reason_empty_without_receipt(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertEqual(receipt.approval_reason, "")
+
+    def test_full_receipt_approval_section_when_granted(self):
+        receipt = build_shard_receipt(_entry_with_approval_receipt(granted=True))
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("APPROVAL", out)
+        self.assertIn("granted", out)
+        self.assertNotIn("Writes blocked", out)
+
+    def test_full_receipt_approval_section_when_denied(self):
+        receipt = build_shard_receipt(_entry_with_approval_receipt(granted=False))
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("APPROVAL", out)
+        self.assertIn("denied", out)
+        self.assertIn("Writes blocked", out)
+
+    def test_no_approval_section_when_not_required(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("APPROVAL\n", out)
+
+    def test_compact_receipt_shows_required_denied(self):
+        receipt = build_shard_receipt(_entry_with_approval_receipt(granted=False))
+        out = render_compact_shard_receipt(receipt)
+        self.assertIn("Required → Denied", out)
+
+    def test_compact_receipt_shows_required_granted(self):
+        receipt = build_shard_receipt(_entry_with_approval_receipt(granted=True))
+        out = render_compact_shard_receipt(receipt)
+        self.assertIn("Required → Granted", out)
+
+    def test_old_entry_without_receipt_renders_safely(self):
+        receipt = build_shard_receipt({"task": "old task", "timestamp": "2026-01-01T00:00:00Z"})
+        out = render_full_shard_receipt(receipt)
+        self.assertIsInstance(out, str)
+        self.assertNotIn("APPROVAL\n", out)

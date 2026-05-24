@@ -133,11 +133,17 @@ class TestRenderNativeReceipt(unittest.TestCase):
         self.assertIn("Write approved", out)
         self.assertNotIn("No risky writes", out)
 
-    def test_approval_not_granted_shows_no_risky_writes(self):
+    def test_approval_not_granted_shows_writes_blocked(self):
         receipt = _ns(source="change_budget_soft_gate", granted=False)
         meta = _meta(approval_receipt=receipt)
         out = _render_native_receipt(meta)
+        self.assertIn("Writes blocked", out)
+        self.assertNotIn("No risky writes", out)
+
+    def test_no_receipt_shows_no_risky_writes(self):
+        out = _render_native_receipt(_meta(approval_receipt=None))
         self.assertIn("No risky writes", out)
+        self.assertNotIn("Writes blocked", out)
 
     def test_full_receipt_format(self):
         meta = _meta(
