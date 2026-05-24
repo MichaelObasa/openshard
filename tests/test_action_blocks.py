@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from openshard.history.shard_contract import ShardReceipt
 from openshard.tui.action_blocks import (
     render_action_block,
     render_actions_section,
     render_check_actions_section,
     render_evidence_section,
+    render_result_section,
 )
 
 
@@ -248,3 +250,112 @@ def test_render_evidence_section_both_sections_present():
     result = render_evidence_section(["src/main.py"], ["database.tf"])
     assert "Read src/main.py" in result
     assert "Finding source database.tf" in result
+
+
+# ---------------------------------------------------------------------------
+# render_result_section
+# ---------------------------------------------------------------------------
+
+
+def _make_receipt(**overrides) -> ShardReceipt:
+    defaults = dict(
+        shard_id="shard-20260524-0001",
+        created_at="2026-05-24T00:12:00Z",
+        task_short="review this",
+        task_full="review this repo",
+        agent="OpenShard Native",
+        strategy="Not recorded",
+        model_display="Claude Sonnet 4.5",
+        risk="High",
+        sandbox="Off",
+        files_changed=0,
+        checks_display="3 skipped",
+        approval="Not required",
+        cost_display="$0.0480",
+        result="9 issue areas found. 27 raw findings recorded.",
+        status="Checks: 3 skipped",
+        duration_seconds=12.3,
+    )
+    defaults.update(overrides)
+    return ShardReceipt(**defaults)
+
+
+def test_render_result_section_header_bold():
+    result = render_result_section(_make_receipt())
+    assert "[bold]RESULT[/bold]" in result
+
+
+def test_render_result_section_result_line_present():
+    result = render_result_section(_make_receipt())
+    assert "9 issue areas found" in result
+
+
+def test_render_result_section_risk_present():
+    result = render_result_section(_make_receipt(risk="High"))
+    assert "Risk  High" in result
+
+
+def test_render_result_section_approval_as_detail_under_risk():
+    result = render_result_section(_make_receipt(risk="High", approval="Not required"))
+    assert "↳ [dim]Not required[/dim]" in result
+
+
+def test_render_result_section_checks_present():
+    result = render_result_section(_make_receipt(checks_display="3 skipped"))
+    assert "Checks" in result
+    assert "3 skipped" in result
+
+
+def test_render_result_section_shard_id_present():
+    result = render_result_section(_make_receipt(shard_id="shard-20260524-0001"))
+    assert "Receipt" in result
+    assert "shard-20260524-0001" in result
+
+
+def test_render_result_section_cost_present():
+    result = render_result_section(_make_receipt(cost_display="$0.0480"))
+    assert "Cost" in result
+    assert "$0.0480" in result
+
+
+def test_render_result_section_skips_not_recorded_result():
+    result = render_result_section(_make_receipt(result="Not recorded"))
+    assert "9 issue" not in result
+    assert "Not recorded" not in result or "Risk" in result
+
+
+def test_render_result_section_skips_not_recorded_risk():
+    result = render_result_section(_make_receipt(risk="Not recorded"))
+    assert "Risk" not in result
+
+
+def test_render_result_section_skips_not_recorded_cost():
+    result = render_result_section(_make_receipt(cost_display="Not recorded"))
+    assert "Cost" not in result
+
+
+def test_render_result_section_skips_not_run_checks():
+    result = render_result_section(_make_receipt(checks_display="Not run"))
+    assert "Checks" not in result
+
+
+def test_render_result_section_skips_not_recorded_checks():
+    result = render_result_section(_make_receipt(checks_display="Not recorded"))
+    assert "Checks" not in result
+
+
+def test_render_result_section_all_sentinel_values_returns_empty():
+    receipt = _make_receipt(
+        result="Not recorded",
+        risk="Not recorded",
+        checks_display="Not recorded",
+        shard_id="",
+        cost_display="Not recorded",
+        approval="Not recorded",
+    )
+    assert render_result_section(receipt) == ""
+
+
+def test_render_result_section_ends_with_newline():
+    result = render_result_section(_make_receipt())
+    assert result.endswith("\n")

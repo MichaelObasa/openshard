@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from openshard.history.shard_contract import ShardReceipt
+
 _MAX_INSPECTED = 5
 _MAX_FINDINGS = 8
+_NOT_RECORDED = frozenset({"Not recorded", "Not run"})
 
 
 def render_action_block(title: str, detail: str | None = None) -> str:
@@ -93,3 +99,29 @@ def render_evidence_section(
     while lines and lines[-1] == "":
         lines.pop()
     return "\n".join(lines) + "\n"
+
+
+def render_result_section(receipt: "ShardReceipt") -> str:
+    rows: list[str] = []
+
+    if receipt.result and receipt.result not in _NOT_RECORDED:
+        rows.append(render_action_block(receipt.result))
+
+    if receipt.risk and receipt.risk not in _NOT_RECORDED:
+        approval: str | None = (
+            receipt.approval if receipt.approval not in _NOT_RECORDED else None
+        )
+        rows.append(render_action_block(f"Risk  {receipt.risk}", approval))
+
+    if receipt.checks_display and receipt.checks_display not in _NOT_RECORDED:
+        rows.append(render_action_block("Checks", receipt.checks_display))
+
+    if receipt.shard_id:
+        rows.append(render_action_block("Receipt", receipt.shard_id))
+
+    if receipt.cost_display and receipt.cost_display not in _NOT_RECORDED:
+        rows.append(render_action_block("Cost", receipt.cost_display))
+
+    if not rows:
+        return ""
+    return "[bold]RESULT[/bold]\n" + "\n".join(rows) + "\n"
