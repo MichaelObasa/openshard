@@ -1884,3 +1884,106 @@ async def test_regression_normal_task_still_invokes_runner(tmp_path):
             await pilot.pause(delay=0.3)
     assert mock_runner_cls.return_value.invoke.called
     assert "run" in str(mock_runner_cls.return_value.invoke.call_args_list[0])
+
+
+# ── Plan mode dispatch ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_plan_renders_openshard_block(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/plan refactor auth safely")
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+    assert "OPENSHARD" in text
+
+
+@pytest.mark.asyncio
+async def test_plan_renders_you_block(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/plan refactor auth safely")
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+    assert "YOU" in text
+
+
+@pytest.mark.asyncio
+async def test_plan_output_contains_plan_section(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/plan refactor auth safely")
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+    assert "PLAN" in text
+
+
+@pytest.mark.asyncio
+async def test_plan_does_not_invoke_cli_runner(tmp_path):
+    app = _make_app(tmp_path)
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/plan refactor auth safely")
+            await pilot.press("enter")
+        mock_runner_cls.return_value.invoke.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_plan_does_not_start_run_status(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        with patch.object(app, "_start_run_status") as mock_start_run:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/plan refactor auth safely")
+            await pilot.press("enter")
+            mock_start_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_plan_bare_shows_openshard_block_with_usage_hint(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/plan")
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+    assert "OPENSHARD" in text
+    assert "/plan" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_regression_ask_still_works_after_plan_added(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/ask what models do you support?")
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+    assert "OPENSHARD" in text
+
+
+@pytest.mark.asyncio
+async def test_regression_normal_task_still_invokes_runner_after_plan_added(tmp_path):
+    app = _make_app(tmp_path)
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = _cli_ok()
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("fix the auth bug")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+    assert mock_runner_cls.return_value.invoke.called
+    assert "run" in str(mock_runner_cls.return_value.invoke.call_args_list[0])

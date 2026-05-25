@@ -5,7 +5,7 @@ from openshard.models.registry import all_models, display_name_for, models_by_ca
 _ASK_FALLBACK = (
     "Ask Mode v1 can answer OpenShard/product questions only.\n"
     "For repo analysis, use a normal task or /pack.\n"
-    "For planning, use /plan once enabled."
+    "For planning, use /plan <task>."
 )
 
 _COMMANDS_TEXT = (
@@ -20,6 +20,7 @@ _COMMANDS_TEXT = (
     "  /packs                   List available workflow packs\n"
     "  /pack <id>               Load a workflow pack\n"
     "  /ask <question>          Ask OpenShard a product question\n"
+    "  /plan <task>             Generate a local execution plan\n"
     "\n"
     "Plain text is sent to the execution engine as a task."
 )
@@ -53,9 +54,10 @@ _LAST_TEXT = (
 )
 
 _PLAN_TEXT = (
-    "/plan is planned for a future OpenShard release.\n"
-    "It will generate a structured execution plan before committing to a run.\n"
-    "Use `openshard plan <task>` from the CLI for the current planning surface."
+    "/plan generates a structured execution plan before you commit to a run.\n"
+    "Use it to review approach, scope, and risk notes.\n"
+    "Example: /plan refactor the auth module\n"
+    "No provider calls are made — plan output is local and instant."
 )
 
 _PACK_TEXT = (

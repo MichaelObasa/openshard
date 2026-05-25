@@ -4,6 +4,8 @@ import shlex
 from dataclasses import dataclass
 from enum import Enum
 
+from openshard.tui.plan_mode import PLAN_FAST_PATHS
+
 
 class TuiCommand(Enum):
     RUN_TASK = "run_task"
@@ -17,6 +19,7 @@ class TuiCommand(Enum):
     PACKS = "packs"
     PACK_SHOW = "pack_show"
     ASK = "ask"
+    PLAN = "plan"
     UNKNOWN = "unknown"
 
 
@@ -72,6 +75,9 @@ def parse_tui_input(text: str) -> ParsedCommand:
         if lower == "/ask" or lower.startswith("/ask "):
             question = text[4:].strip() if lower.startswith("/ask ") else ""
             return ParsedCommand(TuiCommand.ASK, question=question)
+        if lower == "/plan" or lower.startswith("/plan "):
+            task = text[6:].strip() if lower.startswith("/plan ") else None
+            return ParsedCommand(TuiCommand.PLAN, task=task or None)
         match lower:
             case "/help":
                 return ParsedCommand(TuiCommand.HELP)
@@ -102,4 +108,6 @@ def parse_tui_input(text: str) -> ParsedCommand:
     _lower = text.lower()
     if any(_lower.startswith(p) for p in _ASK_FAST_PATH):
         return ParsedCommand(TuiCommand.ASK, question=text)
+    if any(_lower.startswith(p) for p in PLAN_FAST_PATHS):
+        return ParsedCommand(TuiCommand.PLAN, task=text)
     return ParsedCommand(TuiCommand.RUN_TASK, task=text)

@@ -16,6 +16,7 @@ from textual.widgets import Label, Static, TextArea
 from openshard.history.session_events import SessionEventWriter, _truncate
 from openshard.tui.ask_mode import answer_ask_mode
 from openshard.tui.commands import TuiCommand, parse_tui_input
+from openshard.tui.plan_mode import answer_plan_mode
 
 _BRAND_ANSI_SHADOW = (
     "██████╗ ██████╗ ███████╗███╗   ██╗███████╗██╗  ██╗ █████╗ ██████╗ ██████╗\n"
@@ -46,6 +47,7 @@ _SLASH_MENU_TEXT = (
     "  /last full               Show full debug/audit detail\n"
     "  /feedback <outcome>      Record outcome for last run\n"
     "  /ask <question>          Ask a product question\n"
+    "  /plan <task>             Generate a local execution plan\n"
     "  /clear                   Clear output\n"
     "  /quit                    Exit"
 )
@@ -83,6 +85,7 @@ _HELP_TEXT = (
     "  /packs                   List available workflow packs\n"
     "  /pack <id>               Show a workflow pack prompt\n"
     "  /ask <question>          Ask a product question (no run)\n"
+    "  /plan <task>             Generate a local execution plan (no run)\n"
     "  (plain text)             Run as openshard task\n"
     "\n"
     "Composer keys:\n"
@@ -425,6 +428,9 @@ class OpenShardTui(App):
                     self._pack_workflow = ""
         elif parsed.cmd == TuiCommand.ASK:
             answer = answer_ask_mode(parsed.question or "")
+            self._append_output(_render_openshard_block(answer))
+        elif parsed.cmd == TuiCommand.PLAN:
+            answer = answer_plan_mode(parsed.task or "")
             self._append_output(_render_openshard_block(answer))
         else:
             self._append_output(_render_openshard_block(f"Unknown command: {raw}\nType /help for supported commands."))
