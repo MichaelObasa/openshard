@@ -305,6 +305,11 @@ def _display_model_name(slug: str) -> str:
     return _format_model_slug_shard(slug.split("/", 1)[-1])
 
 
+def display_model_name(slug: str) -> str:
+    """Public wrapper — convert a provider/model slug to a user-friendly display name."""
+    return _display_model_name(slug)
+
+
 def _format_model_slug_shard(name: str) -> str:
     """Best-effort formatter for unknown model slugs (e.g. 'gemini-2.0-flash' → 'Gemini 2.0 Flash')."""
     parts = [p for p in name.split("-") if p]
@@ -584,7 +589,17 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         )
         result = _base + ("; review files created." if _fp_for_result else ".")
     elif entry.get("is_review_task"):
-        result = "Review completed."
+        _dom = entry.get("review_domain") or ""
+        _dfiles = entry.get("domain_files") or []
+        if not _dfiles and _dom:
+            from openshard.review.domain_files import no_files_message
+            _msg = no_files_message(_dom)
+            result = _msg if _msg else "Review completed."
+        elif _dfiles and _dom == "docs_onboarding":
+            _readme = next((f for f in _dfiles if "readme" in f.lower()), _dfiles[0])
+            result = f"{_readme} inspected."
+        else:
+            result = "Review completed."
     else:
         result = _result_display(summary) or "Not recorded"
 
@@ -888,12 +903,15 @@ def build_live_run_receipt(
     findings: "Optional[list[ShardFinding]]" = None,
     run_timeline: "Optional[list[dict]]" = None,
     review_checks: "Optional[list[dict]]" = None,
+    routing_selected_model: "Optional[str]" = None,
 ) -> ShardReceipt:
     """Build a ShardReceipt from live run metadata (before log write). Pure, no I/O.
 
     result: pre-formatted result string that bypasses _result_display() processing.
             Use when the caller has already computed a clean result (e.g. two-count
             review format "N issue areas found. M raw findings recorded.").
+    routing_selected_model: the final scored model (if scoring ran); adds the
+            "Auto → {model}" prefix to match build_shard_receipt output.
     """
     _model_stages: list[tuple[str, str]] = [
         (
@@ -906,9 +924,14 @@ def build_live_run_receipt(
         for sr in stage_runs
         if getattr(getattr(sr, "stage", None), "stage_type", None) and getattr(sr, "model", None)
     ]
-    _model_display = _display_model_name(routing_model) if routing_model else "Not recorded"
-    if _model_display == "Not recorded" and _model_stages:
+    if routing_selected_model:
+        _model_display = f"Auto → {_display_model_name(routing_selected_model)}"
+    elif routing_model:
+        _model_display = _display_model_name(routing_model)
+    elif _model_stages:
         _model_display = _model_stages[0][1]
+    else:
+        _model_display = "Not recorded"
 
     if verification_attempted is None or not verification_attempted:
         _checks = "Not run"

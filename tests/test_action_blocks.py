@@ -309,9 +309,10 @@ def test_render_result_section_risk_present():
     assert "Risk  High" in result
 
 
-def test_render_result_section_approval_as_detail_under_risk():
+def test_render_result_section_approval_as_own_row():
     result = render_result_section(_make_receipt(risk="High", approval="Not required"))
-    assert "↳ [dim]Not required[/dim]" in result
+    assert "Approval  Not required" in result
+    assert "↳ [dim]Not required[/dim]" not in result
 
 
 def test_render_result_section_checks_present():

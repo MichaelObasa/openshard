@@ -7,6 +7,7 @@ import click
 from click.testing import CliRunner
 
 from openshard.cli.main import _model_label, _render_log_entry
+from openshard.history.shard_contract import display_model_name as _sc_display_model_name
 from openshard.routing.engine import MODEL_MAIN, MODEL_STRONG
 from openshard.native.context import (
     NativeContextQualityScore,
@@ -3226,7 +3227,7 @@ class TestRoutingModelDisplayConsistency(unittest.TestCase):
             (ln for ln in out.split("\n") if ln.startswith("Model: ")), ""
         )
         self.assertNotIn("Auto →", top_model_line)
-        self.assertIn(_model_label("z-ai/glm-4-5"), top_model_line)
+        self.assertIn(_sc_display_model_name("z-ai/glm-4-5"), top_model_line)
 
     def test_no_selected_top_model_line_no_auto_arrow(self):
         """When only routing_model is present, the top Model: line has no 'Auto →'."""
@@ -3235,7 +3236,7 @@ class TestRoutingModelDisplayConsistency(unittest.TestCase):
             (ln for ln in out.split("\n") if ln.startswith("Model: ")), ""
         )
         self.assertNotIn("Auto →", top_model_line)
-        self.assertIn(_model_label("z-ai/glm-4-5"), top_model_line)
+        self.assertIn(_sc_display_model_name("z-ai/glm-4-5"), top_model_line)
 
 
 class TestLastCostComparisonBlock(unittest.TestCase):
@@ -4519,7 +4520,7 @@ class TestMoreTierExclusion(unittest.TestCase):
     def _entry_with_cost(self) -> dict:
         return {
             "task": "test task",
-            "cost": 0.005,
+            "estimated_cost": 0.005,
             "prompt_tokens": 1000,
             "completion_tokens": 500,
         }
@@ -4565,9 +4566,15 @@ class TestMoreTierExclusion(unittest.TestCase):
         out = _render(self._native_entry_with_routing_preview(), "more")
         self.assertNotIn("routing preview:", out)
 
-    def test_more_excludes_cost_comparison_block(self):
+    def test_more_includes_cost_comparison_block(self):
         out = _render(self._entry_with_cost(), "more")
-        self.assertNotIn("Cost comparison", out)
+        self.assertIn("COST COMPARISON", out)
+        self.assertIn("Run cost:", out)
+        self.assertIn("Estimated same-token baseline:", out)
+
+    def test_more_omits_cost_comparison_when_no_cost_data(self):
+        out = _render({"task": "test task", "prompt_tokens": 1000, "completion_tokens": 500}, "more")
+        self.assertNotIn("COST COMPARISON", out)
 
     def test_more_excludes_tokens_line(self):
         entry = {

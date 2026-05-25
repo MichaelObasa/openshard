@@ -1367,7 +1367,7 @@ class RunPipeline:
             else "Not recorded"
         )
         # Review tasks are always at least High risk regardless of routing category
-        if _is_review_task and _receipt_risk in ("Not recorded", "Low"):
+        if (_is_review_task or _is_readonly_review_task) and _receipt_risk in ("Not recorded", "Low"):
             _receipt_risk = "High"
         _receipt_sandbox = "Off" if (_readonly_task or _is_review_task) else "Not recorded"
         _receipt_approval = "Not required" if _readonly_task else "Not recorded"
@@ -1408,11 +1408,14 @@ class RunPipeline:
             is_native=(effective_executor == "native"),
             exec_result_summary=_clean_summary,
             findings=_extracted_findings if _extracted_findings else None,
-            is_review_task=_is_review_task,
+            is_review_task=_is_review_task or _is_readonly_review_task,
             generator_model=getattr(generator, "model", None),
             run_timeline=[e.to_dict() for e in _timeline],
             run_label=_pack_label,
             review_checks=_review_checks if _review_checks else None,
+            review_domain=_review_domain,
+            domain_files=_domain_files if _domain_files else None,
+            routing_selected_model=_scored.selected_model if _scored and _scored.selected_model else None,
         )
 
         if dry_run:
