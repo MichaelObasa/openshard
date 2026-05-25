@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openshard.models.registry import all_models, models_by_capability, models_by_role
+from openshard.models.registry import all_models, display_name_for, models_by_capability, models_by_role
 
 _ASK_FALLBACK = (
     "Ask Mode v1 can answer OpenShard/product questions only.\n"
@@ -100,27 +100,49 @@ def answer_ask_mode(question: str) -> str:
     return _ASK_FALLBACK
 
 
+_ROSTER_FRONTIER = (
+    "openai/gpt-5.5",
+    "openai/gpt-5.5-pro",
+    "anthropic/claude-opus-4.7",
+    "anthropic/claude-sonnet-4.6",
+)
+_ROSTER_VALUE = (
+    "moonshotai/kimi-k2.6",
+    "deepseek/deepseek-v4-pro",
+    "z-ai/glm-5.1",
+    "qwen/qwen3.7-max",
+)
+_ROSTER_CHEAP = (
+    "deepseek/deepseek-v4-flash",
+    "openai/gpt-5-nano",
+    "google/gemini-3.1-flash-lite",
+    "ibm-granite/granite-4.1-8b",
+)
+
+
 def _answer_model_roster() -> str:
     count = len(all_models())
-    cheap = models_by_role("cheap_control")[:4]
-    reasoning = models_by_capability("reasoning")[:4]
     lines = [
         f"OpenShard currently knows {count} registered models.",
         "",
         "OpenShard groups models by what they are useful for:",
-        "  - Low-cost / control work",
-        "  - Routine engineering",
+        "  - Frontier / escalation",
+        "  - Long-horizon / value work",
         "  - Planning and review",
         "  - Reasoning-heavy tasks",
+        "  - Low-cost / control",
         "  - Experimental coding agents",
         "",
-        "Low-cost / control examples:",
+        "Frontier / escalation examples:",
     ]
-    for m in cheap:
-        lines.append(f"  {m.display_name}")
-    lines += ["", "Reasoning / review examples:"]
-    for m in reasoning:
-        lines.append(f"  {m.display_name}")
+    for mid in _ROSTER_FRONTIER:
+        lines.append(f"  {display_name_for(mid)}")
+    lines += ["", "Long-horizon / value examples:"]
+    for mid in _ROSTER_VALUE:
+        lines.append(f"  {display_name_for(mid)}")
+    lines += ["", "Low-cost / control examples:"]
+    for mid in _ROSTER_CHEAP:
+        lines.append(f"  {display_name_for(mid)}")
     lines += [
         "",
         "Use:",

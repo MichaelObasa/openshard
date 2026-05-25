@@ -70,6 +70,22 @@ class TestModelsShowCommand(unittest.TestCase):
         result = self.runner.invoke(cli, ["models", "show", "unknown/model-x"])
         self.assertIn("not found", result.output.lower())
 
+    def test_show_gpt_5_5_exits_zero(self) -> None:
+        result = self.runner.invoke(cli, ["models", "show", "openai/gpt-5.5"])
+        self.assertEqual(result.exit_code, 0)
+
+    def test_show_gpt_5_5_displays_name(self) -> None:
+        result = self.runner.invoke(cli, ["models", "show", "openai/gpt-5.5"])
+        self.assertIn("GPT-5.5", result.output)
+
+    def test_show_kimi_k2_6_exits_zero(self) -> None:
+        result = self.runner.invoke(cli, ["models", "show", "moonshotai/kimi-k2.6"])
+        self.assertEqual(result.exit_code, 0)
+
+    def test_show_gpt_oss_120b_exits_zero(self) -> None:
+        result = self.runner.invoke(cli, ["models", "show", "openai/gpt-oss-120b"])
+        self.assertEqual(result.exit_code, 0)
+
 
 class TestModelsRoleCommand(unittest.TestCase):
     def setUp(self) -> None:
@@ -90,6 +106,14 @@ class TestModelsRoleCommand(unittest.TestCase):
     def test_role_unknown_shows_no_models_found(self) -> None:
         result = self.runner.invoke(cli, ["models", "role", "nonexistent_role_xyz"])
         self.assertIn("No models found for role", result.output)
+
+    def test_role_low_cost_control_exits_zero(self) -> None:
+        result = self.runner.invoke(cli, ["models", "role", "low_cost_control"])
+        self.assertEqual(result.exit_code, 0)
+
+    def test_role_low_cost_control_has_results(self) -> None:
+        result = self.runner.invoke(cli, ["models", "role", "low_cost_control"])
+        self.assertNotIn("No models found for role", result.output)
 
 
 class TestModelsCapabilitiesCommand(unittest.TestCase):

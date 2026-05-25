@@ -33,6 +33,17 @@ class TestRegistryCompleteness(unittest.TestCase):
             "x-ai/grok-4.3",
             "~anthropic/claude-haiku-latest",
             "x-ai/grok-build-0.1",
+            # OpenRouter expansion — non-experimental
+            "openai/gpt-5.5",
+            "openai/gpt-5.5-pro",
+            "openai/gpt-5.4",
+            "openai/gpt-5.4-pro",
+            "openai/gpt-5.4-mini",
+            "openai/gpt-5.4-nano",
+            "openai/gpt-5-mini",
+            "openai/gpt-5-nano",
+            "moonshotai/kimi-k2.6",
+            "deepseek/deepseek-v4-pro",
         }
         missing = core_ids - self._ids()
         self.assertFalse(missing, f"Missing core models: {missing}")
@@ -48,6 +59,12 @@ class TestRegistryCompleteness(unittest.TestCase):
             "stepfun/step-3.5-flash",
             "poolside/laguna-xs.2:free",
             "poolside/laguna-m.1:free",
+            # OpenRouter expansion — experimental
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-120b",
+            "inclusionai/ring-2.6-1t",
+            "minimax/minimax-m2.7",
+            "inception/mercury-2",
         }
         missing = experimental_ids - self._ids()
         self.assertFalse(missing, f"Missing experimental models: {missing}")
@@ -78,6 +95,17 @@ class TestExperimentalFlag(unittest.TestCase):
         "qwen/qwen3.7-max",
         "x-ai/grok-4.3",
         "~anthropic/claude-haiku-latest",
+        # OpenRouter expansion
+        "openai/gpt-5.5",
+        "openai/gpt-5.5-pro",
+        "openai/gpt-5.4",
+        "openai/gpt-5.4-pro",
+        "openai/gpt-5.4-mini",
+        "openai/gpt-5.4-nano",
+        "openai/gpt-5-mini",
+        "openai/gpt-5-nano",
+        "moonshotai/kimi-k2.6",
+        "deepseek/deepseek-v4-pro",
     }
     _EXPERIMENTAL_MODELS = {
         "qwen/qwen3.6-flash",
@@ -90,6 +118,12 @@ class TestExperimentalFlag(unittest.TestCase):
         "poolside/laguna-xs.2:free",
         "poolside/laguna-m.1:free",
         "x-ai/grok-build-0.1",
+        # OpenRouter expansion
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
+        "inclusionai/ring-2.6-1t",
+        "minimax/minimax-m2.7",
+        "inception/mercury-2",
     }
 
     def test_experimental_false_for_core_models(self) -> None:
@@ -251,6 +285,81 @@ class TestGetModel(unittest.TestCase):
     def test_get_model_returns_model_entry_instance(self) -> None:
         entry = get_model("ibm-granite/granite-4.1-8b")
         self.assertIsInstance(entry, ModelEntry)
+
+
+# ---------------------------------------------------------------------------
+# Expansion model correctness
+# ---------------------------------------------------------------------------
+
+
+class TestExpansionModels(unittest.TestCase):
+    _NEW_IDS = [
+        "openai/gpt-5.5",
+        "openai/gpt-5.5-pro",
+        "openai/gpt-5.4",
+        "openai/gpt-5.4-pro",
+        "openai/gpt-5.4-mini",
+        "openai/gpt-5.4-nano",
+        "openai/gpt-5-mini",
+        "openai/gpt-5-nano",
+        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
+        "moonshotai/kimi-k2.6",
+        "deepseek/deepseek-v4-pro",
+        "inclusionai/ring-2.6-1t",
+        "minimax/minimax-m2.7",
+        "inception/mercury-2",
+    ]
+    _VALID_COST = {"free", "tiny", "cheap", "mid", "expensive", "unknown"}
+    _VALID_LATENCY = {"fast", "normal", "slow", "unknown"}
+
+    def test_expansion_models_have_required_fields(self) -> None:
+        for model_id in self._NEW_IDS:
+            with self.subTest(model_id=model_id):
+                entry = get_model(model_id)
+                self.assertIsNotNone(entry, f"Not found: {model_id}")
+                assert entry is not None
+                self.assertTrue(entry.display_name)
+                self.assertTrue(entry.provider)
+                self.assertTrue(entry.tier)
+                self.assertTrue(entry.roles)
+                self.assertIn(entry.cost_class, self._VALID_COST)
+                self.assertIn(entry.latency_class, self._VALID_LATENCY)
+                self.assertIsInstance(entry.context_length, int)
+
+    def test_low_cost_control_role_has_results(self) -> None:
+        ids = [e.id for e in models_by_role("low_cost_control")]
+        self.assertGreater(len(ids), 0)
+        self.assertIn("openai/gpt-5-nano", ids)
+
+    def test_cheap_control_role_includes_new_utility_models(self) -> None:
+        ids = [e.id for e in models_by_role("cheap_control")]
+        self.assertIn("google/gemini-3.1-flash-lite", ids)
+        self.assertIn("openai/gpt-5-nano", ids)
+        self.assertIn("openai/gpt-5.4-nano", ids)
+        self.assertIn("openai/gpt-5-mini", ids)
+
+    def test_value_worker_role_has_results(self) -> None:
+        ids = [e.id for e in models_by_role("value_worker")]
+        self.assertIn("deepseek/deepseek-v4-pro", ids)
+
+    def test_gpt_oss_120b_is_reasoning_capable(self) -> None:
+        self.assertTrue(supports("openai/gpt-oss-120b", "reasoning"))
+
+    def test_kimi_k2_6_is_not_experimental(self) -> None:
+        self.assertFalse(is_experimental("moonshotai/kimi-k2.6"))
+
+    def test_gpt_oss_20b_is_experimental(self) -> None:
+        self.assertTrue(is_experimental("openai/gpt-oss-20b"))
+
+    def test_no_duplicate_model_ids_after_expansion(self) -> None:
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        for entry in _REGISTRY:
+            if entry.id in seen:
+                duplicates.add(entry.id)
+            seen.add(entry.id)
+        self.assertFalse(duplicates, f"Duplicate model IDs: {duplicates}")
 
 
 if __name__ == "__main__":
