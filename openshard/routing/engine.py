@@ -162,6 +162,50 @@ def is_readonly_task(task: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Inline read-only instruction detection
+# ---------------------------------------------------------------------------
+
+_INLINE_READONLY_PHRASES: tuple[str, ...] = (
+    "do not apply changes",
+    "do not make changes",
+    "do not write files",
+    "review only",
+    "do not modify",
+    "without making changes",
+    "without modifying files",
+    "do not change files",
+    "no file changes",
+    "read only",
+    "read-only",
+)
+
+_REVIEW_TASK_TERMS: tuple[str, ...] = (
+    "review",
+    "audit",
+    "assess",
+    "investigate",
+    "identify risks",
+    "production readiness",
+    "security",
+    "terraform",
+    "iac",
+    "hardening",
+)
+
+
+def has_inline_readonly_instruction(task: str) -> bool:
+    """Return True if the task body contains an explicit do-not-write instruction."""
+    t = task.lower()
+    return any(phrase in t for phrase in _INLINE_READONLY_PHRASES)
+
+
+def looks_like_review_task(task: str) -> bool:
+    """Return True if the task reads like a structured review/audit/assessment."""
+    t = task.lower()
+    return any(term in t for term in _REVIEW_TASK_TERMS)
+
+
+# ---------------------------------------------------------------------------
 # Legacy class (preserved for any existing callers)
 # ---------------------------------------------------------------------------
 

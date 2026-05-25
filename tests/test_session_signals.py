@@ -328,3 +328,79 @@ def test_has_retry_words_case_insensitive():
     assert _has_retry_words("Please RETRY this")
     assert _has_retry_words("Can you Try Again")
     assert not _has_retry_words("looks good to me")
+
+
+# ---------------------------------------------------------------------------
+# Fix 5: Session boundary resets last_run_response
+# ---------------------------------------------------------------------------
+
+_SESSION_A = "sess-aaa"
+_SESSION_B = "sess-bbb"
+
+
+def _response_event_for(session: str, run_id: str, shard_id: str) -> dict:
+    return {
+        "event_type": "openshard_response",
+        "session_id": session,
+        "run_id": run_id,
+        "shard_id": shard_id,
+        "summary": "",
+        "metadata": {},
+    }
+
+
+def _command_event_for(session: str, command: str) -> dict:
+    return {
+        "event_type": "command_invoked",
+        "session_id": session,
+        "run_id": None,
+        "shard_id": None,
+        "command": command,
+        "summary": "",
+        "metadata": {},
+    }
+
+
+def test_old_session_run_does_not_produce_inspected_result_in_new_session():
+    """Old session run must not link to a /last more in a new session."""
+    events = [
+        _response_event_for(_SESSION_A, run_id="run-old", shard_id="shard-old"),
+        _command_event_for(_SESSION_B, "/last more"),
+    ]
+    signals = infer_signals_from_session(events)
+    inspected = [s for s in signals if s["signal_type"] == "inspected_result"]
+    assert inspected == [], (
+        "inspected_result must not be created when /last more is in a different session "
+        f"from the run response; got signals: {signals}"
+    )
+
+
+def test_session_boundary_resets_new_run_links_correctly():
+    """After session boundary reset, a new run in session B links /last more correctly."""
+    events = [
+        _response_event_for(_SESSION_A, run_id="run-old", shard_id="shard-old"),
+        _response_event_for(_SESSION_B, run_id="run-new", shard_id="shard-new"),
+        _command_event_for(_SESSION_B, "/last more"),
+    ]
+    signals = infer_signals_from_session(events)
+    inspected = [s for s in signals if s["signal_type"] == "inspected_result"]
+    assert len(inspected) == 1, f"Expected 1 inspected_result signal, got: {signals}"
+    assert inspected[0]["run_id"] == "run-new", (
+        f"inspected_result must link to run-new, got: {inspected[0]['run_id']!r}"
+    )
+    assert inspected[0]["shard_id"] == "shard-new", (
+        f"inspected_result must link to shard-new, got: {inspected[0]['shard_id']!r}"
+    )
+
+
+def test_same_session_linkage_unchanged():
+    """Within a single session, /last more still links to the session's run (regression guard)."""
+    events = [
+        _response_event_for(_SESSION_A, run_id="run-x", shard_id="shard-x"),
+        _command_event_for(_SESSION_A, "/last more"),
+    ]
+    signals = infer_signals_from_session(events)
+    inspected = [s for s in signals if s["signal_type"] == "inspected_result"]
+    assert len(inspected) == 1, f"Expected 1 inspected_result signal, got: {signals}"
+    assert inspected[0]["run_id"] == "run-x"
+    assert inspected[0]["shard_id"] == "shard-x"
