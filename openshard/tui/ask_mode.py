@@ -97,6 +97,12 @@ def answer_ask_mode(question: str) -> str:
         return _LAST_TEXT
     if "/plan" in q or "what is plan" in q:
         return _PLAN_TEXT
+    if (
+        "model policy" in q
+        or ("ask mode" in q and "model" in q)
+        or ("plan mode" in q and "model" in q)
+    ):
+        return _answer_mode_policy()
     if "/pack" in q or "context pack" in q:
         return _PACK_TEXT
     return _ASK_FALLBACK
@@ -187,4 +193,30 @@ def _answer_experimental_models() -> str:
     for m in models:
         lines.append(f"  {m.display_name}")
     lines += ["", "Use `openshard models experimental` for full details."]
+    return "\n".join(lines)
+
+
+def _answer_mode_policy() -> str:
+    from openshard.models.mode_policy import model_policy_for_mode
+
+    ask = model_policy_for_mode("ask")
+    plan = model_policy_for_mode("plan")
+    if ask is None or plan is None:
+        return "Model policy is unavailable."
+    lines = [
+        "Ask Mode and Plan Mode are currently local deterministic.",
+        "No provider calls are made. Model policy is advisory only.",
+        "",
+        "Ask Mode model policy (advisory only):",
+        f"  Default   {display_name_for(ask.default_model_id)}",
+        "  Fallbacks " + ", ".join(display_name_for(fid) for fid in ask.fallback_model_ids),
+        "",
+        "Plan Mode model policy (advisory only):",
+        f"  Default   {display_name_for(plan.default_model_id)}",
+        "  Fallbacks " + ", ".join(display_name_for(fid) for fid in plan.fallback_model_ids),
+        "",
+        "Run routing remains controlled by the existing routing policy.",
+        "",
+        "Use `openshard models mode ask` or `openshard models mode plan` for CLI details.",
+    ]
     return "\n".join(lines)
