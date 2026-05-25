@@ -2080,6 +2080,9 @@ def render_post_run(
     run_timeline: "list[dict] | None" = None,
     run_label: str = "",
     review_checks: "list[dict] | None" = None,
+    review_domain: str = "",
+    domain_files: "list[str] | None" = None,
+    routing_selected_model: "str | None" = None,
 ) -> None:
     """Render the post-execution receipt in compact shard format."""
     import click
@@ -2105,10 +2108,21 @@ def render_post_run(
         memo = render_review_tldr_memo(_findings, final_files or [])
         click.echo(memo)
     elif is_review_task:
-        _result_summary = "Review completed."
+        _dfiles = domain_files or []
+        if not _dfiles and review_domain:
+            from openshard.review.domain_files import no_files_message
+            _msg = no_files_message(review_domain)
+            _result_summary = _msg if _msg else "Review completed."
+        elif _dfiles and review_domain == "docs_onboarding":
+            _readme = next((f for f in _dfiles if "readme" in f.lower()), _dfiles[0])
+            _result_summary = f"{_readme} inspected."
+        else:
+            _result_summary = "Review completed."
+        _evidence_files = domain_files or final_files or []
         fallback = render_review_fallback_memo(
-            final_files or [],
+            _evidence_files,
             include_diagnostic=(detail in ("more", "full")),
+            is_evidence=readonly_task or is_review_task,
         )
         click.echo(fallback)
 
@@ -2132,6 +2146,7 @@ def render_post_run(
         agent_notes=list(notes) if notes else [],
         findings=_findings if _findings else None,
         review_checks=review_checks if review_checks else None,
+        routing_selected_model=routing_selected_model or None,
     )
     click.echo("")
     click.echo(render_compact_shard_receipt(receipt))

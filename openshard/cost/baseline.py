@@ -102,6 +102,35 @@ def format_full_comparison_lines(
     return lines
 
 
+def _ratio_str(actual: float, baseline: float) -> str:
+    if actual <= 0 or baseline <= actual:
+        return ""
+    ratio = baseline / actual
+    if ratio >= 10:
+        return f"{round(ratio)}x higher"
+    return f"{ratio:.1f}x higher"
+
+
+def format_concise_comparison_lines(
+    prompt_tokens: int,
+    completion_tokens: int,
+    actual_cost: float,
+) -> list[str]:
+    """Return one concise line per priceable baseline model.
+
+    Each line: '    {label}-only   ${bc:.4f}   {ratio}x higher'
+    """
+    lines: list[str] = []
+    for label, model_id in FULL_COMPARISON_MODELS:
+        bc = compute_cost(model_id, prompt_tokens, completion_tokens)
+        if bc is None:
+            continue
+        ratio = _ratio_str(actual_cost, bc)
+        suffix = f"   {ratio}" if ratio else ""
+        lines.append(f"    {label}-only   ${bc:.4f}{suffix}")
+    return lines
+
+
 def compute_baseline_comparison(
     prompt_tokens: int,
     completion_tokens: int,

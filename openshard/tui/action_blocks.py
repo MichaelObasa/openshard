@@ -116,10 +116,10 @@ def render_result_section(receipt: "ShardReceipt") -> str:
         rows.append(render_action_block(receipt.result))
 
     if receipt.risk and receipt.risk not in _NOT_RECORDED:
-        approval: str | None = (
-            receipt.approval if receipt.approval not in _NOT_RECORDED else None
-        )
-        rows.append(render_action_block(f"Risk  {receipt.risk}", approval))
+        rows.append(render_action_block(f"Risk  {receipt.risk}"))
+
+    if receipt.approval and receipt.approval not in _NOT_RECORDED:
+        rows.append(render_action_block(f"Approval  {receipt.approval}"))
 
     if receipt.checks_display and receipt.checks_display not in _NOT_RECORDED:
         rows.append(render_action_block("Checks", receipt.checks_display))

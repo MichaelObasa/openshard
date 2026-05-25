@@ -943,7 +943,8 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
             click.echo(f"\n{prefix}: {', '.join(parts)}")
         elif _routing_selected or routing_model:
             _display_model = _routing_selected or routing_model
-            lbl = _model_label(_display_model)
+            from openshard.history.shard_contract import display_model_name as _sc_display_model_name
+            lbl = _sc_display_model_name(_display_model)
             if _routing_selected and _routing_selected != routing_model:
                 # Scored routing overrode the keyword pick — mirror receipt format.
                 click.echo(f"\nModel: Auto → {lbl}")
@@ -1190,6 +1191,26 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
             _bl = format_baseline_line(_pt, _ct, actual_cost=cost)
             if _bl is not None:
                 click.echo(_bl)
+    elif detail == "more":
+        from openshard.cost.baseline import (
+            compute_baseline_comparison,
+            format_concise_comparison_lines,
+        )
+        _pt = entry.get("prompt_tokens") or 0
+        _ct = entry.get("completion_tokens") or 0
+        _cmp = compute_baseline_comparison(_pt, _ct, actual_cost=cost)
+        if _cmp is not None:
+            click.echo("\nCOST COMPARISON")
+            click.echo(f"  OpenShard selected: {_shard.model_display}")
+            click.echo(f"  Run cost: ${_cmp['actual_cost_usd']:.4f}")
+            _rows = format_concise_comparison_lines(_pt, _ct, _cmp["actual_cost_usd"])
+            if _rows:
+                click.echo("")
+                click.echo("  Estimated same-token baseline:")
+                for _row in _rows:
+                    click.echo(_row)
+            click.echo("")
+            click.echo("  Method: same-token API price estimate. Real single-model cost may differ.")
     elif detail == "full":
         from openshard.cost.baseline import (
             compute_baseline_comparison,
