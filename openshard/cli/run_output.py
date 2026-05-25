@@ -1985,23 +1985,34 @@ def render_review_tldr_memo(findings: list, files: list) -> str:
     return "\n".join(lines)
 
 
-def render_review_fallback_memo(files: list, *, include_diagnostic: bool = False) -> str:
+def render_review_fallback_memo(
+    files: list,
+    *,
+    include_diagnostic: bool = False,
+    is_evidence: bool = False,
+) -> str:
     """Return a fallback review memo when no structured findings were captured. Pure, no I/O.
 
-    When files were created, mentions them and the generated review files.
-    When no files exist, does not mention generated review files.
+    When *is_evidence* is True the files are domain-discovered evidence
+    (e.g. CI/CD, auth, docs) that were read, not generated report files.
+    In that mode the memo uses "Files inspected" wording and never claims
+    that review files were generated.
+
+    When *is_evidence* is False (default) the files are assumed to be
+    generated review report files produced during a write-allowed run.
     """
     if files:
         lines: list[str] = ["OpenShard completed the review."]
-        if include_diagnostic:
-            lines.append("Structured findings were not captured for this run.")
-        lines.append("Detailed findings are available in the generated review files.")
+        lines.append("Structured findings were not captured for this run.")
         lines.append("")
-        lines.append("Files created")
+        lines.append("Files inspected" if is_evidence else "Files created")
         for f in files:
             path = getattr(f, "path", None) or (f if isinstance(f, str) else "")
             if path:
                 lines.append(f"  {path}")
+        if not is_evidence:
+            lines.append("")
+            lines.append("Detailed findings are available in the generated review files.")
     else:
         lines = [
             "OpenShard completed the review, but no structured findings were captured for this run."

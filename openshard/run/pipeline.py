@@ -72,7 +72,7 @@ from openshard.history.metrics import load_runs
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
 from openshard.providers.manager import ProviderManager
 from openshard.providers.openrouter import MODEL_PRICING, compute_cost
-from openshard.routing.engine import ESCALATION_CHAIN, MODEL_STRONG, RoutingDecision, route, is_readonly_task, has_inline_readonly_instruction, looks_like_review_task
+from openshard.routing.engine import ESCALATION_CHAIN, MODEL_STRONG, RoutingDecision, route, is_readonly_task, has_inline_readonly_instruction, looks_like_review_task, classify_review_domain
 from openshard.routing.form_factor_policy import ExecutionFormFactorDecision, select_form_factor
 from openshard.routing.profiles import (
     ProfileDecision,
@@ -1233,6 +1233,17 @@ class RunPipeline:
                 confirm_or_abort(f"{_sm_dec.reason} (repo stack: {_lang_str})")
 
         _is_review_task = "STRUCTURED_FINDINGS:" in task
+        _review_domain = classify_review_domain(task)
+        _is_iac_review = (_is_review_task or _is_readonly_review_task) and _review_domain == "terraform_iac"
+        # _has_domain_review: true for any read-only/review task whose domain is
+        # specific enough to warrant domain file discovery and review-mode output.
+        # Includes tasks that don't match looks_like_review_task() (e.g. test-
+        # coverage prompts with only an inline readonly instruction).
+        _specific_domain = _review_domain not in ("generic_review", "terraform_iac")
+        _has_domain_review = (
+            _is_review_task or _is_readonly_review_task
+            or (_readonly_task and _specific_domain)
+        )
         _TASK_SUFFIX_STRIP = "\n\nAfter completing your analysis"
         _task_display = task[:task.index(_TASK_SUFFIX_STRIP)].rstrip() if _TASK_SUFFIX_STRIP in task else task
         _clean_summary, _extracted_findings = _extract_structured_findings(exec_result.summary)
@@ -1248,11 +1259,10 @@ class RunPipeline:
                 if _extracted_findings:
                     _extraction_source = "markdown-files"
 
-        # Deterministic static analysis for Terraform review packs.
-        # Runs unconditionally when this is a review task so the demo is reliable
-        # even when the model does not produce valid STRUCTURED_FINDINGS JSON.
-        # Static findings are merged AFTER model findings so model context is preserved.
-        if _is_review_task or _is_readonly_review_task:
+        # Deterministic static analysis — only for Terraform/IaC review domain.
+        # Gated so CI/CD, auth, docs, tests, and generic review prompts do not
+        # receive IaC findings that are unrelated to the prompt intent.
+        if _is_iac_review:
             try:
                 from openshard.review.terraform_checker import scan_terraform
                 _static_findings = scan_terraform(Path.cwd())
@@ -1276,7 +1286,7 @@ class RunPipeline:
             ))
 
         _review_checks: list[dict] = []
-        if _is_review_task or _is_readonly_review_task:
+        if _is_iac_review:
             try:
                 from openshard.review.checks import run_review_checks
                 _check_root = workspace if workspace is not None else Path.cwd()
@@ -1290,6 +1300,18 @@ class RunPipeline:
                     kind="check",
                     count=len(_review_checks),
                 ))
+
+        # Domain-specific file discovery for non-IaC review domains.
+        # Runs for any read-only/review task with a specific domain so that
+        # test-coverage and similar prompts also get honest evidence output.
+        _domain_files: list[str] = []
+        if _has_domain_review and not _is_iac_review and _specific_domain:
+            try:
+                from openshard.review.domain_files import find_review_domain_files
+                _scan_root = workspace if workspace is not None else Path.cwd()
+                _domain_files = find_review_domain_files(_scan_root, _review_domain)
+            except Exception:
+                pass
 
         if _is_review_task or _is_readonly_review_task:
             _emit_review_debug(
@@ -1307,8 +1329,12 @@ class RunPipeline:
         _findings_extra: dict = {}
         if _is_review_task or _is_readonly_review_task:
             _findings_extra["is_review_task"] = True
+        if _has_domain_review and _specific_domain:
+            _findings_extra["review_domain"] = _review_domain
         if _review_checks:
             _findings_extra["review_checks"] = _review_checks
+        if _domain_files:
+            _findings_extra["domain_files"] = _domain_files
         if _extracted_findings:
             _findings_extra["findings"] = [
                 {
@@ -1321,7 +1347,7 @@ class RunPipeline:
                 for f in _extracted_findings
             ]
             click.echo("\nReview complete")
-        elif _is_review_task or _is_readonly_review_task:
+        elif _has_domain_review:
             click.echo("\nReview complete")
         else:
             click.echo("\nDone")

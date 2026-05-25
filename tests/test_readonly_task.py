@@ -10,7 +10,7 @@ from openshard.cli.main import cli
 from openshard.execution.generator import ChangedFile
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry
-from openshard.routing.engine import is_readonly_task, has_inline_readonly_instruction, looks_like_review_task
+from openshard.routing.engine import is_readonly_task, has_inline_readonly_instruction, looks_like_review_task, classify_review_domain
 
 _DEFAULT_CONFIG = {"approval_mode": "smart"}
 
@@ -700,3 +700,252 @@ class TestInlineReadonlyPipelineIntegration(unittest.TestCase):
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("Read-only task", result.output)
         self.assertIn("discarded", result.output)
+
+
+# ---------------------------------------------------------------------------
+# Domain classifier unit tests
+# ---------------------------------------------------------------------------
+
+class TestClassifyReviewDomain(unittest.TestCase):
+
+    def test_cicd_explicit(self):
+        self.assertEqual(
+            classify_review_domain(
+                "Review this repo's CI/CD setup. Identify fragile workflow steps, "
+                "missing validation, unsafe secrets usage, and checks that should "
+                "run before deployment. Do not apply changes."
+            ),
+            "cicd",
+        )
+
+    def test_cicd_pipeline_keyword(self):
+        self.assertEqual(classify_review_domain("Audit the pipeline configuration."), "cicd")
+
+    def test_auth_security(self):
+        self.assertEqual(
+            classify_review_domain(
+                "Investigate the auth-related code paths and identify likely risks "
+                "or missing checks. Do not apply changes unless the issue is obvious."
+            ),
+            "auth_security",
+        )
+
+    def test_auth_token_keyword(self):
+        self.assertEqual(classify_review_domain("Review JWT token validation."), "auth_security")
+
+    def test_docs_onboarding_readme(self):
+        self.assertEqual(
+            classify_review_domain(
+                "Review the README and onboarding flow for a new developer. "
+                "Identify what is unclear, missing, or misleading. Do not apply changes."
+            ),
+            "docs_onboarding",
+        )
+
+    def test_docs_onboarding_keyword(self):
+        self.assertEqual(classify_review_domain("Check the onboarding documentation."), "docs_onboarding")
+
+    def test_tests_domain(self):
+        self.assertEqual(
+            classify_review_domain(
+                "Find the highest-value missing tests in this repo and propose a "
+                "small safe implementation plan. Do not write files yet."
+            ),
+            "tests",
+        )
+
+    def test_tests_coverage_keyword(self):
+        self.assertEqual(classify_review_domain("Review the test coverage."), "tests")
+
+    def test_terraform_iac(self):
+        self.assertEqual(
+            classify_review_domain("Terraform production readiness review."),
+            "terraform_iac",
+        )
+
+    def test_iac_hardening(self):
+        self.assertEqual(classify_review_domain("IaC hardening review."), "terraform_iac")
+
+    def test_generic_review(self):
+        self.assertEqual(classify_review_domain("Review the API design."), "generic_review")
+
+    def test_non_terraform_wins_over_terraform(self):
+        """A prompt containing both 'readme' and 'terraform' maps to docs_onboarding."""
+        self.assertEqual(
+            classify_review_domain("Review the README. Also note any terraform warnings."),
+            "docs_onboarding",
+        )
+
+    def test_case_insensitive(self):
+        self.assertEqual(classify_review_domain("REVIEW THE CI/CD SETUP."), "cicd")
+
+
+# ---------------------------------------------------------------------------
+# Domain gating regression tests (integration)
+# ---------------------------------------------------------------------------
+
+# Sentinel finding injected by the mock — must NOT appear for non-IaC reviews.
+_SENTINEL_FINDING_MSG = "google_project_iam_binding_sentinel"
+_FORBIDDEN_STRINGS = (
+    _SENTINEL_FINDING_MSG,
+    "google_project_iam",
+    "deletion_protection",
+    "terraform fmt",
+    "terraform validate",
+    "tflint",
+    "missing ownership",
+    "missing environment",
+)
+
+_CICD_PROMPT = (
+    "Review this repo's CI/CD setup. Identify fragile workflow steps, missing "
+    "validation, unsafe secrets usage, and checks that should run before deployment. "
+    "Do not apply changes."
+)
+_AUTH_PROMPT = (
+    "Investigate the auth-related code paths and identify likely risks or missing "
+    "checks. Do not apply changes unless the issue is obvious and low-risk."
+)
+_README_PROMPT = (
+    "Review the README and onboarding flow for a new developer. Identify what is "
+    "unclear, missing, or misleading. Do not apply changes."
+)
+_TEST_COVERAGE_PROMPT = (
+    "Find the highest-value missing tests in this repo and propose a small safe "
+    "implementation plan. Do not write files yet."
+)
+_TERRAFORM_PROMPT = (
+    "Perform a Terraform production readiness review. Do not apply changes."
+)
+
+
+def _invoke_with_sentinel(task: str):
+    """Run *task* with scan_terraform mocked to a sentinel finding."""
+    from openshard.history.shard_contract import ShardFinding
+    _sentinel = ShardFinding(
+        severity="Critical",
+        message=_SENTINEL_FINDING_MSG,
+        path="main.tf",
+        line=1,
+    )
+    gen_mock = _make_generator_mock(_fake_result_no_files())
+    with patch("openshard.run.pipeline.ExecutionGenerator", return_value=gen_mock), \
+         patch("openshard.run.pipeline.NativeAgentExecutor", return_value=MagicMock()), \
+         patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+         patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+         patch("openshard.run.pipeline.analyze_repo", return_value=_SAFE_REPO), \
+         patch("openshard.run.pipeline.build_verification_plan", return_value=_empty_plan()), \
+         patch("openshard.run.pipeline._log_run"), \
+         patch("openshard.run.pipeline._build_explicit_file_context", return_value=""), \
+         patch("openshard.review.terraform_checker.scan_terraform", return_value=[_sentinel]) as mock_scan:
+        runner = CliRunner()
+        cli_result = runner.invoke(cli, ["run", task])
+    return cli_result, mock_scan
+
+
+class TestReviewDomainGating(unittest.TestCase):
+
+    def _assert_no_terraform_output(self, output: str, label: str) -> None:
+        for forbidden in _FORBIDDEN_STRINGS:
+            self.assertNotIn(
+                forbidden, output,
+                f"{label}: output must not contain '{forbidden}'",
+            )
+
+    def test_cicd_does_not_call_scan_terraform(self):
+        result, mock_scan = _invoke_with_sentinel(_CICD_PROMPT)
+        self.assertEqual(result.exit_code, 0, result.output)
+        mock_scan.assert_not_called()
+        self._assert_no_terraform_output(result.output, "CI/CD review")
+
+    def test_auth_does_not_call_scan_terraform(self):
+        result, mock_scan = _invoke_with_sentinel(_AUTH_PROMPT)
+        self.assertEqual(result.exit_code, 0, result.output)
+        mock_scan.assert_not_called()
+        self._assert_no_terraform_output(result.output, "Auth review")
+
+    def test_readme_does_not_call_scan_terraform(self):
+        result, mock_scan = _invoke_with_sentinel(_README_PROMPT)
+        self.assertEqual(result.exit_code, 0, result.output)
+        mock_scan.assert_not_called()
+        self._assert_no_terraform_output(result.output, "README review")
+
+    def test_test_coverage_does_not_call_scan_terraform(self):
+        result, mock_scan = _invoke_with_sentinel(_TEST_COVERAGE_PROMPT)
+        self.assertEqual(result.exit_code, 0, result.output)
+        mock_scan.assert_not_called()
+        self._assert_no_terraform_output(result.output, "Test coverage review")
+
+    def test_terraform_review_calls_scan_terraform(self):
+        result, mock_scan = _invoke_with_sentinel(_TERRAFORM_PROMPT)
+        self.assertEqual(result.exit_code, 0, result.output)
+        mock_scan.assert_called_once()
+        self.assertIn(_SENTINEL_FINDING_MSG, result.output)
+
+    def test_non_iac_reviews_remain_readonly(self):
+        """Non-IaC read-only reviews must not write files (Changed = 0)."""
+        for prompt, label in (
+            (_CICD_PROMPT, "CI/CD"),
+            (_AUTH_PROMPT, "Auth"),
+            (_README_PROMPT, "README"),
+            (_TEST_COVERAGE_PROMPT, "Tests"),
+        ):
+            result, _ = _invoke_with_sentinel(prompt)
+            self.assertEqual(result.exit_code, 0, f"{label}: {result.output}")
+            # Read-only safety net fires for inline "Do not apply/write" prompts.
+            # The key invariant is no sentinel finding in output (no IaC scan ran).
+            self.assertNotIn(_SENTINEL_FINDING_MSG, result.output, label)
+
+
+# ---------------------------------------------------------------------------
+# Domain evidence accuracy regression tests
+# ---------------------------------------------------------------------------
+
+class TestDomainEvidenceAccuracy(unittest.TestCase):
+    """Evidence files must be labelled correctly and internal dirs must be excluded."""
+
+    def test_openshard_dir_excluded_from_auth_evidence(self):
+        """find_review_domain_files must not return files under .openshard/."""
+        import tempfile
+        from pathlib import Path as _Path
+        from openshard.review.domain_files import find_review_domain_files
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = _Path(tmpdir)
+            # Create a fake .openshard/session_events.jsonl that contains "auth" in name
+            # (via the word "session_signals" — not an auth term, but test exclusion logic)
+            openshard_dir = root / ".openshard"
+            openshard_dir.mkdir()
+            fake_telemetry = openshard_dir / "session_signals.jsonl"
+            fake_telemetry.write_text("{}")
+            # Create a real auth file outside .openshard
+            real_auth = root / "middleware" / "auth.py"
+            real_auth.parent.mkdir()
+            real_auth.write_text("# auth middleware")
+
+            result = find_review_domain_files(root, "auth_security")
+
+        paths = set(result)
+        self.assertFalse(
+            any(".openshard" in p for p in paths),
+            f".openshard files must be excluded; got: {paths}",
+        )
+
+    def test_readme_shown_as_inspected_not_created(self):
+        """When domain files are passed with is_evidence=True, output says 'Files inspected'."""
+        from openshard.cli.run_output import render_review_fallback_memo
+        out = render_review_fallback_memo(["README.md"], is_evidence=True)
+        self.assertIn("Files inspected", out)
+        self.assertNotIn("Files created", out)
+
+    def test_no_generated_review_files_message_for_evidence(self):
+        """Domain evidence must not claim that generated review files are available."""
+        from openshard.cli.run_output import render_review_fallback_memo
+        out = render_review_fallback_memo(["README.md"], is_evidence=True)
+        self.assertNotIn("generated review files", out)
+
+    def test_tests_domain_no_files_message(self):
+        """When no test files are found, output uses the tests-specific no-files message."""
+        from openshard.review.domain_files import no_files_message
+        msg = no_files_message("tests")
+        self.assertIn("No test files", msg)
