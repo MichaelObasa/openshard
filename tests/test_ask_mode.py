@@ -100,3 +100,13 @@ def test_lightweight_routes_to_cheap_control():
     result = answer_ask_mode("lightweight models")
     assert result != _ASK_FALLBACK
     assert "Low-cost" in result
+
+
+def test_model_roster_includes_gpt_5_5():
+    result = answer_ask_mode("what models do you have")
+    assert "GPT-5.5" in result
+
+
+def test_model_roster_includes_kimi_k2_6():
+    result = answer_ask_mode("model roster")
+    assert "Kimi K2.6" in result

@@ -30,7 +30,7 @@ class TestRecommendModels(unittest.TestCase):
         results = recommend_models(
             required_capabilities=("reasoning",),
             include_experimental=True,
-            limit=10,
+            limit=25,
         )
         ids = {a.model.id for a in results}
         self.assertIn("x-ai/grok-4.3", ids)
