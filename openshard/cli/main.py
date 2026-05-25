@@ -408,6 +408,8 @@ def models_stats():
 _COL_ID = 45
 _COL_PROV = 12
 _COL_TIER = 17
+_COL_COST = 10
+_COL_EXP_R = 13
 
 
 def _print_registry_table(entries: list) -> None:
@@ -500,6 +502,82 @@ def models_experimental():
         click.echo("No experimental models registered.")
         return
     _print_registry_table(entries)
+
+
+_VALID_COST_CLASSES = ("free", "tiny", "cheap", "mid", "expensive")
+
+
+@models.command("recommend")
+@click.option("--role", default=None, help="Filter/score by role name.")
+@click.option(
+    "--risk",
+    type=click.Choice(["low", "medium", "high"], case_sensitive=False),
+    default=None,
+    help="Risk level hint.",
+)
+@click.option(
+    "--capability",
+    "capabilities",
+    multiple=True,
+    help="Required capability (tools, structured_outputs, reasoning, multimodal). Repeatable.",
+)
+@click.option(
+    "--max-cost",
+    "max_cost_class",
+    type=click.Choice(_VALID_COST_CLASSES, case_sensitive=False),
+    default=None,
+    help="Maximum cost class.",
+)
+@click.option("--include-experimental", "include_experimental", is_flag=True, default=False)
+@click.option("--limit", default=5, show_default=True, type=click.IntRange(min=1))
+def models_recommend(
+    role: str | None,
+    risk: str | None,
+    capabilities: tuple[str, ...],
+    max_cost_class: str | None,
+    include_experimental: bool,
+    limit: int,
+) -> None:
+    """Recommend advisory models for a use case (does not change routing)."""
+    from openshard.models.advisory import recommend_models
+    from openshard.models.registry import CAPABILITY_NAMES
+
+    unknown = [c for c in capabilities if c not in CAPABILITY_NAMES]
+    if unknown:
+        click.echo(
+            f"No results: unknown capability '{unknown[0]}'. "
+            f"Accepted: {', '.join(sorted(CAPABILITY_NAMES))}"
+        )
+        return
+
+    results = recommend_models(
+        role=role,
+        risk=risk,
+        required_capabilities=tuple(capabilities),
+        max_cost_class=max_cost_class,
+        include_experimental=include_experimental,
+        limit=limit,
+    )
+
+    if not results:
+        click.echo("No models matched the given criteria.")
+        return
+
+    header = (
+        f"  {'ID':<{_COL_ID}}  {'Tier':<{_COL_TIER}}  "
+        f"{'Cost':<{_COL_COST}}  {'Experimental':<{_COL_EXP_R}}  Reasons"
+    )
+    click.echo(header)
+    click.echo("  " + "-" * (len(header) - 2))
+    for advisory in results:
+        m = advisory.model
+        mid = m.id if len(m.id) <= _COL_ID else m.id[: _COL_ID - 1] + "..."
+        exp = "yes" if m.experimental else "no"
+        reasons_str = "; ".join(advisory.reasons) if advisory.reasons else "-"
+        click.echo(
+            f"  {mid:<{_COL_ID}}  {m.tier:<{_COL_TIER}}  "
+            f"{m.cost_class:<{_COL_COST}}  {exp:<{_COL_EXP_R}}  {reasons_str}"
+        )
 
 
 @cli.group(invoke_without_command=True)
