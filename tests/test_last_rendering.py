@@ -4642,5 +4642,113 @@ class TestDeveloperFeedbackV1Rendering(unittest.TestCase):
         self.assertNotIn("Feedback", out)
 
 
+class TestModelAdvisoryRendering(unittest.TestCase):
+    _ADVISORY = [
+        {
+            "model_id": "x-ai/grok-4.3",
+            "display_name": "xAI: Grok 4.3",
+            "tier": "strong",
+            "cost_class": "expensive",
+            "experimental": False,
+            "reasons": ["suitable for high-risk review", "supports reasoning"],
+        },
+        {
+            "model_id": "anthropic/claude-opus-4.7",
+            "display_name": "Claude Opus 4.7",
+            "tier": "frontier",
+            "cost_class": "expensive",
+            "experimental": False,
+            "reasons": ["suitable for high-risk review", "cost class expensive"],
+        },
+    ]
+
+    def _native_entry(self, advisory=None):
+        entry = {
+            "task": "test advisory task",
+            "workflow": "native",
+            "executor": "native",
+        }
+        if advisory is not None:
+            entry["model_advisory"] = advisory
+        return entry
+
+    def _plain_entry(self, advisory=None):
+        entry = {"task": "test advisory task"}
+        if advisory is not None:
+            entry["model_advisory"] = advisory
+        return entry
+
+    def test_advisory_compact_line_in_native_block_at_full(self):
+        # [native] block is rendered only at --full; compact one-liner must appear there
+        out = _render(self._native_entry(self._ADVISORY), "full")
+        self.assertIn("model advisory:", out)
+        self.assertIn("advisory only", out)
+
+    def test_advisory_compact_line_hidden_at_default(self):
+        out = _render(self._native_entry(self._ADVISORY), "default")
+        self.assertNotIn("model advisory:", out)
+
+    def test_advisory_full_section_in_shard_receipt_at_more(self):
+        out = _render(self._plain_entry(self._ADVISORY), "more")
+        self.assertIn("MODEL ADVISORY", out)
+
+    def test_advisory_full_section_in_shard_receipt_at_full(self):
+        out = _render(self._plain_entry(self._ADVISORY), "full")
+        self.assertIn("MODEL ADVISORY", out)
+
+    def test_advisory_section_includes_advisory_only_label(self):
+        out = _render(self._plain_entry(self._ADVISORY), "more")
+        self.assertIn("Advisory only — routing unchanged", out)
+
+    def test_advisory_section_includes_risk_signal_label(self):
+        out = _render(self._plain_entry(self._ADVISORY), "more")
+        self.assertIn("Generated from risk signal only", out)
+
+    def test_advisory_section_shows_display_names(self):
+        out = _render(self._plain_entry(self._ADVISORY), "more")
+        self.assertIn("xAI: Grok 4.3", out)
+
+    def test_advisory_section_shows_reasons_with_arrow(self):
+        out = _render(self._plain_entry(self._ADVISORY), "more")
+        self.assertIn("↳", out)
+        self.assertIn("suitable for high-risk review", out)
+
+    def test_advisory_absent_no_crash_at_more(self):
+        out = _render(self._native_entry(), "more")
+        self.assertNotIn("MODEL ADVISORY", out)
+
+    def test_advisory_absent_no_crash_at_full(self):
+        out = _render(self._native_entry(), "full")
+        self.assertNotIn("MODEL ADVISORY", out)
+
+    def test_compact_receipt_no_advisory_row(self):
+        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        receipt = build_shard_receipt(self._plain_entry(self._ADVISORY))
+        out = render_compact_shard_receipt(receipt)
+        self.assertNotIn("Advisory", out)
+
+    def test_selected_model_unchanged_by_advisory_data(self):
+        entry = self._native_entry(self._ADVISORY)
+        entry["routing_selected_model"] = "anthropic/claude-sonnet-4.6"
+        out = _render(entry, "full")
+        self.assertIn("Claude Sonnet 4.6", out)
+
+    def test_no_duplicate_full_advisory_section(self):
+        out = _render(self._native_entry(self._ADVISORY), "full")
+        count = out.count("MODEL ADVISORY")
+        self.assertEqual(count, 1, f"MODEL ADVISORY appeared {count} times, expected 1")
+
+    def test_advisory_candidate_count_shown_in_native_block(self):
+        # [native] block only at --full
+        out = _render(self._native_entry(self._ADVISORY), "full")
+        self.assertIn("2 candidates", out)
+
+    def test_advisory_single_candidate_uses_singular_label(self):
+        single = [self._ADVISORY[0]]
+        out = _render(self._native_entry(single), "full")
+        self.assertIn("1 candidate", out)
+        self.assertNotIn("1 candidates", out)
+
+
 if __name__ == "__main__":
     unittest.main()

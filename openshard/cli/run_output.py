@@ -1305,6 +1305,14 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
             if _tdr_lines:
                 has_content = True
 
+    if detail in ("more", "full"):
+        _adv_list = getattr(native_meta, "model_advisory", None)
+        if _adv_list and isinstance(_adv_list, list) and len(_adv_list) > 0:
+            _n = len(_adv_list)
+            _cand = "candidate" if _n == 1 else "candidates"
+            lines.append(f"  model advisory: {_n} {_cand} — advisory only")
+            has_content = True
+
     return lines if has_content else []
 
 
@@ -1385,6 +1393,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "tool_search_events": entry.get("tool_search_events", []),
         "sandbox": entry.get("sandbox"),
         "failure_memory_routing_advisory": entry.get("failure_memory_routing_advisory"),
+        "model_advisory": entry.get("model_advisory"),
         "plan_ledger": entry.get("plan_ledger"),
         "edit_loop_summary": entry.get("edit_loop_summary"),
         "candidate_summary": entry.get("candidate_summary"),

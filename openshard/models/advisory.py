@@ -16,7 +16,7 @@ _COST_ORDER: dict[str, int] = {
 _HIGH_RISK_TIERS: frozenset[str] = frozenset({"strong", "frontier"})
 _LOW_RISK_COSTS: frozenset[str] = frozenset({"free", "tiny", "cheap"})
 
-__all__ = ["CAPABILITY_NAMES", "ModelAdvisory", "recommend_models"]
+__all__ = ["CAPABILITY_NAMES", "ModelAdvisory", "build_advisory_for_storage", "recommend_models"]
 
 
 @dataclass(frozen=True)
@@ -96,3 +96,38 @@ def recommend_models(
 
     scored.sort(key=lambda x: x[0])
     return [advisory for _, advisory in scored[:limit]]
+
+
+def build_advisory_for_storage(
+    risk: str | None,
+    *,
+    limit: int = 3,
+) -> tuple[list[dict], dict]:
+    """Return (candidates, meta) for run history storage. Pure, no I/O.
+
+    candidates: serializable advisory dicts, empty when risk is unknown.
+    meta: audit record of the inputs and rule-version that produced the list.
+    """
+    meta: dict = {
+        "version": "rules_v1",
+        "risk": risk,
+        "role": None,
+        "required_capabilities": [],
+        "limit": limit,
+        "advisory_only": True,
+    }
+    if risk not in ("high", "medium", "low"):
+        return [], meta
+    advisories = recommend_models(risk=risk, limit=limit)
+    candidates = [
+        {
+            "model_id": a.model.id,
+            "display_name": a.model.display_name,
+            "tier": a.model.tier,
+            "cost_class": a.model.cost_class,
+            "experimental": a.model.experimental,
+            "reasons": list(a.reasons),
+        }
+        for a in advisories
+    ]
+    return candidates, meta
