@@ -409,6 +409,8 @@ _CAPABILITY_ATTRS: dict[str, str] = {
     "multimodal": "supports_multimodal",
 }
 
+CAPABILITY_NAMES: tuple[str, ...] = tuple(_CAPABILITY_ATTRS)
+
 # ---------------------------------------------------------------------------
 # Index — built once at import time.
 # ---------------------------------------------------------------------------
