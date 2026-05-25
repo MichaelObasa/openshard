@@ -212,3 +212,60 @@ def test_slash_feedback_retried_parses():
     result = parse_tui_input("/feedback retried")
     assert result.cmd == TuiCommand.FEEDBACK
     assert result.feedback_outcome == "retried"
+
+
+# ── Ask mode commands ──────────────────────────────────────────────────────────
+
+
+def test_slash_ask_with_question_parses_as_ask():
+    result = parse_tui_input("/ask what models do you support?")
+    assert result.cmd == TuiCommand.ASK
+    assert result.question == "what models do you support?"
+
+
+def test_slash_ask_bare_parses_as_ask_with_empty_question():
+    result = parse_tui_input("/ask")
+    assert result.cmd == TuiCommand.ASK
+    assert result.question == ""
+
+
+def test_slash_ask_case_insensitive():
+    result = parse_tui_input("/ASK what models")
+    assert result.cmd == TuiCommand.ASK
+
+
+def test_slash_ask_question_not_in_task():
+    result = parse_tui_input("/ask reasoning models")
+    assert result.question == "reasoning models"
+    assert result.task is None
+
+
+def test_fast_path_what_models_parses_as_ask():
+    result = parse_tui_input("what models do you have")
+    assert result.cmd == TuiCommand.ASK
+
+
+def test_fast_path_which_models_parses_as_ask():
+    result = parse_tui_input("which models are available")
+    assert result.cmd == TuiCommand.ASK
+
+
+def test_fast_path_what_commands_parses_as_ask():
+    result = parse_tui_input("what commands can I use")
+    assert result.cmd == TuiCommand.ASK
+
+
+def test_fast_path_what_is_openshard_parses_as_ask():
+    result = parse_tui_input("what is openshard")
+    assert result.cmd == TuiCommand.ASK
+
+
+def test_fast_path_what_does_openshard_parses_as_ask():
+    result = parse_tui_input("what does openshard do")
+    assert result.cmd == TuiCommand.ASK
+
+
+def test_regression_plain_task_still_run_task():
+    result = parse_tui_input("fix the authentication bug")
+    assert result.cmd == TuiCommand.RUN_TASK
+    assert result.task == "fix the authentication bug"

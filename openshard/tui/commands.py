@@ -16,6 +16,7 @@ class TuiCommand(Enum):
     QUIT = "quit"
     PACKS = "packs"
     PACK_SHOW = "pack_show"
+    ASK = "ask"
     UNKNOWN = "unknown"
 
 
@@ -29,6 +30,16 @@ class ParsedCommand:
     pack_id: str | None = None
     feedback_outcome: str | None = None
     feedback_reason: str | None = None
+    question: str | None = None
+
+
+_ASK_FAST_PATH: tuple[str, ...] = (
+    "what models",
+    "which models",
+    "what commands",
+    "what is openshard",
+    "what does openshard",
+)
 
 
 def parse_tui_input(text: str) -> ParsedCommand:
@@ -58,6 +69,9 @@ def parse_tui_input(text: str) -> ParsedCommand:
                 return ParsedCommand(TuiCommand.UNKNOWN)
             reason = parts[1] if len(parts) > 1 else None
             return ParsedCommand(TuiCommand.FEEDBACK, feedback_outcome=outcome, feedback_reason=reason)
+        if lower == "/ask" or lower.startswith("/ask "):
+            question = text[4:].strip() if lower.startswith("/ask ") else ""
+            return ParsedCommand(TuiCommand.ASK, question=question)
         match lower:
             case "/help":
                 return ParsedCommand(TuiCommand.HELP)
@@ -85,4 +99,7 @@ def parse_tui_input(text: str) -> ParsedCommand:
             return ParsedCommand(TuiCommand.RUN_TASK, task=task) if task else ParsedCommand(TuiCommand.UNKNOWN)
         return ParsedCommand(TuiCommand.UNKNOWN)
 
+    _lower = text.lower()
+    if any(_lower.startswith(p) for p in _ASK_FAST_PATH):
+        return ParsedCommand(TuiCommand.ASK, question=text)
     return ParsedCommand(TuiCommand.RUN_TASK, task=text)

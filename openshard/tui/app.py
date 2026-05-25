@@ -14,6 +14,7 @@ from textual.message import Message
 from textual.widgets import Label, Static, TextArea
 
 from openshard.history.session_events import SessionEventWriter, _truncate
+from openshard.tui.ask_mode import answer_ask_mode
 from openshard.tui.commands import TuiCommand, parse_tui_input
 
 _BRAND_ANSI_SHADOW = (
@@ -44,6 +45,7 @@ _SLASH_MENU_TEXT = (
     "  /last more               Show more detail\n"
     "  /last full               Show full debug/audit detail\n"
     "  /feedback <outcome>      Record outcome for last run\n"
+    "  /ask <question>          Ask a product question\n"
     "  /clear                   Clear output\n"
     "  /quit                    Exit"
 )
@@ -80,6 +82,7 @@ _HELP_TEXT = (
     "  /quit                    Exit the TUI\n"
     "  /packs                   List available workflow packs\n"
     "  /pack <id>               Show a workflow pack prompt\n"
+    "  /ask <question>          Ask a product question (no run)\n"
     "  (plain text)             Run as openshard task\n"
     "\n"
     "Composer keys:\n"
@@ -420,6 +423,9 @@ class OpenShardTui(App):
                 except KeyError:
                     self._pack_suffix = ""
                     self._pack_workflow = ""
+        elif parsed.cmd == TuiCommand.ASK:
+            answer = answer_ask_mode(parsed.question or "")
+            self._append_output(_render_openshard_block(answer))
         else:
             self._append_output(_render_openshard_block(f"Unknown command: {raw}\nType /help for supported commands."))
 

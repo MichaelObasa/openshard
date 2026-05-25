@@ -1794,3 +1794,93 @@ async def test_last_more_output_has_no_result_block(tmp_path):
             text = _text(app.query_one("#output-content", Static))
 
     assert "RESULT" not in text
+
+
+# ── Ask mode dispatch ──────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_ask_renders_openshard_block(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/ask what models do you support?")
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+    assert "OPENSHARD" in text
+
+
+@pytest.mark.asyncio
+async def test_ask_renders_you_block(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("/ask what models")
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+    assert "YOU" in text
+
+
+@pytest.mark.asyncio
+async def test_ask_does_not_call_cli_runner(tmp_path):
+    app = _make_app(tmp_path)
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/ask what models do you have")
+            await pilot.press("enter")
+        mock_runner_cls.return_value.invoke.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ask_does_not_start_run_status(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        with patch.object(app, "_start_run_status") as mock_start_run:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("/ask what models do you have")
+            await pilot.press("enter")
+            mock_start_run.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fast_path_what_models_renders_openshard_block(tmp_path):
+    app = _make_app(tmp_path)
+    async with app.run_test(size=_SIZE) as pilot:
+        ta = app.query_one("#task-input", TaskInput)
+        ta.focus()
+        ta.load_text("what models do you have")
+        await pilot.press("enter")
+        text = _text(app.query_one("#output-content", Static))
+    assert "OPENSHARD" in text
+
+
+@pytest.mark.asyncio
+async def test_fast_path_does_not_invoke_runner(tmp_path):
+    app = _make_app(tmp_path)
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("what models do you have")
+            await pilot.press("enter")
+        mock_runner_cls.return_value.invoke.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_regression_normal_task_still_invokes_runner(tmp_path):
+    app = _make_app(tmp_path)
+    with patch("openshard.tui.app.CliRunner") as mock_runner_cls:
+        mock_runner_cls.return_value.invoke.return_value = _cli_ok()
+        async with app.run_test(size=_SIZE) as pilot:
+            ta = app.query_one("#task-input", TaskInput)
+            ta.focus()
+            ta.load_text("explain this repo")
+            await pilot.press("enter")
+            await pilot.pause(delay=0.3)
+    assert mock_runner_cls.return_value.invoke.called
+    assert "run" in str(mock_runner_cls.return_value.invoke.call_args_list[0])
