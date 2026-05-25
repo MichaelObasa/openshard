@@ -269,3 +269,68 @@ def test_regression_plain_task_still_run_task():
     result = parse_tui_input("fix the authentication bug")
     assert result.cmd == TuiCommand.RUN_TASK
     assert result.task == "fix the authentication bug"
+
+
+# ── Plan mode commands ────────────────────────────────────────────────────────
+
+
+def test_slash_plan_with_task_parses_as_plan():
+    result = parse_tui_input("/plan refactor auth")
+    assert result.cmd == TuiCommand.PLAN
+    assert result.task == "refactor auth"
+    assert result.question is None
+
+
+def test_slash_plan_bare_parses_as_plan_with_no_task():
+    result = parse_tui_input("/plan")
+    assert result.cmd == TuiCommand.PLAN
+    assert result.task is None
+
+
+def test_slash_plan_uppercase_parses_as_plan():
+    result = parse_tui_input("/PLAN refactor auth")
+    assert result.cmd == TuiCommand.PLAN
+    assert result.task == "refactor auth"
+
+
+def test_slash_plan_trailing_spaces_has_no_task():
+    result = parse_tui_input("/plan   ")
+    assert result.cmd == TuiCommand.PLAN
+    assert result.task is None
+
+
+def test_slash_plan_multiword_task():
+    result = parse_tui_input("/plan add tests for the payment module")
+    assert result.cmd == TuiCommand.PLAN
+    assert result.task == "add tests for the payment module"
+
+
+def test_fast_path_plan_prefix_parses_as_plan():
+    result = parse_tui_input("plan refactor auth safely")
+    assert result.cmd == TuiCommand.PLAN
+
+
+def test_fast_path_how_should_i_parses_as_plan():
+    result = parse_tui_input("how should i refactor the auth module")
+    assert result.cmd == TuiCommand.PLAN
+
+
+def test_fast_path_safest_way_parses_as_plan():
+    result = parse_tui_input("what is the safest way to deploy this")
+    assert result.cmd == TuiCommand.PLAN
+
+
+def test_fast_path_how_do_i_approach_parses_as_plan():
+    result = parse_tui_input("how do i approach this refactor")
+    assert result.cmd == TuiCommand.PLAN
+
+
+def test_regression_fix_the_auth_bug_is_run_task():
+    result = parse_tui_input("fix the auth bug")
+    assert result.cmd == TuiCommand.RUN_TASK
+    assert result.task == "fix the auth bug"
+
+
+def test_regression_ask_fast_path_still_wins_over_plan():
+    result = parse_tui_input("what models do you have")
+    assert result.cmd == TuiCommand.ASK

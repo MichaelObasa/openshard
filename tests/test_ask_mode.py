@@ -37,6 +37,11 @@ def test_commands_includes_ask():
     assert "/ask" in result
 
 
+def test_commands_includes_plan():
+    result = answer_ask_mode("what commands can I use")
+    assert "/plan" in result
+
+
 def test_openshard_description_contains_openshard():
     result = answer_ask_mode("what is openshard")
     assert "openshard" in result.lower()
