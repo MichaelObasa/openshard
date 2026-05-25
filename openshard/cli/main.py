@@ -580,6 +580,40 @@ def models_recommend(
         )
 
 
+@models.command("mode")
+@click.argument("mode")
+def models_mode(mode: str) -> None:
+    """Show the advisory model policy for a mode (ask, plan, run)."""
+    from openshard.models.mode_policy import model_policy_for_mode
+    from openshard.models.registry import display_name_for
+
+    _LABEL = 12
+    mode = mode.strip().lower()
+    if mode not in ("ask", "plan", "run"):
+        raise click.ClickException(
+            f"Unknown mode '{mode}'. Supported modes: ask, plan, run."
+        )
+    policy = model_policy_for_mode(mode)
+    if policy is None:
+        click.echo(f"{'Mode':<{_LABEL}}run")
+        click.echo(
+            f"{'Status':<{_LABEL}}Run routing remains controlled by existing routing policy"
+        )
+        return
+    default_display = display_name_for(policy.default_model_id, policy.default_model_id)
+    fallback_display = ", ".join(
+        display_name_for(fid, fid) for fid in policy.fallback_model_ids
+    )
+    if mode == "ask":
+        status = "Advisory only - Ask Mode is still local deterministic"
+    else:
+        status = "Advisory only - Plan Mode is still local deterministic"
+    click.echo(f"{'Mode':<{_LABEL}}{mode}")
+    click.echo(f"{'Default':<{_LABEL}}{default_display}")
+    click.echo(f"{'Fallbacks':<{_LABEL}}{fallback_display}")
+    click.echo(f"{'Status':<{_LABEL}}{status}")
+
+
 @cli.group(invoke_without_command=True)
 @click.pass_context
 def profiles(ctx: click.Context):
