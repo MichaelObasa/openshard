@@ -5,7 +5,7 @@ import unittest
 from click.testing import CliRunner
 
 from openshard.cli.main import cli
-from openshard.models.advisory import ModelAdvisory, recommend_models
+from openshard.models.advisory import ModelAdvisory, build_advisory_for_storage, recommend_models
 
 
 class TestRecommendModels(unittest.TestCase):
@@ -78,6 +78,84 @@ class TestRecommendModels(unittest.TestCase):
             [a.model.id for a in call1],
             [a.model.id for a in call2],
         )
+
+
+class TestBuildAdvisoryForStorage(unittest.TestCase):
+    def test_high_risk_returns_candidates(self):
+        candidates, _ = build_advisory_for_storage(risk="high")
+        self.assertGreater(len(candidates), 0)
+
+    def test_high_risk_max_3_candidates(self):
+        candidates, _ = build_advisory_for_storage(risk="high")
+        self.assertLessEqual(len(candidates), 3)
+
+    def test_low_risk_returns_candidates(self):
+        candidates, _ = build_advisory_for_storage(risk="low")
+        self.assertGreater(len(candidates), 0)
+
+    def test_medium_risk_returns_candidates(self):
+        candidates, _ = build_advisory_for_storage(risk="medium")
+        self.assertGreater(len(candidates), 0)
+
+    def test_unknown_risk_returns_empty_candidates(self):
+        candidates, meta = build_advisory_for_storage(risk="unknown")
+        self.assertEqual(candidates, [])
+        self.assertIsInstance(meta, dict)
+
+    def test_none_risk_returns_empty_candidates(self):
+        candidates, meta = build_advisory_for_storage(risk=None)
+        self.assertEqual(candidates, [])
+        self.assertIsInstance(meta, dict)
+
+    def test_meta_has_version_rules_v1(self):
+        _, meta = build_advisory_for_storage(risk="high")
+        self.assertEqual(meta["version"], "rules_v1")
+
+    def test_meta_advisory_only_is_true(self):
+        _, meta = build_advisory_for_storage(risk="high")
+        self.assertIs(meta["advisory_only"], True)
+
+    def test_meta_records_risk_input(self):
+        _, meta = build_advisory_for_storage(risk="high")
+        self.assertEqual(meta["risk"], "high")
+
+    def test_meta_none_risk_records_none(self):
+        _, meta = build_advisory_for_storage(risk=None)
+        self.assertIsNone(meta["risk"])
+
+    def test_meta_has_role_none(self):
+        _, meta = build_advisory_for_storage(risk="high")
+        self.assertIsNone(meta["role"])
+
+    def test_meta_has_required_capabilities_empty(self):
+        _, meta = build_advisory_for_storage(risk="high")
+        self.assertEqual(meta["required_capabilities"], [])
+
+    def test_result_structure_has_required_fields(self):
+        candidates, _ = build_advisory_for_storage(risk="high")
+        required = {"model_id", "display_name", "tier", "cost_class", "experimental", "reasons"}
+        for c in candidates:
+            self.assertEqual(required, required & c.keys(), f"Missing fields in {c}")
+
+    def test_reasons_is_list_of_strings(self):
+        candidates, _ = build_advisory_for_storage(risk="high")
+        for c in candidates:
+            self.assertIsInstance(c["reasons"], list)
+            for r in c["reasons"]:
+                self.assertIsInstance(r, str)
+
+    def test_experimental_false_by_default(self):
+        candidates, _ = build_advisory_for_storage(risk="high")
+        for c in candidates:
+            self.assertFalse(
+                c["experimental"],
+                f"Model {c['model_id']} is experimental but should be excluded by default",
+            )
+
+    def test_result_is_json_serializable(self):
+        import json
+        candidates, meta = build_advisory_for_storage(risk="high")
+        json.dumps({"candidates": candidates, "meta": meta})
 
 
 class TestModelsRecommendCommand(unittest.TestCase):

@@ -376,6 +376,7 @@ class ShardReceipt:
     approval_granted: Optional[bool] = None
     approval_reason: str = ""
     file_evidence: list[FileEvidence] = field(default_factory=list)
+    model_advisory: list[dict] = field(default_factory=list)
 
 
 def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
@@ -668,6 +669,13 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     files_referenced: list[str] = sorted({f.path for f in findings if f.path})
     file_evidence = _build_file_evidence(inspected_files, files_referenced, files_touched)
 
+    _adv_raw = entry.get("model_advisory")
+    _model_advisory: list[dict] = []
+    if isinstance(_adv_raw, list):
+        for _a in _adv_raw:
+            if isinstance(_a, dict) and "model_id" in _a:
+                _model_advisory.append(_a)
+
     return ShardReceipt(
         shard_id=_make_shard_id(timestamp, index),
         created_at=timestamp,
@@ -710,6 +718,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         run_timeline=[e for e in (entry.get("run_timeline") or []) if isinstance(e, dict) and e.get("label")],
         developer_feedback=entry.get("developer_feedback") or None,
         file_evidence=file_evidence,
+        model_advisory=_model_advisory,
     )
 
 
@@ -1083,6 +1092,17 @@ def render_full_shard_receipt(receipt: ShardReceipt) -> str:
     else:
         lines.append(f"{_INDENT}  No structured findings recorded.")
     lines.append("")
+
+    if receipt.model_advisory:
+        lines.append(f"{_INDENT}MODEL ADVISORY")
+        lines.append(f"{_INDENT}  Advisory only — routing unchanged")
+        lines.append(f"{_INDENT}  Generated from risk signal only")
+        for _adv in receipt.model_advisory:
+            _name = _adv.get("display_name") or _adv.get("model_id", "?")
+            lines.append(f"{_INDENT}  {_name}")
+            for _r in _adv.get("reasons", [])[:3]:
+                lines.append(f"{_INDENT}    ↳ {_r}")
+        lines.append("")
 
     lines.append(f"{_INDENT}CHANGES")
     file_str = f"{receipt.files_changed} file{'s' if receipt.files_changed != 1 else ''}"

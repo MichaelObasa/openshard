@@ -2433,6 +2433,21 @@ def _log_run(
     if verification_plan is not None and verification_plan.has_commands:
         entry["verification_plan"] = _serialize_verification_plan(verification_plan)
 
+    # Generate model advisory from risk signal — stored for display, never affects routing.
+    _advisory_risk: str | None = None
+    if form_factor_decision is not None:
+        _advisory_risk = form_factor_decision.risk_level
+    if not _advisory_risk and extra_metadata:
+        _plan_raw = extra_metadata.get("plan") or {}
+        if isinstance(_plan_raw, dict):
+            _advisory_risk = _plan_raw.get("risk") or None
+    if _advisory_risk:
+        from openshard.models.advisory import build_advisory_for_storage as _build_adv
+        _adv_candidates, _adv_meta = _build_adv(risk=_advisory_risk)
+        entry["model_advisory_meta"] = _adv_meta
+        if _adv_candidates:
+            entry["model_advisory"] = _adv_candidates
+
     if extra_metadata:
         entry.update(extra_metadata)
 
