@@ -596,6 +596,19 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         _dr_changed = diff_review.get("changed_files")
         if isinstance(_dr_changed, list):
             files_touched = [f for f in _dr_changed if isinstance(f, str)]
+
+    # For runs that explicitly recorded zero file changes, clear files_touched so
+    # that any stale files_detail entries (e.g. a model-generated report that was
+    # discarded by the read-only safety net) do not appear as changed evidence.
+    # Only fires when the entry carries explicit counters — older/minimal entries
+    # that lack these keys but have diff_review.changed_files are left untouched.
+    _change_counter_keys = ("files_created", "files_updated", "files_deleted")
+    _has_explicit_counters = any(k in entry for k in _change_counter_keys)
+    if _has_explicit_counters:
+        _changed_count = sum(int(entry.get(k) or 0) for k in _change_counter_keys)
+        if _changed_count == 0:
+            files_touched = []
+
     diff_added = diff_review.get("added_lines")
     diff_removed = diff_review.get("removed_lines")
     if diff_added is None:
@@ -683,7 +696,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         _feedback_routing_advisory = _fra_raw
 
     return ShardReceipt(
-        shard_id=_make_shard_id(timestamp, index),
+        shard_id=entry.get("shard_id") or _make_shard_id(timestamp, index),
         created_at=timestamp,
         task_short=_trunc(task, 70),
         task_full=task,

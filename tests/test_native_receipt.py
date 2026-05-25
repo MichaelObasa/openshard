@@ -1303,3 +1303,192 @@ class TestExecutorAutoSelection(unittest.TestCase):
         import inspect
         src = inspect.getsource(_pipe_mod.RunPipeline.run)
         self.assertIn('"opencode"', src, "opencode workflow mapping must be preserved in pipeline.run()")
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: Shard ID consistency — stored shard_id is single source of truth
+# ---------------------------------------------------------------------------
+
+class TestShardIdConsistency(unittest.TestCase):
+
+    def _minimal_entry(self, **extra):
+        base = {
+            "timestamp": "2026-05-25T12:00:00Z",
+            "task": "explain the pipeline",
+            "execution_model": "mock-model",
+            "retry_triggered": False,
+            "duration_seconds": 1.0,
+            "files_created": 0,
+            "files_updated": 0,
+            "files_deleted": 0,
+            "verification_attempted": False,
+            "verification_passed": None,
+            "summary": "Explanation of the pipeline.",
+        }
+        base.update(extra)
+        return base
+
+    def test_stored_shard_id_preferred_over_computed(self):
+        """build_shard_receipt uses entry['shard_id'] rather than re-computing from index."""
+        from openshard.history.shard_contract import build_shard_receipt
+        entry = self._minimal_entry(shard_id="shard-20260525-0020")
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.shard_id, "shard-20260525-0020")
+        self.assertNotEqual(receipt.shard_id, "shard-20260525-0001")
+
+    def test_fallback_to_computed_when_shard_id_not_stored(self):
+        """When no stored shard_id, build_shard_receipt falls back to _make_shard_id(ts, index)."""
+        from openshard.history.shard_contract import build_shard_receipt, _make_shard_id
+        entry = self._minimal_entry()
+        receipt = build_shard_receipt(entry, index=4)
+        expected = _make_shard_id("2026-05-25T12:00:00Z", 4)
+        self.assertEqual(receipt.shard_id, expected)
+        self.assertEqual(receipt.shard_id, "shard-20260525-0005")
+
+    def test_log_run_stores_shard_id_in_entry(self):
+        """_log_run must write shard_id into the serialised JSONL entry."""
+        import json
+        import time
+        from unittest.mock import MagicMock, patch
+        from openshard.run.pipeline import _log_run
+
+        captured: list[str] = []
+
+        class _FakeFile:
+            def write(self, s: str) -> int:
+                captured.append(s)
+                return len(s)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        def _fake_path_open(self, mode="r", encoding=None, **kw):
+            if mode == "a":
+                return _FakeFile()
+            import builtins
+            return builtins.open(str(self), mode, encoding=encoding, **kw)
+
+        gen_mock = MagicMock()
+        gen_mock.model = "mock-model"
+        gen_mock.fixer_model = "mock-fixer"
+
+        with patch("pathlib.Path.open", _fake_path_open), \
+             patch("pathlib.Path.mkdir"):
+            _log_run(
+                start=time.time(),
+                task="explain the pipeline",
+                generator=gen_mock,
+                retry_triggered=False,
+                files=[],
+                verification_attempted=False,
+                verification_passed=None,
+                workspace=None,
+                run_index=2,
+            )
+
+        self.assertTrue(captured, "Nothing was written to the log file")
+        written_line = captured[0]
+        entry = json.loads(written_line.strip())
+        self.assertIn("shard_id", entry, "shard_id must be stored in run entry")
+        self.assertTrue(
+            entry["shard_id"].startswith("shard-"),
+            f"shard_id {entry['shard_id']!r} has wrong format",
+        )
+        # With run_index=2, the shard number should be 3 (index+1).
+        self.assertTrue(
+            entry["shard_id"].endswith("-0003"),
+            f"shard_id {entry['shard_id']!r} should end with -0003 for run_index=2",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: Evidence for read-only runs
+# ---------------------------------------------------------------------------
+
+class TestReadOnlyEvidence(unittest.TestCase):
+
+    def _entry_with_files_detail(self, **extra):
+        base = {
+            "timestamp": "2026-05-25T12:00:00Z",
+            "task": "Review this Terraform repo. Do not apply changes.",
+            "execution_model": "mock-model",
+            "retry_triggered": False,
+            "duration_seconds": 1.0,
+            "files_created": 0,
+            "files_updated": 0,
+            "files_deleted": 0,
+            "verification_attempted": False,
+            "verification_passed": None,
+            "summary": "Production readiness review complete.",
+            "files_detail": [
+                {"path": "TERRAFORM_PRODUCTION_READINESS_REVIEW.md", "change_type": "create", "summary": "review"},
+            ],
+        }
+        base.update(extra)
+        return base
+
+    def test_zero_change_run_clears_files_touched(self):
+        """files_touched must be empty for a run with files_created/updated/deleted all 0."""
+        from openshard.history.shard_contract import build_shard_receipt
+        entry = self._entry_with_files_detail()
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.files_touched, [])
+        touched_paths = [e.path for e in receipt.file_evidence if "changed" in e.roles]
+        self.assertNotIn(
+            "TERRAFORM_PRODUCTION_READINESS_REVIEW.md",
+            touched_paths,
+            "Generated report file must not appear as changed evidence for a zero-change run",
+        )
+
+    def test_nonzero_change_run_preserves_files_touched(self):
+        """When files were actually changed, files_touched is preserved."""
+        from openshard.history.shard_contract import build_shard_receipt
+        entry = self._entry_with_files_detail(files_created=1)
+        receipt = build_shard_receipt(entry)
+        self.assertIn("TERRAFORM_PRODUCTION_READINESS_REVIEW.md", receipt.files_touched)
+
+    def test_missing_counters_with_diff_review_preserves_files_touched(self):
+        """Entries without explicit change counters must still use diff_review fallback."""
+        from openshard.history.shard_contract import build_shard_receipt
+        entry = {
+            "timestamp": "2026-05-25T12:00:00Z",
+            "task": "old entry without counters",
+            "execution_model": "mock-model",
+            "retry_triggered": False,
+            "duration_seconds": 1.0,
+            "verification_attempted": False,
+            "verification_passed": None,
+            "summary": "done",
+            "diff_review": {"changed_files": ["src/main.py", "src/utils.py"]},
+        }
+        receipt = build_shard_receipt(entry)
+        self.assertIn("src/main.py", receipt.files_touched)
+        self.assertIn("src/utils.py", receipt.files_touched)
+
+    def test_inspected_files_appear_in_evidence_when_no_changed_files(self):
+        """file_context.paths must appear in evidence with 'inspected' role for read-only runs."""
+        from openshard.history.shard_contract import build_shard_receipt
+        entry = {
+            "timestamp": "2026-05-25T12:00:00Z",
+            "task": "Review this Terraform repo. Do not apply changes.",
+            "execution_model": "mock-model",
+            "retry_triggered": False,
+            "duration_seconds": 1.0,
+            "files_created": 0,
+            "files_updated": 0,
+            "files_deleted": 0,
+            "verification_attempted": False,
+            "verification_passed": None,
+            "summary": "Production readiness review complete.",
+            "file_context": {"paths": ["main.tf", "outputs.tf"], "files_read": 2},
+        }
+        receipt = build_shard_receipt(entry)
+        evidence_paths = [e.path for e in receipt.file_evidence]
+        self.assertIn("main.tf", evidence_paths)
+        self.assertIn("outputs.tf", evidence_paths)
+        for e in receipt.file_evidence:
+            if e.path in ("main.tf", "outputs.tf"):
+                self.assertIn("inspected", e.roles)

@@ -55,10 +55,16 @@ def infer_signals_from_session(events: list[dict]) -> list[dict]:
     # Only updated when openshard_response carries a real run_id or shard_id.
     # Non-run responses (e.g. /last output) must not erase prior run context.
     last_run_response: dict | None = None
+    prev_session_id: str = ""
 
     for event in events:
-        etype = event.get("event_type", "")
         session_id = event.get("session_id", "")
+        # Reset run context at session boundaries so old-session runs do not
+        # contaminate signal inference for a new session.
+        if session_id and session_id != prev_session_id and prev_session_id:
+            last_run_response = None
+        prev_session_id = session_id
+        etype = event.get("event_type", "")
 
         if etype == "openshard_response":
             if event.get("run_id") or event.get("shard_id"):

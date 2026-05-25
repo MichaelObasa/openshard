@@ -72,7 +72,7 @@ from openshard.history.metrics import load_runs
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
 from openshard.providers.manager import ProviderManager
 from openshard.providers.openrouter import MODEL_PRICING, compute_cost
-from openshard.routing.engine import ESCALATION_CHAIN, MODEL_STRONG, RoutingDecision, route, is_readonly_task
+from openshard.routing.engine import ESCALATION_CHAIN, MODEL_STRONG, RoutingDecision, route, is_readonly_task, has_inline_readonly_instruction, looks_like_review_task
 from openshard.routing.form_factor_policy import ExecutionFormFactorDecision, select_form_factor
 from openshard.routing.profiles import (
     ProfileDecision,
@@ -412,7 +412,7 @@ class RunPipeline:
 
         opencode_mode = (effective_executor == "opencode")
         routing_decision: RoutingDecision | None = route(task) if not opencode_mode else None
-        if routing_decision is not None and is_readonly_task(task):
+        if routing_decision is not None and (is_readonly_task(task) or has_inline_readonly_instruction(task)):
             routing_decision.rationale = "read-only analysis"
         # When using a third-party provider, non-native routed models are not available.
         # Fall back to a sensible default for each provider.
@@ -605,8 +605,9 @@ class RunPipeline:
                 target=_routed_model,
             ))
 
-        _readonly_task = is_readonly_task(task)
+        _readonly_task = is_readonly_task(task) or has_inline_readonly_instruction(task)
         _is_sf_task = "STRUCTURED_FINDINGS:" in task
+        _is_readonly_review_task = _readonly_task and looks_like_review_task(task)
         _generation_max_tokens: int = 8192 if _is_sf_task else 16384
 
         _verification_plan = build_verification_plan(_cfg, _repo_facts)
@@ -1238,7 +1239,7 @@ class RunPipeline:
         _extraction_source: "str | None" = None
         if _extracted_findings:
             _extraction_source = "STRUCTURED_FINDINGS"
-        elif _is_review_task:
+        elif _is_review_task or _is_readonly_review_task:
             _extracted_findings = _extract_findings_from_model_answer(_clean_summary)
             if _extracted_findings:
                 _extraction_source = "plain-text"
@@ -1251,7 +1252,7 @@ class RunPipeline:
         # Runs unconditionally when this is a review task so the demo is reliable
         # even when the model does not produce valid STRUCTURED_FINDINGS JSON.
         # Static findings are merged AFTER model findings so model context is preserved.
-        if _is_review_task:
+        if _is_review_task or _is_readonly_review_task:
             try:
                 from openshard.review.terraform_checker import scan_terraform
                 _static_findings = scan_terraform(Path.cwd())
@@ -1275,7 +1276,7 @@ class RunPipeline:
             ))
 
         _review_checks: list[dict] = []
-        if _is_review_task:
+        if _is_review_task or _is_readonly_review_task:
             try:
                 from openshard.review.checks import run_review_checks
                 _check_root = workspace if workspace is not None else Path.cwd()
@@ -1290,7 +1291,7 @@ class RunPipeline:
                     count=len(_review_checks),
                 ))
 
-        if _is_review_task:
+        if _is_review_task or _is_readonly_review_task:
             _emit_review_debug(
                 effective_executor=effective_executor,
                 selected_workflow=effective_workflow,
@@ -1304,7 +1305,7 @@ class RunPipeline:
                 findings_count=len(_extracted_findings),
             )
         _findings_extra: dict = {}
-        if _is_review_task:
+        if _is_review_task or _is_readonly_review_task:
             _findings_extra["is_review_task"] = True
         if _review_checks:
             _findings_extra["review_checks"] = _review_checks
@@ -1320,7 +1321,7 @@ class RunPipeline:
                 for f in _extracted_findings
             ]
             click.echo("\nReview complete")
-        elif _is_review_task:
+        elif _is_review_task or _is_readonly_review_task:
             click.echo("\nReview complete")
         else:
             click.echo("\nDone")
@@ -1425,6 +1426,7 @@ class RunPipeline:
                          verification_plan=_verification_plan,
                          form_factor_decision=_form_factor_decision,
                          extra_metadata=_dr_extra,
+                         run_index=_receipt_index,
                          run_timeline=[e.to_dict() for e in _timeline])
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
@@ -1749,6 +1751,7 @@ class RunPipeline:
                              verification_plan=_verification_plan,
                              form_factor_decision=_form_factor_decision,
                              extra_metadata=_vf_extra,
+                             run_index=_receipt_index,
                              run_timeline=[e.to_dict() for e in _timeline])
                 except Exception as exc:
                     click.echo(f"  [log] warning: {exc}")
@@ -2187,6 +2190,7 @@ class RunPipeline:
                      form_factor_decision=_form_factor_decision,
                      extra_metadata=_extra_metadata,
                      run_id=_run_id,
+                     run_index=_receipt_index,
                      run_timeline=[e.to_dict() for e in _timeline])
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
@@ -2335,6 +2339,7 @@ def _log_run(
     extra_metadata: dict | None = None,
     run_id: str | None = None,
     run_timeline: list | None = None,
+    run_index: int | None = None,
 ) -> None:
     entry: dict = {
         "timestamp": run_id if run_id else datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -2468,6 +2473,9 @@ def _log_run(
         _tl = list(run_timeline)
         _tl.append(RunTimelineEvent("receipt_saved", "Saved Shard receipt", kind="receipt").to_dict())
         entry["run_timeline"] = _tl
+
+    from openshard.history.shard_contract import _make_shard_id as _msi
+    entry["shard_id"] = _msi(entry["timestamp"], run_index)
 
     log_path = Path.cwd() / _LOG_PATH
     log_path.parent.mkdir(parents=True, exist_ok=True)

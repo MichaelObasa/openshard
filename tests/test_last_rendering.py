@@ -4847,5 +4847,67 @@ class TestFeedbackRoutingAdvisoryRendering(unittest.TestCase):
         self.assertNotIn("FEEDBACK ROUTING ADVISORY", out)
 
 
+# ---------------------------------------------------------------------------
+# Fix 4: Structured findings for read-only review tasks
+# ---------------------------------------------------------------------------
+
+class TestReadonlyTaskFindings(unittest.TestCase):
+    """Verify that /last --more renders findings for read-only review tasks."""
+
+    def _entry_with_findings(self, **extra):
+        base = {
+            "task": "Review this Terraform repo for production readiness. Do not apply changes.",
+            "execution_model": "mock-model",
+            "summary": (
+                "Production readiness review complete.\n\n"
+                "## Critical\n- Missing deletion protection on RDS instances\n\n"
+                "## High\n- Secrets stored in plaintext environment variables\n"
+            ),
+            "is_review_task": True,
+            "findings": [
+                {"severity": "Critical", "message": "Missing deletion protection on RDS instances"},
+                {"severity": "High", "message": "Secrets stored in plaintext environment variables"},
+            ],
+            "files_created": 0,
+            "files_updated": 0,
+            "files_deleted": 0,
+        }
+        base.update(extra)
+        return base
+
+    def test_readonly_review_with_findings_shows_findings_section(self):
+        """FINDINGS section must appear in /last --more for a read-only review task."""
+        out = _render(self._entry_with_findings(), "more")
+        self.assertIn("FINDINGS", out)
+        self.assertNotIn("No structured findings recorded.", out)
+
+    def test_readonly_review_with_findings_shows_severity(self):
+        """Finding severity labels must appear in /last --more output."""
+        out = _render(self._entry_with_findings(), "more")
+        self.assertIn("Critical", out)
+        self.assertIn("High", out)
+
+    def test_readonly_review_no_findings_shows_honest_message(self):
+        """When no findings recorded, 'No structured findings recorded.' must appear."""
+        entry = self._entry_with_findings(findings=[])
+        out = _render(entry, "more")
+        self.assertIn("No structured findings recorded.", out)
+
+    def test_explanation_readonly_task_shows_no_structured_findings(self):
+        """An explain-only task (is_review_task=False) shows 'No structured findings recorded.'
+        rather than real findings, since it is not treated as a review task."""
+        entry = {
+            "task": "Explain this module. Do not write files.",
+            "execution_model": "mock-model",
+            "summary": "This module handles CLI routing.",
+            "is_review_task": False,
+            "files_created": 0,
+            "files_updated": 0,
+            "files_deleted": 0,
+        }
+        out = _render(entry, "more")
+        self.assertIn("No structured findings recorded.", out)
+
+
 if __name__ == "__main__":
     unittest.main()

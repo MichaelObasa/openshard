@@ -10,7 +10,7 @@ from openshard.cli.main import cli
 from openshard.execution.generator import ChangedFile
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry
-from openshard.routing.engine import is_readonly_task
+from openshard.routing.engine import is_readonly_task, has_inline_readonly_instruction, looks_like_review_task
 
 _DEFAULT_CONFIG = {"approval_mode": "smart"}
 
@@ -532,3 +532,171 @@ class TestSfTaskPipelineIntegration(unittest.TestCase):
         self.assertIsNotNone(max_tokens, "max_tokens was not passed to generate()")
         self.assertLessEqual(max_tokens, 16384, f"max_tokens={max_tokens} exceeds 16384 cap")
         self.assertEqual(max_tokens, 8192)
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for has_inline_readonly_instruction()
+# ---------------------------------------------------------------------------
+
+class TestHasInlineReadonlyInstruction(unittest.TestCase):
+
+    def test_do_not_apply_changes(self):
+        self.assertTrue(has_inline_readonly_instruction("Review this repo. Do not apply changes."))
+
+    def test_do_not_make_changes(self):
+        self.assertTrue(has_inline_readonly_instruction("Audit the config. Do not make changes."))
+
+    def test_review_only(self):
+        self.assertTrue(has_inline_readonly_instruction("This is a review only task."))
+
+    def test_do_not_modify(self):
+        self.assertTrue(has_inline_readonly_instruction("Assess the code. Do not modify anything."))
+
+    def test_without_making_changes(self):
+        self.assertTrue(has_inline_readonly_instruction("Check the module without making changes."))
+
+    def test_without_modifying_files(self):
+        self.assertTrue(has_inline_readonly_instruction("Inspect the repo without modifying files."))
+
+    def test_do_not_change_files(self):
+        self.assertTrue(has_inline_readonly_instruction("Evaluate this. Do not change files."))
+
+    def test_no_file_changes(self):
+        self.assertTrue(has_inline_readonly_instruction("No file changes should be made."))
+
+    def test_read_only_hyphen(self):
+        self.assertTrue(has_inline_readonly_instruction("This is a read-only assessment."))
+
+    def test_read_only_space(self):
+        self.assertTrue(has_inline_readonly_instruction("Treat this as read only."))
+
+    def test_case_insensitive(self):
+        self.assertTrue(has_inline_readonly_instruction("DO NOT APPLY CHANGES to any file."))
+
+    def test_normal_write_task_is_false(self):
+        self.assertFalse(has_inline_readonly_instruction("implement pagination"))
+
+    def test_empty_string_is_false(self):
+        self.assertFalse(has_inline_readonly_instruction(""))
+
+    def test_explanation_without_phrase_is_false(self):
+        self.assertFalse(has_inline_readonly_instruction("explain the routing logic"))
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for looks_like_review_task()
+# ---------------------------------------------------------------------------
+
+class TestLooksLikeReviewTask(unittest.TestCase):
+
+    def test_terraform_production_readiness(self):
+        task = "Review this Terraform repo for production readiness. Do not apply changes."
+        self.assertTrue(looks_like_review_task(task))
+
+    def test_security_audit(self):
+        self.assertTrue(looks_like_review_task("Security audit of the API layer."))
+
+    def test_assess(self):
+        self.assertTrue(looks_like_review_task("Assess the networking configuration."))
+
+    def test_iac_hardening(self):
+        self.assertTrue(looks_like_review_task("Review IaC hardening for the cluster."))
+
+    def test_explanation_task_is_false(self):
+        self.assertFalse(looks_like_review_task("explain this module, do not write files"))
+
+    def test_summarise_task_is_false(self):
+        self.assertFalse(looks_like_review_task("summarise this code, do not change files"))
+
+    def test_empty_string_is_false(self):
+        self.assertFalse(looks_like_review_task(""))
+
+
+# ---------------------------------------------------------------------------
+# Pipeline integration: inline read-only instruction enforcement
+# ---------------------------------------------------------------------------
+
+_VALIDATION_PROMPT = (
+    "Review this Terraform repo for production readiness. "
+    "Focus on security, deletion protection, networking risk, secrets, and 2am operability. "
+    "Do not apply changes."
+)
+
+
+def _fake_result_with_report():
+    """Generator returns a markdown report file — must be discarded on read-only runs."""
+    r = MagicMock()
+    r.usage = None
+    r.files = [
+        ChangedFile(
+            path="TERRAFORM_PRODUCTION_READINESS_REVIEW.md",
+            change_type="create",
+            content="# Review\n\n## Critical\n- Missing deletion protection\n",
+            summary="Terraform production readiness review",
+        )
+    ]
+    r.summary = "Production readiness review complete."
+    r.notes = []
+    return r
+
+
+class TestInlineReadonlyPipelineIntegration(unittest.TestCase):
+
+    def test_do_not_apply_discards_files(self):
+        """Prompt with 'Do not apply changes' must discard model-generated files."""
+        result, _ = _invoke(
+            _VALIDATION_PROMPT,
+            result=_fake_result_with_report(),
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("Read-only task", result.output)
+        self.assertIn("discarded", result.output)
+
+    def test_do_not_apply_changed_count_zero(self):
+        """Receipt must show 0 changed files for 'Do not apply changes' prompt."""
+        result, _ = _invoke(
+            _VALIDATION_PROMPT,
+            result=_fake_result_with_report(),
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertNotIn("Files: 1 created", result.output)
+
+    def test_no_report_file_created_on_disk(self):
+        """The markdown report file must not be written to disk for read-only runs."""
+        import os
+        import tempfile
+
+        report_name = "TERRAFORM_PRODUCTION_READINESS_REVIEW.md"
+        gen_mock = _make_generator_mock(_fake_result_with_report())
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = os.getcwd()
+            try:
+                os.chdir(tmpdir)
+                with patch("openshard.run.pipeline.ExecutionGenerator", return_value=gen_mock), \
+                     patch("openshard.run.pipeline.NativeAgentExecutor", return_value=MagicMock()), \
+                     patch("openshard.run.pipeline.ProviderManager", return_value=_make_manager_mock()), \
+                     patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+                     patch("openshard.run.pipeline.analyze_repo", return_value=_SAFE_REPO), \
+                     patch("openshard.run.pipeline.build_verification_plan", return_value=_empty_plan()), \
+                     patch("openshard.run.pipeline._log_run"), \
+                     patch("openshard.run.pipeline._build_explicit_file_context", return_value=""):
+                    runner = CliRunner()
+                    cli_result = runner.invoke(cli, ["run", _VALIDATION_PROMPT])
+                self.assertEqual(cli_result.exit_code, 0, cli_result.output)
+                self.assertFalse(
+                    os.path.exists(os.path.join(tmpdir, report_name)),
+                    f"{report_name} was created on disk despite read-only instruction",
+                )
+            finally:
+                os.chdir(original_cwd)
+
+    def test_explain_with_do_not_write_is_readonly(self):
+        """Explanation task with 'do not write files' is also treated as read-only."""
+        result, _ = _invoke(
+            "Explain this repo architecture. Do not write files.",
+            result=_fake_result_with_files(),
+        )
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("Read-only task", result.output)
+        self.assertIn("discarded", result.output)
