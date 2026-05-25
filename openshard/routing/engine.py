@@ -206,6 +206,52 @@ def looks_like_review_task(task: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Review domain classification
+# ---------------------------------------------------------------------------
+
+_REVIEW_DOMAIN_SIGNALS: dict[str, tuple[str, ...]] = {
+    "cicd": (
+        "ci/cd", "cicd", "github actions", "workflow", "pipeline",
+        "deployment checks", "pre-deploy", "pre-deployment",
+        "github workflows", "azure-pipelines", "jenkinsfile", "gitlab ci",
+    ),
+    "auth_security": (
+        "auth", "authentication", "authorization", "login", "session",
+        "token", "jwt", "oauth",
+    ),
+    "tests": (
+        "test coverage", "missing tests", "pytest", "unit tests",
+        "integration tests",
+    ),
+    "docs_onboarding": (
+        "readme", "onboarding", "documentation", "new developer", "docs",
+    ),
+    "terraform_iac": (
+        "terraform", "iac", "infrastructure", "gcp", "aws", "azure",
+        "cloud", "production readiness", "hardening",
+    ),
+}
+
+
+def classify_review_domain(task: str) -> str:
+    """Return the review domain for *task*.
+
+    Non-terraform domains are checked first so a specific match wins over
+    the broad terraform_iac set.
+
+    Returns one of:
+        cicd | auth_security | tests | docs_onboarding | terraform_iac | generic_review
+    """
+    t = task.lower()
+    for domain in ("cicd", "auth_security", "tests", "docs_onboarding"):
+        if any(signal in t for signal in _REVIEW_DOMAIN_SIGNALS[domain]):
+            return domain
+    if any(signal in t for signal in _REVIEW_DOMAIN_SIGNALS["terraform_iac"]):
+        return "terraform_iac"
+    return "generic_review"
+
+
+# ---------------------------------------------------------------------------
 # Legacy class (preserved for any existing callers)
 # ---------------------------------------------------------------------------
 

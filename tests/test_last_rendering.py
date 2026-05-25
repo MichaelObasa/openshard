@@ -3170,6 +3170,74 @@ class TestLastStagesDispatchModels(unittest.TestCase):
         self.assertGreater(glm_idx_second, glm_idx_first)
 
 
+class TestRoutingModelDisplayConsistency(unittest.TestCase):
+    """When routing_selected_model differs from routing_model, the /last default
+    top Model: line should show the scored model with 'Auto →' to match the receipt.
+
+    The compact receipt (also rendered at default detail) always shows 'Auto →'
+    when routing_selected_model is set, so tests check the standalone '\nModel: …'
+    line using the literal prefix '\nModel: Auto →'.
+    """
+
+    def _entry_scored_differs(self) -> dict:
+        return {
+            "task": "review the API",
+            "routing_model": "z-ai/glm-4-5",               # keyword routing pick
+            "routing_selected_model": "openrouter/deepseek-r1",  # scored routing pick
+            "routing_rationale": "standard feature implementation",
+        }
+
+    def _entry_scored_same(self) -> dict:
+        return {
+            "task": "implement a feature",
+            "routing_model": "z-ai/glm-4-5",
+            "routing_selected_model": "z-ai/glm-4-5",       # same as keyword pick
+            "routing_rationale": "standard feature implementation",
+        }
+
+    def _entry_no_selected(self) -> dict:
+        return {
+            "task": "do a thing",
+            "routing_model": "z-ai/glm-4-5",
+            "routing_rationale": "standard feature implementation",
+        }
+
+    def test_scored_differs_top_model_line_has_auto_arrow(self):
+        """When scored ≠ keyword, the standalone Model: line says 'Auto →'."""
+        out = _render(self._entry_scored_differs(), detail="default")
+        # "\nModel: Auto →" is the top Model: line format; receipt box uses "  Model  Auto →"
+        self.assertIn("\nModel: Auto →", out)
+
+    def test_scored_differs_top_model_line_shows_scored_label(self):
+        """The top Model: line shows the scored model, not the keyword pick."""
+        out = _render(self._entry_scored_differs(), detail="default")
+        scored_label = _model_label("openrouter/deepseek-r1")
+        # Find the standalone "\nModel: …" line specifically
+        top_model_line = next(
+            (ln for ln in out.split("\n") if ln.startswith("Model: ")), ""
+        )
+        self.assertIn(scored_label, top_model_line)
+
+    def test_scored_same_top_model_line_no_auto_arrow(self):
+        """When scored == keyword, the top Model: line has no 'Auto →' prefix."""
+        out = _render(self._entry_scored_same(), detail="default")
+        # The standalone top Model: line should not have "Auto →"
+        top_model_line = next(
+            (ln for ln in out.split("\n") if ln.startswith("Model: ")), ""
+        )
+        self.assertNotIn("Auto →", top_model_line)
+        self.assertIn(_model_label("z-ai/glm-4-5"), top_model_line)
+
+    def test_no_selected_top_model_line_no_auto_arrow(self):
+        """When only routing_model is present, the top Model: line has no 'Auto →'."""
+        out = _render(self._entry_no_selected(), detail="default")
+        top_model_line = next(
+            (ln for ln in out.split("\n") if ln.startswith("Model: ")), ""
+        )
+        self.assertNotIn("Auto →", top_model_line)
+        self.assertIn(_model_label("z-ai/glm-4-5"), top_model_line)
+
+
 class TestLastCostComparisonBlock(unittest.TestCase):
 
     # actual $0.005 < Sonnet 4.6 baseline for 100k/50k ≈ $1.05 → cheaper

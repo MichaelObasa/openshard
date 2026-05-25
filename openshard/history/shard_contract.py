@@ -429,7 +429,7 @@ def _result_display(summary: str) -> str:
     # No internal sentence boundary — use full line when it fits.
     if len(line) <= _MAX_RESULT:
         return line
-    # Long line: clip at a word boundary and strip trailing connectives.
+    # Long line: clip at a word boundary, strip trailing connectives, add ellipsis.
     clipped = line[:_MAX_RESULT]
     sp = clipped.rfind(" ")
     if sp > _MAX_RESULT // 3:
@@ -681,7 +681,12 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         files_read_count = _snip if type(_snip) is int else None
     inspected_files = [p for p in _fc_paths if isinstance(p, str)] if isinstance(_fc_paths, list) else []
     files_referenced: list[str] = sorted({f.path for f in findings if f.path})
-    file_evidence = _build_file_evidence(inspected_files, files_referenced, files_touched)
+    # Merge domain-specific evidence files (CI/CD, auth, docs, tests) as inspected.
+    _domain_files_raw = entry.get("domain_files") or []
+    _domain_inspected = [p for p in _domain_files_raw if isinstance(p, str)]
+    file_evidence = _build_file_evidence(
+        inspected_files + _domain_inspected, files_referenced, files_touched
+    )
 
     _adv_raw = entry.get("model_advisory")
     _model_advisory: list[dict] = []

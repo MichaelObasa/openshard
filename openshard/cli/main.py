@@ -894,21 +894,43 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
         _review_files = [fd.get("path", "") for fd in files_detail if fd.get("path")]
         click.echo("\nReview complete")
         click.echo(render_review_tldr_memo(_sf_list, _review_files))
-    elif entry.get("is_review_task"):
+    elif entry.get("is_review_task") or (
+        entry.get("review_domain") and entry.get("review_domain") not in ("generic_review", "terraform_iac")
+    ):
         from openshard.cli.run_output import render_review_fallback_memo
+        from openshard.review.domain_files import no_files_message
         _review_files = [fd.get("path", "") for fd in files_detail if fd.get("path")]
+        _domain_files_log = entry.get("domain_files") or []
+        # Prefer domain-discovered evidence files over the changed-files list.
+        # Changed files are always empty for read-only reviews; domain_files
+        # contains the files that were actually inspected for the review domain.
+        _evidence_files = _domain_files_log or _review_files
         click.echo("\nReview complete")
-        click.echo(render_review_fallback_memo(
-            _review_files,
-            include_diagnostic=(detail in ("more", "full")),
-        ))
+        if not _evidence_files:
+            _no_msg = no_files_message(entry.get("review_domain", ""))
+            if _no_msg:
+                click.echo(_no_msg)
+            else:
+                click.echo(render_review_fallback_memo(
+                    [],
+                    include_diagnostic=(detail in ("more", "full")),
+                ))
+        else:
+            click.echo(render_review_fallback_memo(
+                _evidence_files,
+                include_diagnostic=(detail in ("more", "full")),
+                is_evidence=True,
+            ))
     else:
         click.echo("\nDone")
         if summary:
             click.echo(summary)
 
-    # Model line — only in default mode; receipt shows model in --more / --full
+    # Model line — only in default mode; receipt shows model in --more / --full.
+    # Prefer routing_selected_model (scored routing) over routing_model (keyword
+    # routing) so the displayed model matches what the receipt shows.
     _is_ro = routing_rationale == "read-only analysis"
+    _routing_selected: str = entry.get("routing_selected_model", "")
     if detail == "default":
         if stage_runs_data:
             seen: dict[str, list[str]] = {}
@@ -919,11 +941,16 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
             parts = [f"{lbl} ({' + '.join(types)})" for lbl, types in seen.items()]
             prefix = "Model" if len(seen) == 1 else "Models"
             click.echo(f"\n{prefix}: {', '.join(parts)}")
-        elif routing_model:
-            lbl = _model_label(routing_model)
-            reason = _RATIONALE_SHORT.get(routing_rationale, "")
-            suffix = f" ({reason})" if reason else ""
-            click.echo(f"\nModel: {lbl}{suffix}")
+        elif _routing_selected or routing_model:
+            _display_model = _routing_selected or routing_model
+            lbl = _model_label(_display_model)
+            if _routing_selected and _routing_selected != routing_model:
+                # Scored routing overrode the keyword pick — mirror receipt format.
+                click.echo(f"\nModel: Auto → {lbl}")
+            else:
+                reason = _RATIONALE_SHORT.get(routing_rationale, "")
+                suffix = f" ({reason})" if reason else ""
+                click.echo(f"\nModel: {lbl}{suffix}")
         _df_compact = entry.get("developer_feedback")
         if _df_compact:
             click.echo(f"Feedback: {_df_compact.get('outcome', '')}")
