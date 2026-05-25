@@ -2448,6 +2448,19 @@ def _log_run(
         if _adv_candidates:
             entry["model_advisory"] = _adv_candidates
 
+    try:
+        from openshard.models.feedback_advisory import (
+            _load_recent_session_signals as _load_sigs,
+            build_feedback_routing_advisory as _build_fra,
+        )
+        _sig_path = Path.cwd() / ".openshard" / "session_signals.jsonl"
+        _recent_sigs = _load_sigs(_sig_path)
+        _fra = _build_fra(_recent_sigs)
+        if _fra is not None:
+            entry["feedback_routing_advisory"] = _fra
+    except Exception:
+        pass
+
     if extra_metadata:
         entry.update(extra_metadata)
 

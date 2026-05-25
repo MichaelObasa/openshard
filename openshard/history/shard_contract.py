@@ -377,6 +377,7 @@ class ShardReceipt:
     approval_reason: str = ""
     file_evidence: list[FileEvidence] = field(default_factory=list)
     model_advisory: list[dict] = field(default_factory=list)
+    feedback_routing_advisory: dict | None = None
 
 
 def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
@@ -676,6 +677,11 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
             if isinstance(_a, dict) and "model_id" in _a:
                 _model_advisory.append(_a)
 
+    _fra_raw = entry.get("feedback_routing_advisory")
+    _feedback_routing_advisory: dict | None = None
+    if isinstance(_fra_raw, dict) and _fra_raw.get("advisory_only") is True:
+        _feedback_routing_advisory = _fra_raw
+
     return ShardReceipt(
         shard_id=_make_shard_id(timestamp, index),
         created_at=timestamp,
@@ -719,6 +725,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         developer_feedback=entry.get("developer_feedback") or None,
         file_evidence=file_evidence,
         model_advisory=_model_advisory,
+        feedback_routing_advisory=_feedback_routing_advisory,
     )
 
 
@@ -941,7 +948,7 @@ def _fmt_timestamp(ts: str) -> str:
         return ts
 
 
-def render_full_shard_receipt(receipt: ShardReceipt) -> str:
+def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> str:
     """Render a full structured SHARD block with consistent separator style. Pure, no I/O."""
     lines: list[str] = []
 
@@ -1102,6 +1109,22 @@ def render_full_shard_receipt(receipt: ShardReceipt) -> str:
             lines.append(f"{_INDENT}  {_name}")
             for _r in _adv.get("reasons", [])[:3]:
                 lines.append(f"{_INDENT}    ↳ {_r}")
+        lines.append("")
+
+    if detail == "full" and receipt.feedback_routing_advisory:
+        _fra = receipt.feedback_routing_advisory
+        lines.append(f"{_INDENT}FEEDBACK ROUTING ADVISORY")
+        lines.append(f"{_INDENT}  Advisory only — routing unchanged")
+        _rec = _fra.get("recommendation", "").replace("_", " ")
+        lines.append(f"{_INDENT}  Recommendation  {_rec}")
+        lines.append(f"{_INDENT}  Confidence      {_fra.get('confidence', '')}")
+        _reason = _fra.get("reason", "")
+        if _reason:
+            lines.append(f"{_INDENT}  Reason          {_reason}")
+        _sigs = _fra.get("signals_considered") or {}
+        _sig_parts = [f"{k}={v}" for k, v in _sigs.items() if isinstance(v, int) and v > 0]
+        if _sig_parts:
+            lines.append(f"{_INDENT}  Signals         {', '.join(_sig_parts)}")
         lines.append("")
 
     lines.append(f"{_INDENT}CHANGES")

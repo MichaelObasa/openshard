@@ -905,7 +905,7 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
         click.echo("")
         click.echo(render_compact_shard_receipt(_shard))
         click.echo("")
-        click.echo(render_full_shard_receipt(_shard))
+        click.echo(render_full_shard_receipt(_shard, detail=detail))
 
     # Stages (--full only)
     if detail == "full" and stage_runs_data:

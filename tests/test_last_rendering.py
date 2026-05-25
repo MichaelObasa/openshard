@@ -4750,5 +4750,102 @@ class TestModelAdvisoryRendering(unittest.TestCase):
         self.assertNotIn("1 candidates", out)
 
 
+_FRA = {
+    "version": "rules_v1",
+    "advisory_only": True,
+    "recommendation": "consider_stronger_review",
+    "confidence": "medium",
+    "reason": "Recent local session signals included partial feedback.",
+    "signals_considered": {"retry_requested": 0, "partial_explicit": 1, "rejected_explicit": 0},
+    "signals_window": {
+        "source": "session_signals.jsonl",
+        "max_recent_signals": 25,
+        "signals_read": 5,
+        "signals_used": 1,
+    },
+}
+
+
+class TestFeedbackRoutingAdvisoryRendering(unittest.TestCase):
+
+    def _entry_with_fra(self):
+        return {"task": "test feedback advisory task", "feedback_routing_advisory": _FRA}
+
+    def _entry_without_fra(self):
+        return {"task": "test feedback advisory task"}
+
+    # -- full mode shows advisory --
+
+    def test_full_receipt_renders_feedback_advisory_section(self):
+        out = _render(self._entry_with_fra(), "full")
+        self.assertIn("FEEDBACK ROUTING ADVISORY", out)
+
+    def test_full_receipt_renders_advisory_only_label(self):
+        out = _render(self._entry_with_fra(), "full")
+        self.assertIn("Advisory only — routing unchanged", out)
+
+    def test_full_receipt_renders_recommendation(self):
+        out = _render(self._entry_with_fra(), "full")
+        self.assertIn("Recommendation", out)
+        self.assertIn("consider stronger review", out)
+
+    def test_full_receipt_renders_confidence(self):
+        out = _render(self._entry_with_fra(), "full")
+        self.assertIn("Confidence", out)
+        self.assertIn("medium", out)
+
+    def test_full_receipt_renders_reason(self):
+        out = _render(self._entry_with_fra(), "full")
+        self.assertIn("Reason", out)
+        self.assertIn("Recent local session signals", out)
+
+    def test_full_receipt_renders_signals_line(self):
+        out = _render(self._entry_with_fra(), "full")
+        self.assertIn("Signals", out)
+        self.assertIn("partial_explicit=1", out)
+
+    def test_full_receipt_omits_zero_count_signals(self):
+        out = _render(self._entry_with_fra(), "full")
+        self.assertNotIn("retry_requested=0", out)
+        self.assertNotIn("rejected_explicit=0", out)
+
+    # -- absent advisory produces no section --
+
+    def test_full_receipt_no_advisory_section_when_absent(self):
+        out = _render(self._entry_without_fra(), "full")
+        self.assertNotIn("FEEDBACK ROUTING ADVISORY", out)
+
+    # -- compact receipt never shows advisory --
+
+    def test_compact_receipt_never_shows_feedback_advisory(self):
+        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        receipt = build_shard_receipt(self._entry_with_fra())
+        out = render_compact_shard_receipt(receipt)
+        self.assertNotIn("FEEDBACK ROUTING ADVISORY", out)
+        self.assertNotIn("consider stronger review", out)
+
+    # -- more mode does not show advisory --
+
+    def test_more_mode_does_not_render_feedback_advisory(self):
+        out = _render(self._entry_with_fra(), "more")
+        self.assertNotIn("FEEDBACK ROUTING ADVISORY", out)
+
+    # -- default mode does not show advisory --
+
+    def test_default_mode_does_not_render_feedback_advisory(self):
+        out = _render(self._entry_with_fra(), "default")
+        self.assertNotIn("FEEDBACK ROUTING ADVISORY", out)
+
+    # -- field parsing is safe with malformed data --
+
+    def test_entry_with_non_advisory_only_dict_ignored(self):
+        entry = {
+            "task": "test",
+            "feedback_routing_advisory": {"advisory_only": False, "recommendation": "bad"},
+        }
+        out = _render(entry, "full")
+        self.assertNotIn("FEEDBACK ROUTING ADVISORY", out)
+
+
 if __name__ == "__main__":
     unittest.main()
