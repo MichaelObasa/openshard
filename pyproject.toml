@@ -1,13 +1,14 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "openshard"
 version = "0.1.0"
-description = "Intelligent task routing and execution across model tiers"
+description = "The control layer for AI coding agents."
 readme = "README.md"
-license = {file = "LICENSE"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     {name = "Michael Obasa", email = "michaelobasa2@gmail.com"},
 ]
