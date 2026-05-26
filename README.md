@@ -1,18 +1,11 @@
-Use this as the full replacement for `README.md`. It keeps the stronger old README structure, but updates it with the current product reality: Ask/Plan/Run, production IaC demo, receipts, cost comparison, evals, workflow packs, and current limitations. I based it on the README you uploaded. 
-
-````markdown
 # OpenShard
 
 <p align="center">
-  <strong>The local-first control layer for AI coding agents.</strong>
+  <strong>The control layer for AI coding agents.</strong>
 </p>
 
 <p align="center">
-  AI coding agents can write code, but serious developers still need control: what ran, what changed, what context was used, whether checks passed, what it cost, and whether there is a receipt.
-</p>
-
-<p align="center">
-  OpenShard wraps AI-assisted engineering work with routing, review boundaries, checks, evidence, cost tracking, evals, feedback, and durable Shard receipts.
+  AI coding agents can write code, but engineering teams still need to understand what ran, what changed, what context was used, whether checks passed, what it cost and a way of proving it. OpenShard wraps AI coding agent runs with routing, review boundaries, checks, evidence, cost tracking, evals, feedback, and durable Shard receipts.
 </p>
 
 <p align="center">
@@ -29,11 +22,9 @@ Use this as the full replacement for `README.md`. It keeps the stronger old READ
 ---
 
 ## Why OpenShard exists
-
 AI coding agents are becoming good enough to work on real repos, infrastructure, and production-shaped systems.
 
 That creates a new problem. Not “can the model write code?” but:
-
 - Which model or workflow handled the task?
 - What files did it inspect?
 - What did it change?
@@ -43,17 +34,14 @@ That creates a new problem. Not “can the model write code?” but:
 - Is there a durable receipt of what happened?
 
 OpenShard is built for the work around the agent: routing, verification, policy, evidence, cost awareness, and auditability.
-
 The valuable unit is not a single model call. It is a completed engineering task with evidence, checks, cost, and a receipt.
 
 ---
 
 ## What OpenShard does
-
-OpenShard is a local-first CLI/TUI for controlling and recording AI-assisted engineering work.
+OpenShard is a CLI tool for controlling and recording AI coding agent runs.
 
 It can:
-
 - Run real repo tasks through a controlled execution path
 - Route work across models and workflows where available
 - Classify task risk
@@ -192,12 +180,10 @@ It is deliberately flawed to serve as the input for an infrastructure-as-code ha
 All names, project IDs, resource IDs, CIDRs, and accounts are fake and public-safe. No employer or customer details. Designed to show a serious IaC review, not a toy example.
 
 See:
-
 - [`examples/production-infra-demo/README.md`](examples/production-infra-demo/README.md)
 - [`examples/production-infra-demo/demo-task.md`](examples/production-infra-demo/demo-task.md)
 
 A typical production IaC review can show:
-
 - Critical, high, and medium findings
 - File-level evidence such as `iam.tf`, `secrets.tf`, `database.tf`, `network.tf`, and `storage.tf`
 - Verification output from tools like `terraform fmt`, `terraform validate`, and `tflint` when available
@@ -210,11 +196,9 @@ This is the core OpenShard use case: let AI help with serious engineering work, 
 ---
 
 ## Shard receipts
-
 A Shard is the durable receipt for an AI engineering run.
 
-A Shard can show:
-
+It can show:
 - Task and agent
 - Model used
 - Strategy
@@ -242,16 +226,15 @@ Raw developer content is not stored by default.
 ## One run, end to end
 
 A normal OpenShard run can capture:
-
-1. **Task** — the user request or workflow pack prompt.
-2. **Routing** — which model or workflow was selected.
-3. **Risk** — whether the task is low, medium, high, or requires stronger review.
-4. **Execution** — what the agent did during the run.
-5. **Checks** — verification results, including passed, failed, skipped, or not run.
-6. **Evidence** — files inspected, findings, and relevant source references.
-7. **Changes** — files changed, touched, or left untouched.
-8. **Cost** — estimated spend for the run.
-9. **Receipt** — a durable Shard record that can be inspected later.
+1. **Task** - the user request or workflow pack prompt.
+2. **Routing** - which model or workflow was selected.
+3. **Risk** - whether the task is low, medium, high, or requires stronger review.
+4. **Execution** - what the agent did during the run.
+5. **Checks** - verification results, including passed, failed, skipped, or not run.
+6. **Evidence** - files inspected, findings, and relevant source references.
+7. **Changes** - files changed, touched, or left untouched.
+8. **Cost** - estimated spend for the run.
+9. **Receipt** - a durable Shard record that can be inspected later.
 
 The point is simple: every AI coding run should leave behind enough evidence for a developer or team to understand what happened.
 
@@ -259,9 +242,8 @@ The point is simple: every AI coding run should leave behind enough evidence for
 
 ## How OpenShard is different
 
-OpenShard is not a chatbot, IDE, or generic agent framework.
-
-It is the layer around agentic coding work.
+OpenShard is not a chatbot, IDE, or even a generic agent framework.
+It's the layer around agentic coding work.
 
 | Layer | What it does |
 |---|---|
@@ -275,7 +257,6 @@ It is the layer around agentic coding work.
 OpenShard can work alongside tools like Claude Code, Codex, Cursor, OpenCode, LangChain, LangGraph, OpenRouter, and provider APIs.
 
 The goal is not to replace every coding agent.
-
 The goal is to make AI coding work controllable, inspectable, and measurable.
 
 ---
@@ -283,7 +264,6 @@ The goal is to make AI coding work controllable, inspectable, and measurable.
 ## Workflow packs
 
 Workflow packs are pre-built prompts for repeatable engineering reviews.
-
 ```bash
 openshard packs list
 openshard packs show production-iac-hardening
@@ -291,7 +271,6 @@ openshard packs prompt production-iac-hardening
 ```
 
 Built-in packs include:
-
 - `repo-explanation`
 - `production-iac-hardening`
 - `terraform-networking-review`
@@ -304,20 +283,17 @@ Workflow packs make common review patterns repeatable without forcing users to r
 ---
 
 ## Command reference
-
 Most developers should start with the TUI:
 
 ```bash
 openshard tui                                      # Launch the OpenShard terminal UI
 ```
-
 Run tasks:
 
 ```bash
 openshard run "Review this repo for risks"         # Run a task through OpenShard from the shell
 openshard run --workflow native "Fix this bug"     # Run using the native workflow path
 ```
-
 Inspect the latest run:
 
 ```bash
@@ -325,7 +301,6 @@ openshard last                                     # Show the latest run summary
 openshard last --more                              # Show the expanded Shard receipt
 openshard last --full                              # Show full stored/debug details
 ```
-
 Record feedback:
 
 ```bash
@@ -334,13 +309,11 @@ openshard feedback --outcome partial               # Mark the latest run as part
 openshard feedback --outcome rejected              # Mark the latest run as not useful
 openshard feedback --outcome needs_work            # Mark the latest run as needing more work
 ```
-
 Infer local session signals:
 
 ```bash
 openshard session infer                            # Infer local behavioural/session signals from run history
 ```
-
 Workflow packs:
 
 ```bash
@@ -348,7 +321,6 @@ openshard packs list                               # List available workflow pac
 openshard packs show production-iac-hardening      # Show details for a workflow pack
 openshard packs prompt production-iac-hardening    # Print the pack prompt
 ```
-
 Model registry and policy:
 
 ```bash
@@ -358,7 +330,6 @@ openshard models role cheap_control                # Show low-cost/control model
 openshard models mode ask                          # Show Ask Mode model policy
 openshard models mode plan                         # Show Plan Mode model policy
 ```
-
 Local evals:
 
 ```bash
@@ -369,7 +340,6 @@ openshard eval report                              # Show latest eval report
 openshard eval compare                             # Compare models by eval results
 openshard eval stats                               # Show eval stats
 ```
-
 Useful TUI commands:
 
 ```text
@@ -384,15 +354,12 @@ Useful TUI commands:
 /clear                                             # Clear the output panel
 /quit                                              # Exit the TUI
 ```
-
 ---
 
 ## What works today
-
 OpenShard is still alpha, but the core local loop is working.
 
 Current features include:
-
 - Local CLI and TUI (`openshard tui`)
 - Ask Mode for local product/model/command Q&A
 - Plan Mode v1 for deterministic local plans
@@ -418,11 +385,9 @@ Current features include:
 ---
 
 ## What is not built yet
-
 OpenShard is early and intentionally local-first.
 
 Not built yet:
-
 - No hosted team platform yet
 - No cloud sync yet
 - No hosted dashboard for teams yet
@@ -464,11 +429,9 @@ openshard eval stats
 The goal is not just to ask “which model is best?”
 
 The better question is:
-
 > Which model or workflow succeeds most reliably for this type of task, at what cost, with what safety profile?
 
 The eval system can track:
-
 - Pass rate
 - Verification outcomes
 - Duration
@@ -478,12 +441,11 @@ The eval system can track:
 - Unsafe file attempts
 - Model ranking across eval runs
 
-This is the foundation for smarter routing over time: routing based on real task outcomes, not model hype.
+This is the foundation for smarter routing over time: routing based on actual task outcomes.
 
 ---
 
 ## Current validation state
-
 OpenShard is still early, but it is not just a prototype.
 
 Current validation includes:
@@ -501,15 +463,14 @@ Current validation includes:
 The project is alpha, but the core loop is working:
 
 ```text
-Run the task -> inspect what happened -> verify the output -> record the receipt
+Run the task -> inspect what happened -> verify the output -> create a receipt
 ```
 
 ---
 
 ## Roadmap
 
-Near-term priorities:
-
+Near-term roadmap:
 - Public open-source launch
 - More real-world developer testing
 - Better repo-aware planning
@@ -521,12 +482,11 @@ Near-term priorities:
 - Team policies and shared approval gates
 - Dashboards for cost, model usage, and verification outcomes
 
-Longer-term, OpenShard should become the control plane teams use to manage AI-generated engineering work.
+Longer-term, OpenShard should become the control plane teams use to manage AI engineering work.
 
 ---
 
 ## Why open source?
-
 Routing decisions should be inspectable.
 
 If a tool decides which model touches security-sensitive code, developers should be able to see why.
@@ -540,7 +500,6 @@ Open source also keeps the local-first layer useful on its own. Hosted and team 
 ## Contributing
 
 Contributions are welcome around:
-
 - Routing policies and scoring logic
 - Repo analyzers for new stacks
 - Model profiles and capability data
@@ -555,7 +514,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 ---
 
 ## Security
-
 If you find a security issue, please report it privately before opening a public issue.
 
 See [SECURITY.md](SECURITY.md).
