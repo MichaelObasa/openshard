@@ -386,7 +386,8 @@ Not built yet:
 - No cloud sync yet
 - No hosted dashboard for teams yet
 - No IDE integration yet
-- No Homebrew, winget, or one-line shell installer yet - Plan Mode is not repo-aware yet
+- No Homebrew, winget, or one-line shell installer yet
+- Plan Mode is not repo-aware yet
 - Ask Mode and Plan Mode are local deterministic v1 flows
 - Feedback advisory does not automatically change routing yet
 - External harness adapters are experimental and not guaranteed
