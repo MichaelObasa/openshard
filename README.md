@@ -91,27 +91,21 @@ Record whether the result was accepted, partial, rejected, or needs more work.
 **Recommended: `pipx`**
 
 ```bash
-pipx install git+https://github.com/MichaelObasa/openshard.git
-```
-
-Run:
-
-```bash
+pipx install openshard
 openshard tui
 ```
 
 **Alternative: `uv`**
 
 ```bash
-uv tool install git+https://github.com/MichaelObasa/openshard.git
+uv tool install openshard
+openshard tui
 ```
 
-**Local development:**
+**Upgrade later:**
 
 ```bash
-git clone https://github.com/MichaelObasa/openshard.git
-cd openshard
-pip install -e .
+pipx upgrade openshard
 ```
 
 See [docs/install.md](docs/install.md) for upgrade instructions and notes.
@@ -392,8 +386,7 @@ Not built yet:
 - No cloud sync yet
 - No hosted dashboard for teams yet
 - No IDE integration yet
-- No PyPI or Homebrew release yet — install from GitHub
-- Plan Mode is not repo-aware yet
+- No Homebrew, winget, or one-line shell installer yet - Plan Mode is not repo-aware yet
 - Ask Mode and Plan Mode are local deterministic v1 flows
 - Feedback advisory does not automatically change routing yet
 - External harness adapters are experimental and not guaranteed
@@ -403,10 +396,12 @@ Not built yet:
 
 ## Developer setup
 
+Use this if you want to modify OpenShard locally or contribute code:
+
 ```bash
 git clone https://github.com/MichaelObasa/openshard.git
 cd openshard
-pip install -e .
+pip install -e ".[dev]"
 python -m pytest -q
 python -m ruff check .
 ```
