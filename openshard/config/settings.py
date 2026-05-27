@@ -6,26 +6,68 @@ from typing import Any
 
 import yaml
 
-_DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.yml"
+_DEFAULTS: dict[str, Any] = {
+    "model_tiers": [
+        {"name": "fast",     "model": "anthropic/claude-haiku-4.5",  "max_tokens": 1024},
+        {"name": "balanced", "model": "anthropic/claude-sonnet-4.6", "max_tokens": 4096},
+        {"name": "powerful", "model": "anthropic/claude-opus-4.6",   "max_tokens": 8192},
+    ],
+    "planning_model":      "anthropic/claude-sonnet-4.6",
+    "execution_model":     "anthropic/claude-sonnet-4.6",
+    "fixer_model":         "anthropic/claude-sonnet-4.6",
+    "workflow":            "auto",
+    "approval_mode":       "smart",
+    "cost_gate_threshold": 0.10,
+    "executor":            "direct",
+}
+
+
+def _load_yaml(p: Path) -> dict[str, Any]:
+    with p.open(encoding="utf-8") as fh:
+        return yaml.safe_load(fh) or {}
 
 
 def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
-    """Load and return the YAML configuration file.
+    """Load and return the YAML configuration.
 
-    Searches, in order:
-    1. *path* argument (if provided)
-    2. ``OPENSHARD_CONFIG`` environment variable
-    3. ``config.yml`` at the repository root
+    Search order:
+    1. *path* argument — raises FileNotFoundError if given but absent
+    2. OPENSHARD_CONFIG environment variable — raises if set but absent
+    3. .openshard/config.yml in the current working directory
+    4. config.yml in the current working directory
+    5. Bundled openshard/config/default_config.yml (importlib.resources)
+    6. Built-in _DEFAULTS — never raises
     """
-    config_path = Path(
-        path
-        or os.environ.get("OPENSHARD_CONFIG", "")
-        or _DEFAULT_CONFIG_PATH
-    )
-    if not config_path.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-    with config_path.open() as fh:
-        return yaml.safe_load(fh) or {}
+    if path:
+        config_path = Path(path)
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+        return _load_yaml(config_path)
+
+    env_path = os.environ.get("OPENSHARD_CONFIG", "")
+    if env_path:
+        config_path = Path(env_path)
+        if not config_path.exists():
+            raise FileNotFoundError(f"Config file not found: {config_path}")
+        return _load_yaml(config_path)
+
+    hidden = Path.cwd() / ".openshard" / "config.yml"
+    if hidden.exists():
+        return _load_yaml(hidden)
+
+    cwd_cfg = Path.cwd() / "config.yml"
+    if cwd_cfg.exists():
+        return _load_yaml(cwd_cfg)
+
+    try:
+        from importlib.resources import files
+        pkg_cfg = files("openshard.config").joinpath("default_config.yml")
+        with pkg_cfg.open("r", encoding="utf-8") as fh:
+            return yaml.safe_load(fh) or {}
+    except Exception:
+        pass
+
+    return dict(_DEFAULTS)
 
 
 def get_api_key() -> str:
