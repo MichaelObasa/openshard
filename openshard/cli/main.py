@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 
+from openshard import __version__
 from openshard.config.settings import load_config, get_api_key, get_anthropic_api_key, get_openai_api_key
 from openshard.planning.generator import PlanGenerator
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
@@ -54,7 +55,7 @@ from openshard.history.sandbox_apply_receipts import (
 
 
 @click.group(invoke_without_command=True)
-@click.version_option(package_name="openshard")
+@click.version_option(version=__version__, prog_name="openshard")
 @click.pass_context
 def cli(ctx: click.Context):
     """OpenShard - intelligent task routing and execution."""
@@ -187,7 +188,7 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         raise click.UsageError("--native-loop experimental requires --workflow native")
     try:
         config = load_config()
-    except (ValueError, RuntimeError) as exc:
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
         raise click.ClickException(str(exc))
     detail = "full" if full else ("more" if more else "default")
     pipeline = RunPipeline(

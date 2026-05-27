@@ -43,7 +43,8 @@ where = ["."]
 include = ["openshard*"]
 
 [tool.setuptools.package-data]
-"openshard.tui" = ["*.tcss"]
+"openshard.tui"    = ["*.tcss"]
+"openshard.config" = ["*.yml"]
 
 [tool.ruff]
 line-length = 100

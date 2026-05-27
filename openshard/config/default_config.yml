@@ -1,0 +1,26 @@
+# OpenShard built-in default configuration.
+# Users can override by placing config.yml in the current working directory
+# or .openshard/config.yml, or by setting OPENSHARD_CONFIG=<path>.
+
+model_tiers:
+  - name: fast
+    model: anthropic/claude-haiku-4.5
+    max_tokens: 1024
+
+  - name: balanced
+    model: anthropic/claude-sonnet-4.6
+    max_tokens: 4096
+
+  - name: powerful
+    model: anthropic/claude-opus-4.6
+    max_tokens: 8192
+
+planning_model: anthropic/claude-sonnet-4.6
+execution_model: anthropic/claude-sonnet-4.6
+fixer_model: anthropic/claude-sonnet-4.6
+
+workflow: auto
+approval_mode: smart
+cost_gate_threshold: 0.10
+
+executor: direct
