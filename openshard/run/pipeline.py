@@ -1294,11 +1294,22 @@ class RunPipeline:
             except Exception:
                 pass
             if _review_checks:
+                _rc_passed  = sum(1 for c in _review_checks if c.get("status") == "passed")
+                _rc_failed  = sum(1 for c in _review_checks if c.get("status") == "failed")
+                _rc_skipped = sum(1 for c in _review_checks if c.get("status") == "skipped")
+                _rc_parts: list[str] = []
+                if _rc_passed:
+                    _rc_parts.append(f"{_rc_passed} passed")
+                if _rc_failed:
+                    _rc_parts.append(f"{_rc_failed} failed")
+                if _rc_skipped:
+                    _rc_parts.append(f"{_rc_skipped} skipped")
                 _timeline.append(RunTimelineEvent(
                     "review_checks_recorded",
                     "Recorded review checks",
                     kind="check",
                     count=len(_review_checks),
+                    detail=", ".join(_rc_parts) if _rc_parts else None,
                 ))
 
         # Domain-specific file discovery for non-IaC review domains.
@@ -1312,6 +1323,32 @@ class RunPipeline:
                 _domain_files = find_review_domain_files(_scan_root, _review_domain)
             except Exception:
                 pass
+
+        # files_inspected: emit with provenance-backed file list only.
+        # IaC: paths come from extracted findings (confirmed provenance).
+        # Non-IaC domain: paths come from domain file discovery.
+        _inspected_paths: list[str] = []
+        if _is_iac_review and _extracted_findings:
+            _seen_paths: dict[str, None] = {}
+            for _ef in _extracted_findings:
+                if _ef.path and _ef.path not in _seen_paths:
+                    _seen_paths[_ef.path] = None
+            _inspected_paths = list(_seen_paths.keys())
+        elif _domain_files:
+            _inspected_paths = _domain_files
+        if _inspected_paths:
+            _fi_count = len(_inspected_paths)
+            _fi_label = f"Inspected {_fi_count} file{'s' if _fi_count != 1 else ''}"
+            _fi_detail = ", ".join(_inspected_paths[:5])
+            if _fi_count > 5:
+                _fi_detail += f" (+{_fi_count - 5} more)"
+            _timeline.append(RunTimelineEvent(
+                "files_inspected",
+                _fi_label,
+                kind="scan",
+                count=_fi_count,
+                detail=_fi_detail,
+            ))
 
         if _is_review_task or _is_readonly_review_task:
             _emit_review_debug(
@@ -1369,6 +1406,11 @@ class RunPipeline:
         # Review tasks are always at least High risk regardless of routing category
         if (_is_review_task or _is_readonly_review_task) and _receipt_risk in ("Not recorded", "Low"):
             _receipt_risk = "High"
+        _timeline.append(RunTimelineEvent(
+            "task_risk_recorded",
+            f"Recorded task risk: {_receipt_risk}",
+            kind="route",
+        ))
         _receipt_sandbox = "Off" if (_readonly_task or _is_review_task) else "Not recorded"
         _receipt_approval = "Not required" if _readonly_task else "Not recorded"
         _receipt_index: "int | None" = None

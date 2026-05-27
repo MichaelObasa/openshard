@@ -4331,6 +4331,35 @@ class TestLastTimelineSection(unittest.TestCase):
         out = _render(self._entry_with_timeline(), "more")
         self.assertEqual(out.count("Saved Shard receipt"), 1)
 
+    def test_timeline_detail_shown_in_more(self):
+        entry = {
+            "task": "review iac",
+            "timestamp": "2026-05-23T00:00:00Z",
+            "execution_model": "anthropic/claude-sonnet-4-6",
+            "summary": "Review complete.",
+            "run_timeline": [
+                {"event": "review_checks_recorded", "label": "Recorded review checks",
+                 "kind": "check", "status": "completed", "detail": "3 passed, 1 skipped"},
+            ],
+        }
+        out = _render(entry, "more")
+        self.assertIn("Recorded review checks", out)
+        self.assertIn("3 passed, 1 skipped", out)
+
+    def test_task_risk_recorded_shown_in_more(self):
+        entry = {
+            "task": "review iac",
+            "timestamp": "2026-05-23T00:00:00Z",
+            "execution_model": "anthropic/claude-sonnet-4-6",
+            "summary": "Review complete.",
+            "run_timeline": [
+                {"event": "task_risk_recorded", "label": "Recorded task risk: High",
+                 "kind": "route", "status": "completed"},
+            ],
+        }
+        out = _render(entry, "more")
+        self.assertIn("Recorded task risk: High", out)
+
 
 class TestContextRepoAndBranchRendering(unittest.TestCase):
     """repo_name and git_branch stored in the entry appear in /last --more output."""

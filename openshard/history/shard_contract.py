@@ -1026,8 +1026,11 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
         for _ev in receipt.run_timeline:
             _st = _ev.get("status", "completed") if isinstance(_ev, dict) else getattr(_ev, "status", "completed")
             _lbl = _ev.get("label", "") if isinstance(_ev, dict) else getattr(_ev, "label", "")
+            _det = _ev.get("detail") if isinstance(_ev, dict) else getattr(_ev, "detail", None)
             _sym = _chk if _st != "failed" else _fail
             lines.append(f"{_INDENT}  {_sym} {_lbl}")
+            if _det:
+                lines.append(f"{_INDENT}    {_det}")
         lines.append("")
 
     lines.append(f"{_INDENT}CONTEXT")

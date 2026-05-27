@@ -1666,6 +1666,25 @@ class TestRunTimeline(unittest.TestCase):
         self.assertEqual(len(receipt.run_timeline), 1)
         self.assertEqual(receipt.run_timeline[0]["label"], "Started run")
 
+    def test_render_full_shows_event_detail(self):
+        entry = {**_minimal_entry(), "run_timeline": [
+            {"event": "review_checks_recorded", "label": "Recorded review checks",
+             "kind": "check", "status": "completed", "detail": "2 passed, 1 failed"},
+        ]}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("Recorded review checks", out)
+        self.assertIn("2 passed, 1 failed", out)
+
+    def test_render_full_no_crash_when_detail_absent(self):
+        # Old shards without a 'detail' key must not raise
+        entry = {**_minimal_entry(), "run_timeline": [
+            {"event": "repo_scanned", "label": "Scanned repo", "kind": "scan", "status": "completed"},
+        ]}
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("Scanned repo", out)
+
 
 class TestRepoFromEntryFields(unittest.TestCase):
     """repo_name field takes priority; workspace_path is a folder-name fallback."""
