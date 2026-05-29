@@ -2205,6 +2205,28 @@ class RunPipeline:
             if _extra_metadata is None:
                 _extra_metadata = {}
             _extra_metadata.update(_findings_extra)
+        # Secret scan recording — scans files already read as context, before Shard log.
+        # NOTE: runs post-run (after model use). Records findings for receipt visibility.
+        # Does not prevent secrets from reaching the model in v1.
+        try:
+            from openshard.security.secret_scan import scan_paths_for_secrets as _scan_secrets
+            from dataclasses import asdict as _scan_asdict
+            _scan_file_paths: list[Path] = []
+            if _native_meta is not None and _native_meta.file_context is not None:
+                _scan_file_paths = [
+                    Path(p) for p in (_native_meta.file_context.paths or []) if p
+                ]
+            if _scan_file_paths:
+                _scan_result = _scan_secrets(_scan_file_paths, root=Path.cwd())
+                if _scan_result.findings:
+                    if _extra_metadata is None:
+                        _extra_metadata = {}
+                    _extra_metadata["secret_scan_result"] = _scan_asdict(_scan_result)
+        except Exception as _scan_exc:
+            # Never break the run. Record class only — no message that could contain file content.
+            if _extra_metadata is None:
+                _extra_metadata = {}
+            _extra_metadata["secret_scan_error_class"] = type(_scan_exc).__name__
         try:
             _log_run(start, _task_display, generator, retry_triggered, final_files,
                      verification_attempted=(write and verify),
