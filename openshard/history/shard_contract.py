@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from typing import Optional
 
+from openshard.run.timeline import normalize_timeline
+
 _PROFILE_TO_STRATEGY: dict[str, str] = {
     "native_light": "Single",
     "native_deep": "Plan + Execute",
@@ -789,6 +791,25 @@ def _truncate_compact(text: str, max_chars: int) -> str:
     return line[:max_chars] + "…"
 
 
+def _format_timeline_label(ev: dict) -> str:
+    """Return an enriched display label for a timeline event using count/target fields."""
+    key = ev.get("event", "")
+    label = ev.get("label") or ""
+    count = ev.get("count")
+    target = ev.get("target")
+    if key == "model_response_received" and target:
+        return f"model responded: {target}"
+    if key == "model_request_failed" and target:
+        return f"model failed: {target}"
+    if key == "review_checks_recorded" and count is not None:
+        return f"checks recorded: {count}"
+    if key == "static_findings_detected" and count is not None:
+        return f"findings detected: {count}"
+    if key == "receipt_saved" and target:
+        return f"receipt saved: {target}"
+    return label
+
+
 def render_compact_shard_receipt(receipt: ShardReceipt) -> str:
     """Render a bordered, column-aligned RECEIPT block. Pure, no I/O."""
     file_str = f"{receipt.files_changed} file{'s' if receipt.files_changed != 1 else ''}"
@@ -1019,15 +1040,29 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
     lines.append("")
 
     if receipt.run_timeline:
-        _chk_ok = _UNICODE_OK
-        _chk = "✓" if _chk_ok else "+"
-        _fail = "✖" if _chk_ok else "x"
+        _chk = "✓" if _UNICODE_OK else "+"
+        _fail = "✖" if _UNICODE_OK else "x"
         lines.append(f"{_INDENT}TIMELINE")
-        for _ev in receipt.run_timeline:
-            _st = _ev.get("status", "completed") if isinstance(_ev, dict) else getattr(_ev, "status", "completed")
-            _lbl = _ev.get("label", "") if isinstance(_ev, dict) else getattr(_ev, "label", "")
-            _sym = _chk if _st != "failed" else _fail
-            lines.append(f"{_INDENT}  {_sym} {_lbl}")
+        _tl_events = normalize_timeline(receipt.run_timeline)
+        _receipt_ev = next((e for e in _tl_events if e.get("event") == "receipt_saved"), None)
+        _regular_evs = [e for e in _tl_events if e.get("event") != "receipt_saved"]
+        _has_checks_ev = any(e.get("event") == "review_checks_recorded" for e in _regular_evs)
+        _has_risk_ev = any(e.get("event") == "risk_classified" for e in _regular_evs)
+        _has_inspected_ev = any(e.get("event") == "files_inspected" for e in _regular_evs)
+        for _ev in _regular_evs:
+            _sym = _chk if _ev.get("status", "completed") != "failed" else _fail
+            lines.append(f"{_INDENT}  {_sym} {_format_timeline_label(_ev)}")
+        # Synthesise proof facts from receipt fields when not covered by stored events
+        if not _has_inspected_ev and receipt.files_read_count:
+            lines.append(f"{_INDENT}  {_chk} files inspected: {receipt.files_read_count}")
+        if not _has_risk_ev and receipt.risk and receipt.risk not in ("Not recorded", "-", ""):
+            lines.append(f"{_INDENT}  {_chk} risk classified: {receipt.risk}")
+        if not _has_checks_ev and receipt.checks_display and receipt.checks_display != "Not run":
+            lines.append(f"{_INDENT}  {_chk} checks: {receipt.checks_display}")
+        # receipt_saved always last
+        if _receipt_ev:
+            _sym = _chk if _receipt_ev.get("status", "completed") != "failed" else _fail
+            lines.append(f"{_INDENT}  {_sym} {_format_timeline_label(_receipt_ev)}")
         lines.append("")
 
     lines.append(f"{_INDENT}CONTEXT")
@@ -1047,19 +1082,31 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
     lines.append("")
 
     lines.append(f"{_INDENT}FILE EVIDENCE")
-    if receipt.file_evidence:
-        _fe_cap = 12
-        for _fe in receipt.file_evidence[:_fe_cap]:
-            lines.append(f"{_INDENT}  {_fe.path}")
-            for _role in _fe.roles:
-                lines.append(f"{_INDENT}    {_ROLE_LABELS[_role]}")
+    lines.append("")
+    _fe_cap = 10
+    _fe_inspected = [fe for fe in receipt.file_evidence if "inspected" in fe.roles]
+    _fe_findings = [fe for fe in receipt.file_evidence if "finding_source" in fe.roles]
+    _fe_changed = [fe for fe in receipt.file_evidence if "changed" in fe.roles]
+    for _fe_heading, _fe_group in (
+        ("INSPECTED FILES", _fe_inspected),
+        ("FILES WITH FINDINGS", _fe_findings),
+    ):
+        if _fe_group:
+            lines.append(f"{_INDENT}  {_fe_heading}")
+            for _fe in _fe_group[:_fe_cap]:
+                lines.append(f"{_INDENT}    {_fe.path}")
+            if len(_fe_group) > _fe_cap:
+                lines.append(f"{_INDENT}    +{len(_fe_group) - _fe_cap} more")
             lines.append("")
-        if len(receipt.file_evidence) > _fe_cap:
-            lines.append(f"{_INDENT}  (+{len(receipt.file_evidence) - _fe_cap} more)")
-            lines.append("")
+    lines.append(f"{_INDENT}  CHANGED FILES")
+    if _fe_changed:
+        for _fe in _fe_changed[:_fe_cap]:
+            lines.append(f"{_INDENT}    {_fe.path}")
+        if len(_fe_changed) > _fe_cap:
+            lines.append(f"{_INDENT}    +{len(_fe_changed) - _fe_cap} more")
     else:
-        lines.append(f"{_INDENT}  Not recorded")
-        lines.append("")
+        lines.append(f"{_INDENT}    none")
+    lines.append("")
 
     lines.append(f"{_INDENT}POLICY")
     lines.append(_row("Risk", receipt.risk))
@@ -1086,7 +1133,8 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
     lines.append(f"{_INDENT}CHECKS")
     if receipt.check_results:
         for cr in receipt.check_results:
-            lines.append(f"{_INDENT}  {cr}")
+            _cr = cr if detail == "full" else _truncate_compact(cr, 90)
+            lines.append(f"{_INDENT}  {_cr}")
     else:
         lines.append(f"{_INDENT}{receipt.checks_display}")
     lines.append("")
