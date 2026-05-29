@@ -2338,7 +2338,17 @@ def _safe_git_info(path: Path) -> dict[str, object]:
         branch_raw = lines[0].removeprefix("## ").strip()
         branch = branch_raw.split("...")[0].split(" ")[0] or None
         dirty = any(ln for ln in lines if not ln.startswith("##"))
-        return {"repo_name": repo_name, "git_branch": branch, "git_dirty": dirty}
+        result: dict[str, object] = {"repo_name": repo_name, "git_branch": branch, "git_dirty": dirty}
+        try:
+            rev = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=str(path), capture_output=True, text=True, timeout=3,
+            )
+            if rev.returncode == 0 and rev.stdout.strip():
+                result["git_head_commit_hash"] = rev.stdout.strip()
+        except Exception:
+            pass
+        return result
     except Exception:
         return {"repo_name": repo_name}
 
@@ -2371,6 +2381,7 @@ def _log_run(
     run_index: int | None = None,
 ) -> None:
     entry: dict = {
+        "schema_version": "1.1",
         "timestamp": run_id if run_id else datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
         "task": task,
         "execution_model": model or generator.model,
