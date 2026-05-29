@@ -784,6 +784,36 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     if isinstance(_fra_raw, dict) and _fra_raw.get("advisory_only") is True:
         _feedback_routing_advisory = _fra_raw
 
+    # Build evidence capsules: preserve any existing capsules, then append secret scan findings.
+    _evidence_capsules: list[EvidenceCapsule] = []
+    _existing_caps = entry.get("evidence_capsules") or []
+    if isinstance(_existing_caps, list):
+        for _ec_raw in _existing_caps:
+            if isinstance(_ec_raw, dict) and "capsule_id" in _ec_raw:
+                _evidence_capsules.append(EvidenceCapsule(
+                    capsule_id=_ec_raw.get("capsule_id", ""),
+                    kind=_ec_raw.get("kind", ""),
+                    summary=_ec_raw.get("summary", ""),
+                    source=_ec_raw.get("source"),
+                    path=_ec_raw.get("path"),
+                    line=_ec_raw.get("line"),
+                    severity=_ec_raw.get("severity"),
+                ))
+    _ss_raw = entry.get("secret_scan_result")
+    if isinstance(_ss_raw, dict):
+        for _ssf in (_ss_raw.get("findings") or []):
+            if not isinstance(_ssf, dict):
+                continue
+            _evidence_capsules.append(EvidenceCapsule(
+                capsule_id=_ssf.get("fingerprint") or "secret-unknown",
+                kind="secret_scan",
+                summary=f"Potential {_ssf.get('kind', 'secret')} detected and redacted",
+                source="secret_scanner",
+                path=_ssf.get("path"),
+                line=_ssf.get("line"),
+                severity=_ssf.get("severity"),
+            ))
+
     return ShardReceipt(
         shard_id=entry.get("shard_id") or _make_shard_id(timestamp, index),
         created_at=timestamp,
@@ -835,6 +865,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         git_base_commit_hash=entry.get("git_base_commit_hash") or None,
         error_class=entry.get("error_class") or None,
         error_message=entry.get("error_message") or None,
+        evidence_capsules=_evidence_capsules,
     )
 
 
@@ -904,6 +935,9 @@ def render_compact_shard_receipt(receipt: ShardReceipt) -> str:
         _row("Cost", receipt.cost_display),
         _row("Result", receipt.result),
     ]
+    _secret_count = sum(1 for c in receipt.evidence_capsules if c.kind == "secret_scan")
+    if _secret_count:
+        lines.append(_row("Secrets", f"{_secret_count} finding(s) — see full receipt"))
     if receipt.developer_feedback:
         lines.append(_row("Feedback", receipt.developer_feedback.get("outcome", "")))
 
