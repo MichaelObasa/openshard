@@ -430,7 +430,7 @@ class OpenShardTui(App):
             answer = answer_ask_mode(parsed.question or "")
             self._append_output(_render_openshard_block(answer))
         elif parsed.cmd == TuiCommand.PLAN:
-            answer = answer_plan_mode(parsed.task or "")
+            answer = answer_plan_mode(parsed.task or "", path=self._path)
             self._append_output(_render_openshard_block(answer))
         else:
             self._append_output(_render_openshard_block(f"Unknown command: {raw}\nType /help for supported commands."))
