@@ -2583,3 +2583,101 @@ class TestEvidenceCapsuleRendering(unittest.TestCase):
         receipt = self._receipt_with_capsules([cap])
         out = render_compact_shard_receipt(receipt)
         self.assertNotIn("EVIDENCE CAPSULES", out)
+
+
+class TestPolicyDecisionsShardIntegration(unittest.TestCase):
+
+    def _base_receipt(self, **kwargs) -> ShardReceipt:
+        return ShardReceipt(
+            shard_id="test-id",
+            created_at="2026-05-29T00:00:00Z",
+            task_short="test task",
+            task_full="test task",
+            agent="native",
+            strategy="direct",
+            model_display="claude-sonnet",
+            risk="low",
+            sandbox="off",
+            files_changed=0,
+            checks_display="Not run",
+            approval="Not required",
+            cost_display="$0.0000",
+            result="ok",
+            status="ok",
+            duration_seconds=None,
+            **kwargs,
+        )
+
+    def test_build_shard_receipt_parses_policy_decisions(self):
+        entry = _minimal_entry()
+        entry["policy_decisions"] = [
+            {
+                "decision_id": "abc-123",
+                "action": "write_file",
+                "resource": "auth.py",
+                "decision": "deny",
+                "reason": "blocked",
+            }
+        ]
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(len(receipt.policy_decisions), 1)
+        self.assertEqual(receipt.policy_decisions[0]["decision"], "deny")
+        self.assertEqual(receipt.policy_decisions[0]["decision_id"], "abc-123")
+
+    def test_old_entry_without_policy_decisions_defaults_to_empty(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertEqual(receipt.policy_decisions, [])
+
+    def test_invalid_policy_decisions_entries_ignored(self):
+        entry = _minimal_entry()
+        entry["policy_decisions"] = [
+            {"decision_id": "ok", "action": "read", "resource": None, "decision": "allow"},
+            {"decision_id": "", "action": "x", "decision": "allow"},   # empty decision_id
+            {"action": "x", "decision": "deny"},                        # missing decision_id
+            {"decision_id": "y", "action": "x", "decision": "INVALID"},  # bad decision value
+            "not-a-dict",
+        ]
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(len(receipt.policy_decisions), 1)
+        self.assertEqual(receipt.policy_decisions[0]["decision_id"], "ok")
+
+    def test_full_receipt_renders_policy_decisions_section(self):
+        receipt = self._base_receipt(
+            policy_decisions=[
+                {
+                    "decision_id": "d1",
+                    "action": "risky_write",
+                    "resource": "auth.py",
+                    "decision": "ask",
+                    "reason": "approval required",
+                }
+            ]
+        )
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("POLICY DECISIONS", out)
+        self.assertIn("risky_write", out)
+        self.assertIn("approval required", out)
+
+    def test_full_receipt_omits_section_when_policy_decisions_empty(self):
+        receipt = self._base_receipt(policy_decisions=[])
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("POLICY DECISIONS", out)
+
+    def test_policy_decisions_capped_at_10_with_more_indicator(self):
+        pds = [
+            {"decision_id": f"d{i}", "action": f"act{i}", "resource": None, "decision": "allow", "reason": "ok"}
+            for i in range(15)
+        ]
+        receipt = self._base_receipt(policy_decisions=pds)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("POLICY DECISIONS", out)
+        self.assertIn("+5 more", out)
+
+    def test_compact_receipt_unchanged_with_policy_decisions(self):
+        receipt = self._base_receipt(
+            policy_decisions=[
+                {"decision_id": "d1", "action": "write", "resource": None, "decision": "deny", "reason": "blocked"}
+            ]
+        )
+        out = render_compact_shard_receipt(receipt)
+        self.assertNotIn("POLICY DECISIONS", out)

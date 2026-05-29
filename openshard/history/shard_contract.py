@@ -452,6 +452,8 @@ class ShardReceipt:
     execution_spans: list[ExecutionSpan] = field(default_factory=list)
     # Evidence capsules — structured, no raw content
     evidence_capsules: list[EvidenceCapsule] = field(default_factory=list)
+    # Policy decisions — structured gate/policy outcomes; empty until populated branches
+    policy_decisions: list[dict] = field(default_factory=list)
 
 
 def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
@@ -814,6 +816,18 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
                 severity=_ssf.get("severity"),
             ))
 
+    _valid_decisions = frozenset({"allow", "ask", "deny", "not_applicable"})
+    _policy_decisions: list[dict] = []
+    _policy_decisions_raw = entry.get("policy_decisions") or []
+    if isinstance(_policy_decisions_raw, list):
+        for _pd in _policy_decisions_raw:
+            if (
+                isinstance(_pd, dict)
+                and _pd.get("decision_id")
+                and _pd.get("decision") in _valid_decisions
+            ):
+                _policy_decisions.append(_pd)
+
     return ShardReceipt(
         shard_id=entry.get("shard_id") or _make_shard_id(timestamp, index),
         created_at=timestamp,
@@ -866,6 +880,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         error_class=entry.get("error_class") or None,
         error_message=entry.get("error_message") or None,
         evidence_capsules=_evidence_capsules,
+        policy_decisions=_policy_decisions,
     )
 
 
@@ -1292,6 +1307,20 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
             lines.append(_row("Reason", receipt.approval_reason))
         if not receipt.approval_granted:
             lines.append(_row("Result", "Writes blocked"))
+        lines.append("")
+
+    if receipt.policy_decisions:
+        lines.append(f"{_INDENT}POLICY DECISIONS")
+        _pd_cap = 10
+        _pd_col_dec = 6
+        _pd_col_act = 16
+        for _pd in receipt.policy_decisions[:_pd_cap]:
+            _pd_dec = str(_pd.get("decision") or "").ljust(_pd_col_dec)
+            _pd_act = str(_pd.get("action") or "").ljust(_pd_col_act)
+            _pd_reason = str(_pd.get("reason") or "")
+            lines.append(f"{_INDENT}  {_pd_dec}  {_pd_act}  {_pd_reason}")
+        if len(receipt.policy_decisions) > _pd_cap:
+            lines.append(f"{_INDENT}  +{len(receipt.policy_decisions) - _pd_cap} more")
         lines.append("")
 
     lines.append(f"{_INDENT}CHECKS")
