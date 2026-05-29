@@ -4984,5 +4984,77 @@ class TestReadonlyTaskFindings(unittest.TestCase):
         self.assertIn("No structured findings recorded.", out)
 
 
+# ---------------------------------------------------------------------------
+# /last more proof rendering
+# ---------------------------------------------------------------------------
+
+class TestLastMoreProofRendering(unittest.TestCase):
+    """Tests that /last more surfaces the key proof facts a developer needs."""
+
+    def _base_write_entry(self) -> dict:
+        return {
+            "task": "add feature",
+            "timestamp": "2026-05-01T10:00:00Z",
+            "execution_model": "anthropic/claude-sonnet-4-6",
+            "summary": "Feature implemented.",
+            "form_factor": {"risk_level": "high", "read_only": False},
+            "estimated_cost": 0.012,
+        }
+
+    def test_compact_receipt_shows_risk(self):
+        entry = self._base_write_entry()
+        out = _render(entry, "more")
+        self.assertIn("High", out)
+
+    def test_compact_receipt_shows_checks_display(self):
+        entry = dict(self._base_write_entry())
+        entry["review_checks"] = [
+            {"name": "terraform fmt", "status": "passed", "command": "", "reason": "", "summary": "ok", "returncode": 0},
+            {"name": "tflint", "status": "skipped", "command": "", "reason": "tflint not installed", "summary": "", "returncode": None},
+        ]
+        out = _render(entry, "more")
+        self.assertIn("1 passed", out)
+        self.assertIn("1 skipped", out)
+
+    def test_compact_receipt_shows_changed_file_count(self):
+        entry = dict(self._base_write_entry())
+        entry["files_detail"] = [
+            {"path": "src/app.py", "change_type": "update", "summary": "updated"},
+            {"path": "src/utils.py", "change_type": "create", "summary": "created"},
+        ]
+        out = _render(entry, "more")
+        self.assertIn("2 files", out)
+
+    def test_last_more_includes_timeline_section(self):
+        entry = dict(self._base_write_entry())
+        entry["run_timeline"] = [
+            {"event": "repo_scanned", "label": "Scanned repo", "kind": "scan", "status": "completed"},
+        ]
+        out = _render(entry, "more")
+        self.assertIn("TIMELINE", out)
+
+    def test_last_more_skipped_check_reason(self):
+        entry = dict(self._base_write_entry())
+        entry["run_timeline"] = [
+            {"event": "repo_scanned", "label": "Scanned repo", "kind": "scan", "status": "completed"},
+        ]
+        entry["review_checks"] = [
+            {"name": "tflint", "status": "skipped", "command": "", "reason": "executable not found", "summary": "", "returncode": None},
+        ]
+        out = _render(entry, "more")
+        self.assertIn("executable not found", out)
+
+    def test_last_more_approval_not_invented(self):
+        # Write task with no approval receipt → "Not recorded", never "Required"
+        entry = dict(self._base_write_entry())
+        entry["approval_receipt"] = None
+        out = _render(entry, "more")
+        self.assertIn("Not recorded", out)
+        # "Required" should not appear as a standalone approval claim
+        for line in out.splitlines():
+            if "Approval" in line:
+                self.assertNotIn("Required →", line)
+
+
 if __name__ == "__main__":
     unittest.main()
