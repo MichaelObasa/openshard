@@ -2227,6 +2227,31 @@ class RunPipeline:
             if _extra_metadata is None:
                 _extra_metadata = {}
             _extra_metadata["secret_scan_error_class"] = type(_scan_exc).__name__
+        # Record runtime policy decisions — recording only, no behaviour change.
+        try:
+            from openshard.policy.runtime import (
+                build_runtime_policy_decisions as _build_pdecisions,
+                _dedup_decisions as _pd_dedup,
+            )
+            _runtime_pds = _build_pdecisions(
+                approval_request=(_extra_metadata or {}).get("approval_request"),
+                approval_receipt=(_extra_metadata or {}).get("approval_receipt"),
+                secret_scan_result=(_extra_metadata or {}).get("secret_scan_result"),
+                validator_policy=(_extra_metadata or {}).get("validator_policy"),
+                readonly=_readonly_task,
+            )
+            if _runtime_pds:
+                if _extra_metadata is None:
+                    _extra_metadata = {}
+                _existing_pds = _extra_metadata.get("policy_decisions") or []
+                _appended = (
+                    list(_existing_pds) + _pd_dedup(list(_existing_pds), _runtime_pds)
+                    if isinstance(_existing_pds, list)
+                    else _runtime_pds
+                )
+                _extra_metadata["policy_decisions"] = _appended
+        except Exception:
+            pass  # Never break the run
         try:
             _log_run(start, _task_display, generator, retry_triggered, final_files,
                      verification_attempted=(write and verify),
