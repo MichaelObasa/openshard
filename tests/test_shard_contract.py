@@ -6,6 +6,8 @@ import click
 from click.testing import CliRunner
 
 from openshard.history.shard_contract import (
+    EvidenceCapsule,
+    ExecutionSpan,
     ShardFinding,
     ShardReceipt,
     _build_file_evidence,
@@ -2340,3 +2342,244 @@ class TestApprovalReceiptSurface(unittest.TestCase):
         receipt = build_shard_receipt(entry)
         out = render_compact_shard_receipt(receipt)
         self.assertIn("Not required", out)
+
+
+class TestShardSchemaHardening(unittest.TestCase):
+    def test_schema_version_none_for_old_entries(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertIsNone(receipt.schema_version)
+
+    def test_schema_version_populated_from_entry(self):
+        entry = dict(_minimal_entry())
+        entry["schema_version"] = "1.1"
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.schema_version, "1.1")
+
+    def test_live_run_receipt_schema_version_is_1_1(self):
+        receipt = build_live_run_receipt(
+            task="test task",
+            run_id="2026-05-01T00:00:00Z",
+            run_index=0,
+            agent="OpenShard Native",
+            stage_runs=[],
+            routing_model=None,
+            risk="Low",
+            sandbox="On",
+            files_changed=0,
+            verification_attempted=None,
+            verification_passed=None,
+            approval="Not required",
+            estimated_cost=None,
+            result_summary="Done.",
+        )
+        self.assertEqual(receipt.schema_version, "1.1")
+
+    def test_new_list_fields_default_empty(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertEqual(receipt.schema_notes, [])
+        self.assertEqual(receipt.execution_spans, [])
+        self.assertEqual(receipt.evidence_capsules, [])
+
+    def test_new_optional_fields_default_none(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertIsNone(receipt.git_base_branch)
+        self.assertIsNone(receipt.git_base_commit_hash)
+        self.assertIsNone(receipt.git_head_commit_hash)
+        self.assertIsNone(receipt.git_dirty)
+        self.assertIsNone(receipt.error_class)
+        self.assertIsNone(receipt.error_message)
+        self.assertIsNone(receipt.context_files_considered_count)
+        self.assertIsNone(receipt.context_files_injected_count)
+        self.assertIsNone(receipt.context_utilisation_ratio)
+
+    def test_git_dirty_bool_preserved(self):
+        entry = dict(_minimal_entry())
+        entry["git_dirty"] = True
+        receipt = build_shard_receipt(entry)
+        self.assertIs(receipt.git_dirty, True)
+
+    def test_git_dirty_false_preserved(self):
+        entry = dict(_minimal_entry())
+        entry["git_dirty"] = False
+        receipt = build_shard_receipt(entry)
+        self.assertIs(receipt.git_dirty, False)
+
+    def test_git_head_commit_hash_from_entry(self):
+        entry = dict(_minimal_entry())
+        entry["git_head_commit_hash"] = "abc1234"
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.git_head_commit_hash, "abc1234")
+
+    def test_git_fields_none_for_old_entry(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertIsNone(receipt.git_head_commit_hash)
+        self.assertIsNone(receipt.git_base_branch)
+        self.assertIsNone(receipt.git_base_commit_hash)
+
+    def test_error_class_from_entry(self):
+        entry = dict(_minimal_entry())
+        entry["error_class"] = "provider_error"
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.error_class, "provider_error")
+
+    def test_context_utilisation_fields_none_by_default(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        self.assertIsNone(receipt.context_files_considered_count)
+        self.assertIsNone(receipt.context_files_injected_count)
+        self.assertIsNone(receipt.context_utilisation_ratio)
+
+
+class TestShardBackwardCompatibility(unittest.TestCase):
+    def test_old_entry_compact_receipt_stable(self):
+        receipt = build_shard_receipt({"task": "old task", "timestamp": "2024-01-01T00:00:00Z"})
+        out = render_compact_shard_receipt(receipt)
+        self.assertIsInstance(out, str)
+        self.assertGreater(len(out), 0)
+
+    def test_old_entry_full_receipt_stable(self):
+        receipt = build_shard_receipt({"task": "old task", "timestamp": "2024-01-01T00:00:00Z"})
+        out = render_full_shard_receipt(receipt)
+        self.assertIsInstance(out, str)
+        self.assertIn("TASK", out)
+
+    def test_old_entry_schema_section_absent(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("SCHEMA", out)
+
+    def test_old_entry_git_section_absent(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("\n  GIT\n", out)
+
+    def test_old_entry_error_section_absent(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("  ERROR\n", out)
+
+    def test_old_entry_context_usage_section_absent(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("CONTEXT USAGE", out)
+
+    def test_old_entry_execution_spans_section_absent(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("EXECUTION SPANS", out)
+
+    def test_old_entry_evidence_capsules_section_absent(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("EVIDENCE CAPSULES", out)
+
+    def test_schema_section_shows_for_new_entry(self):
+        entry = dict(_minimal_entry())
+        entry["schema_version"] = "1.1"
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("SCHEMA", out)
+        self.assertIn("1.1", out)
+
+    def test_existing_sections_stable_for_new_receipt(self):
+        entry = dict(_minimal_entry())
+        entry["schema_version"] = "1.1"
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        for section in ("TASK", "EXECUTION", "CONTEXT", "FILE EVIDENCE", "POLICY", "CHECKS", "FINDINGS", "COST", "RECEIPT"):
+            self.assertIn(section, out)
+
+    def test_no_raw_content_in_error_message(self):
+        entry = dict(_minimal_entry())
+        entry["error_class"] = "validation_failed"
+        entry["error_message"] = "short safe message"
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("validation_failed", out)
+        self.assertIn("short safe message", out)
+        self.assertLessEqual(len(receipt.error_message), 120)
+
+
+class TestExecutionSpanRendering(unittest.TestCase):
+    def _receipt_with_spans(self, spans: list[ExecutionSpan]) -> ShardReceipt:
+        receipt = build_shard_receipt(_minimal_entry())
+        object.__setattr__(receipt, "execution_spans", spans) if False else None
+        # dataclass is not frozen, so direct assignment works
+        receipt.execution_spans = spans
+        return receipt
+
+    def test_no_execution_spans_section_when_empty(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("EXECUTION SPANS", out)
+
+    def test_execution_spans_section_shown_when_present(self):
+        span = ExecutionSpan(span_id="s1", name="terraform fmt", kind="check", status="completed", duration_ms=120)
+        receipt = self._receipt_with_spans([span])
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("EXECUTION SPANS", out)
+        self.assertIn("terraform fmt", out)
+
+    def test_execution_span_with_error_class_renders_safely(self):
+        span = ExecutionSpan(span_id="s2", name="validate", kind="check", status="failed", error_class="validation_failed")
+        receipt = self._receipt_with_spans([span])
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("EXECUTION SPANS", out)
+        self.assertIn("validation_failed", out)
+
+    def test_execution_spans_capped(self):
+        spans = [ExecutionSpan(span_id=f"s{i}", name=f"span-{i}", kind="check") for i in range(15)]
+        receipt = self._receipt_with_spans(spans)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("EXECUTION SPANS", out)
+        self.assertIn("+5 more", out)
+
+    def test_compact_receipt_unchanged_with_spans(self):
+        span = ExecutionSpan(span_id="s1", name="fmt", kind="check")
+        receipt = self._receipt_with_spans([span])
+        out = render_compact_shard_receipt(receipt)
+        self.assertNotIn("EXECUTION SPANS", out)
+
+
+class TestEvidenceCapsuleRendering(unittest.TestCase):
+    def _receipt_with_capsules(self, capsules: list[EvidenceCapsule]) -> ShardReceipt:
+        receipt = build_shard_receipt(_minimal_entry())
+        receipt.evidence_capsules = capsules
+        return receipt
+
+    def test_no_evidence_capsules_section_when_empty(self):
+        receipt = build_shard_receipt(_minimal_entry())
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("EVIDENCE CAPSULES", out)
+
+    def test_evidence_capsules_section_shown_when_present(self):
+        cap = EvidenceCapsule(capsule_id="c1", kind="finding", summary="Missing required tag")
+        receipt = self._receipt_with_capsules([cap])
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("EVIDENCE CAPSULES", out)
+        self.assertIn("Missing required tag", out)
+
+    def test_evidence_capsule_with_path_and_line(self):
+        cap = EvidenceCapsule(capsule_id="c2", kind="finding", summary="Unused import", path="src/main.py", line=42)
+        receipt = self._receipt_with_capsules([cap])
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("src/main.py", out)
+        self.assertIn("42", out)
+
+    def test_evidence_capsule_with_path_no_line(self):
+        cap = EvidenceCapsule(capsule_id="c3", kind="finding", summary="Insecure config", path="config.tf")
+        receipt = self._receipt_with_capsules([cap])
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("config.tf", out)
+
+    def test_evidence_capsules_capped(self):
+        caps = [EvidenceCapsule(capsule_id=f"c{i}", kind="finding", summary=f"issue {i}") for i in range(15)]
+        receipt = self._receipt_with_capsules(caps)
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("EVIDENCE CAPSULES", out)
+        self.assertIn("+5 more", out)
+
+    def test_compact_receipt_unchanged_with_capsules(self):
+        cap = EvidenceCapsule(capsule_id="c1", kind="finding", summary="issue")
+        receipt = self._receipt_with_capsules([cap])
+        out = render_compact_shard_receipt(receipt)
+        self.assertNotIn("EVIDENCE CAPSULES", out)

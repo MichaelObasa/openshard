@@ -98,6 +98,31 @@ class FileEvidence:
     roles: list[str]  # ordered subset of: inspected, finding_source, changed
 
 
+@dataclass
+class ExecutionSpan:
+    """OTel-ready/OTel-inspired span shape. No tracing dependency."""
+    span_id: str
+    name: str
+    kind: str
+    started_at: str | None = None
+    duration_ms: int | None = None
+    status: str | None = None
+    error_class: str | None = None
+    summary: str | None = None
+
+
+@dataclass
+class EvidenceCapsule:
+    """Structured evidence unit. No raw content stored."""
+    capsule_id: str
+    kind: str
+    summary: str
+    source: str | None = None
+    path: str | None = None
+    line: int | None = None
+    severity: str | None = None
+
+
 _ROLE_ORDER = ["inspected", "finding_source", "changed"]
 
 _ROLE_LABELS: dict[str, str] = {
@@ -408,6 +433,25 @@ class ShardReceipt:
     file_evidence: list[FileEvidence] = field(default_factory=list)
     model_advisory: list[dict] = field(default_factory=list)
     feedback_routing_advisory: dict | None = None
+    # Schema versioning — None for old entries; "1.1" for entries written by this version
+    schema_version: str | None = None
+    schema_notes: list[str] = field(default_factory=list)
+    # Git attribution — supplements existing branch/git_state/repo fields
+    git_base_branch: str | None = None
+    git_base_commit_hash: str | None = None
+    git_head_commit_hash: str | None = None
+    git_dirty: bool | None = None
+    # Error classification — normalised class; no raw command output
+    error_class: str | None = None
+    error_message: str | None = None
+    # Context utilisation summary — intentionally None until future branches populate
+    context_files_considered_count: int | None = None
+    context_files_injected_count: int | None = None
+    context_utilisation_ratio: float | None = None
+    # OTel-ready execution spans — empty until future branches populate
+    execution_spans: list[ExecutionSpan] = field(default_factory=list)
+    # Evidence capsules — structured, no raw content
+    evidence_capsules: list[EvidenceCapsule] = field(default_factory=list)
 
 
 def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
@@ -784,6 +828,13 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         file_evidence=file_evidence,
         model_advisory=_model_advisory,
         feedback_routing_advisory=_feedback_routing_advisory,
+        schema_version=entry.get("schema_version") or None,
+        git_dirty=entry.get("git_dirty") if isinstance(entry.get("git_dirty"), bool) else None,
+        git_head_commit_hash=entry.get("git_head_commit_hash") or None,
+        git_base_branch=entry.get("git_base_branch") or None,
+        git_base_commit_hash=entry.get("git_base_commit_hash") or None,
+        error_class=entry.get("error_class") or None,
+        error_message=entry.get("error_message") or None,
     )
 
 
@@ -1020,6 +1071,7 @@ def build_live_run_receipt(
         findings=list(findings) if findings else [],
         run_timeline=list(run_timeline) if run_timeline else [],
         check_results=_check_results,
+        schema_version="1.1",
     )
 
 
@@ -1038,6 +1090,11 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
     lines: list[str] = []
 
     lines += [_SEP, f"{_INDENT}SHARD {_EM} {receipt.shard_id}", _SEP, ""]
+
+    if receipt.schema_version:
+        lines.append(f"{_INDENT}SCHEMA")
+        lines.append(_row("Version", receipt.schema_version))
+        lines.append("")
 
     lines += [f"{_INDENT}TASK", f"{_INDENT}{receipt.task_full}", ""]
 
@@ -1061,6 +1118,13 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
     lines.append(_row("Duration", dur))
     lines.append(_row("Status", receipt.status))
     lines.append("")
+
+    if receipt.error_class:
+        lines.append(f"{_INDENT}ERROR")
+        lines.append(_row("Class", receipt.error_class))
+        if receipt.error_message:
+            lines.append(_row("Message", receipt.error_message[:120]))
+        lines.append("")
 
     if receipt.run_timeline:
         _chk = "✓" if _UNICODE_OK else "+"
@@ -1104,6 +1168,39 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
         lines.append(_row("Touched", "-"))
     lines.append("")
 
+    _git_new = (
+        receipt.git_head_commit_hash is not None
+        or receipt.git_base_branch is not None
+        or receipt.git_base_commit_hash is not None
+        or receipt.git_dirty is not None
+    )
+    if _git_new:
+        lines.append(f"{_INDENT}GIT")
+        if receipt.git_head_commit_hash:
+            lines.append(_row("Head commit", receipt.git_head_commit_hash))
+        if receipt.git_base_branch:
+            lines.append(_row("Base branch", receipt.git_base_branch))
+        if receipt.git_base_commit_hash:
+            lines.append(_row("Base commit", receipt.git_base_commit_hash))
+        if receipt.git_dirty is not None:
+            lines.append(_row("Dirty", "yes" if receipt.git_dirty else "no"))
+        lines.append("")
+
+    _ctx_util = (
+        receipt.context_files_considered_count is not None
+        or receipt.context_files_injected_count is not None
+        or receipt.context_utilisation_ratio is not None
+    )
+    if _ctx_util:
+        lines.append(f"{_INDENT}CONTEXT USAGE")
+        if receipt.context_files_considered_count is not None:
+            lines.append(_row("Considered", str(receipt.context_files_considered_count)))
+        if receipt.context_files_injected_count is not None:
+            lines.append(_row("Injected", str(receipt.context_files_injected_count)))
+        if receipt.context_utilisation_ratio is not None:
+            lines.append(_row("Utilisation", f"{receipt.context_utilisation_ratio:.0%}"))
+        lines.append("")
+
     lines.append(f"{_INDENT}FILE EVIDENCE")
     lines.append("")
     _fe_cap = 10
@@ -1130,6 +1227,16 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
     else:
         lines.append(f"{_INDENT}    none")
     lines.append("")
+
+    if receipt.evidence_capsules:
+        lines.append(f"{_INDENT}EVIDENCE CAPSULES")
+        _ec_cap = 10
+        for _ec in receipt.evidence_capsules[:_ec_cap]:
+            _ec_loc = f"  [{_ec.path}:{_ec.line}]" if _ec.path and _ec.line is not None else (f"  [{_ec.path}]" if _ec.path else "")
+            lines.append(f"{_INDENT}  {_ec.kind}  {_ec.summary}{_ec_loc}")
+        if len(receipt.evidence_capsules) > _ec_cap:
+            lines.append(f"{_INDENT}  +{len(receipt.evidence_capsules) - _ec_cap} more")
+        lines.append("")
 
     lines.append(f"{_INDENT}POLICY")
     lines.append(_row("Risk", receipt.risk))
@@ -1161,6 +1268,18 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
     else:
         lines.append(f"{_INDENT}{receipt.checks_display}")
     lines.append("")
+
+    if receipt.execution_spans:
+        lines.append(f"{_INDENT}EXECUTION SPANS")
+        _es_cap = 10
+        for _es in receipt.execution_spans[:_es_cap]:
+            _dur = f"  {_es.duration_ms}ms" if _es.duration_ms is not None else ""
+            _st = f"  {_es.status}" if _es.status else ""
+            _ec = f"  [{_es.error_class}]" if _es.error_class else ""
+            lines.append(f"{_INDENT}  {_es.kind}  {_es.name}{_st}{_dur}{_ec}")
+        if len(receipt.execution_spans) > _es_cap:
+            lines.append(f"{_INDENT}  +{len(receipt.execution_spans) - _es_cap} more")
+        lines.append("")
 
     lines.append(f"{_INDENT}FINDINGS")
     if receipt.findings:
