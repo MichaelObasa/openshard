@@ -147,10 +147,42 @@ _GCP_STORAGE_PUBLIC = re.compile(
 # Local-only Terraform backend (no remote locking)
 _BACKEND_LOCAL = re.compile(r'backend\s+"local"', re.IGNORECASE)
 
+# ---------------------------------------------------------------------------
+# Provider detection patterns
+# ---------------------------------------------------------------------------
+
+_PROVIDER_GCP   = re.compile(r'provider\s+"google(?:-beta)?"', re.IGNORECASE)
+_PROVIDER_AWS   = re.compile(r'provider\s+"aws"', re.IGNORECASE)
+_PROVIDER_AZURE = re.compile(r'provider\s+"azurerm"', re.IGNORECASE)
+_RESOURCE_GCP   = re.compile(r'\bresource\s+"google_')
+_RESOURCE_AWS   = re.compile(r'\bresource\s+"aws_')
+_RESOURCE_AZURE = re.compile(r'\bresource\s+"azurerm_')
+
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+def detect_terraform_providers(root: Path) -> frozenset[str]:
+    """Return the set of cloud providers detected from .tf files under *root*.
+
+    Returns a frozenset containing zero or more of: "aws", "gcp", "azure".
+    An empty set means the provider could not be determined from the files.
+    """
+    providers: set[str] = set()
+    for tf_path in root.rglob("*.tf"):
+        try:
+            text = tf_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if _PROVIDER_GCP.search(text) or _RESOURCE_GCP.search(text):
+            providers.add("gcp")
+        if _PROVIDER_AWS.search(text) or _RESOURCE_AWS.search(text) or _BACKEND_S3.search(text):
+            providers.add("aws")
+        if _PROVIDER_AZURE.search(text) or _RESOURCE_AZURE.search(text):
+            providers.add("azure")
+    return frozenset(providers)
+
 
 def scan_terraform(root: Path) -> list[ShardFinding]:
     """Return findings for all .tf files under *root*. Never raises."""
@@ -159,9 +191,11 @@ def scan_terraform(root: Path) -> list[ShardFinding]:
     if not tf_files:
         return findings
 
+    providers = detect_terraform_providers(root)
+
     for tf_path in tf_files:
         try:
-            _scan_file(tf_path, root, findings)
+            _scan_file(tf_path, root, findings, providers)
         except Exception:
             pass
 
@@ -179,7 +213,7 @@ def _rel(path: Path, root: Path) -> str:
         return str(path)
 
 
-def _scan_file(path: Path, root: Path, findings: list[ShardFinding]) -> None:
+def _scan_file(path: Path, root: Path, findings: list[ShardFinding], providers: frozenset[str]) -> None:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -189,11 +223,12 @@ def _scan_file(path: Path, root: Path, findings: list[ShardFinding]) -> None:
 
     _check_cidr_wildcard(lines, rel, findings)
     _check_encryption(lines, rel, findings)
-    _check_s3_public_acl(lines, rel, findings)
+    if "aws" in providers:
+        _check_s3_public_acl(lines, rel, findings)
     _check_deletion_protection(lines, rel, findings)
     _check_iam_wildcards(text, lines, rel, findings)
     _check_missing_tags(text, lines, rel, findings)
-    _check_backend_locking(text, lines, rel, findings)
+    _check_backend_locking(text, lines, rel, findings, providers)
     _check_hardcoded_secrets(lines, rel, findings)
     _check_gcp_resources(text, lines, rel, findings)
 
@@ -407,7 +442,7 @@ def _collect_block(lines: list[str], start: int) -> tuple[str, int]:
     return "\n".join(collected), len(lines) - 1
 
 
-def _check_backend_locking(text: str, lines: list[str], rel: str, findings: list[ShardFinding]) -> None:
+def _check_backend_locking(text: str, lines: list[str], rel: str, findings: list[ShardFinding], providers: frozenset[str]) -> None:
     if _BACKEND_LOCAL.search(text):
         findings.append(ShardFinding(
             severity="High",
@@ -415,7 +450,7 @@ def _check_backend_locking(text: str, lines: list[str], rel: str, findings: list
             path=rel,
             line=None,
         ))
-    if _BACKEND_S3.search(text) and not _DYNAMO_LOCK.search(text):
+    if "aws" in providers and _BACKEND_S3.search(text) and not _DYNAMO_LOCK.search(text):
         findings.append(ShardFinding(
             severity="High",
             message="S3 backend is missing dynamodb_table — state locking is not configured",

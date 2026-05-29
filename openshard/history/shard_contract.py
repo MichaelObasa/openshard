@@ -104,6 +104,28 @@ _ROLE_LABELS: dict[str, str] = {
     "changed": "changed",
 }
 
+# Directories that are always noisy regardless of depth (e.g. src/__pycache__/x.pyc).
+_NOISY_EVIDENCE_ANY_SEGMENT: frozenset[str] = frozenset({
+    "__pycache__", ".pytest_cache", ".venv", "venv", "node_modules",
+    ".mypy_cache", ".ruff_cache", ".tox", ".next", ".git",
+})
+
+# Directories that are only noisy when they are the top-level path component.
+# Checking any segment for these would risk over-filtering real source paths.
+_NOISY_EVIDENCE_ROOT_SEGMENT: frozenset[str] = frozenset({
+    "dist", "build", "coverage", "cache", ".cache", "tmp", "temp",
+})
+
+
+def _is_noisy_evidence_path(path: str) -> bool:
+    """Return True if *path* should be excluded from user-facing inspected evidence."""
+    parts = path.replace("\\", "/").split("/")
+    if not parts:
+        return False
+    if any(part in _NOISY_EVIDENCE_ANY_SEGMENT for part in parts):
+        return True
+    return parts[0] in _NOISY_EVIDENCE_ROOT_SEGMENT
+
 
 def _build_file_evidence(
     inspected: list[str],
@@ -112,7 +134,8 @@ def _build_file_evidence(
 ) -> list[FileEvidence]:
     acc: dict[str, set[str]] = {}
     for p in inspected:
-        acc.setdefault(p, set()).add("inspected")
+        if not _is_noisy_evidence_path(p):
+            acc.setdefault(p, set()).add("inspected")
     for p in referenced:
         acc.setdefault(p, set()).add("finding_source")
     for p in touched:

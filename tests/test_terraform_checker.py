@@ -1243,5 +1243,166 @@ class TestGoldenDemoOutput(unittest.TestCase):
         )
 
 
+class TestProviderDetection(unittest.TestCase):
+    """detect_terraform_providers() identifies cloud providers from .tf content."""
+
+    def _detect(self, content: str) -> frozenset[str]:
+        from openshard.review.terraform_checker import detect_terraform_providers
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            _write_tf(p, "main.tf", content)
+            return detect_terraform_providers(p)
+
+    def test_detects_gcp_from_provider_block(self):
+        providers = self._detect('provider "google" { project = "my-proj" }')
+        self.assertIn("gcp", providers)
+
+    def test_detects_gcp_from_google_beta_provider(self):
+        providers = self._detect('provider "google-beta" { project = "my-proj" }')
+        self.assertIn("gcp", providers)
+
+    def test_detects_gcp_from_resource_prefix(self):
+        providers = self._detect('resource "google_storage_bucket" "assets" { name = "x" }')
+        self.assertIn("gcp", providers)
+
+    def test_detects_aws_from_provider_block(self):
+        providers = self._detect('provider "aws" { region = "us-east-1" }')
+        self.assertIn("aws", providers)
+
+    def test_detects_aws_from_resource_prefix(self):
+        providers = self._detect('resource "aws_s3_bucket" "data" { bucket = "x" }')
+        self.assertIn("aws", providers)
+
+    def test_detects_both_when_mixed(self):
+        providers = self._detect("""
+            resource "google_compute_instance" "vm" { name = "x" }
+            resource "aws_s3_bucket" "backup" { bucket = "y" }
+        """)
+        self.assertIn("gcp", providers)
+        self.assertIn("aws", providers)
+
+    def test_empty_for_unknown_provider(self):
+        providers = self._detect('resource "null_resource" "noop" {}')
+        self.assertEqual(providers, frozenset())
+
+    def test_no_tf_files_returns_empty(self):
+        from openshard.review.terraform_checker import detect_terraform_providers
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            result = detect_terraform_providers(Path(d))
+        self.assertEqual(result, frozenset())
+
+
+class TestProviderGating(unittest.TestCase):
+    """Provider-specific checks are gated; unknown provider emits only generic findings."""
+
+    def _scan(self, content: str) -> list[ShardFinding]:
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            _write_tf(p, "main.tf", content)
+            return scan_terraform(p)
+
+    def test_gcp_only_repo_no_s3_acl_finding(self):
+        # A GCP repo with a local `acl` variable must not produce an S3 ACL finding.
+        findings = self._scan("""
+            resource "google_storage_bucket" "assets" {
+              name     = "my-assets"
+              location = "US"
+              labels   = { owner = "platform", environment = "prod" }
+            }
+            locals {
+              acl = "public-read"
+            }
+        """)
+        s3_acl = [f for f in findings if "S3" in f.message or "public acl" in f.message.lower() or "public-" in f.message.lower()]
+        self.assertEqual(s3_acl, [], f"Unexpected S3 ACL finding in GCP-only repo: {s3_acl}")
+
+    def test_gcp_only_repo_no_dynamodb_finding(self):
+        # A GCP repo with local backend must get the local-backend finding but NOT the DynamoDB advice.
+        findings = self._scan("""
+            terraform {
+              backend "local" {}
+            }
+            resource "google_compute_instance" "vm" {
+              name         = "vm"
+              machine_type = "e2-micro"
+              zone         = "us-central1-a"
+              labels       = { owner = "ops", environment = "prod" }
+              boot_disk { initialize_params { image = "debian-cloud/debian-11" } }
+              network_interface { network = "default" }
+            }
+        """)
+        dynamo = [f for f in findings if "dynamodb" in f.message.lower()]
+        self.assertEqual(dynamo, [], f"Unexpected DynamoDB finding in GCP-only repo: {dynamo}")
+        local_backend = [f for f in findings if "local backend" in f.message.lower()]
+        self.assertTrue(local_backend, "Expected local-backend finding to still fire for GCP repo")
+
+    def test_aws_only_repo_no_gcp_findings(self):
+        # An AWS-only repo must not produce GCP-specific findings.
+        findings = self._scan("""
+            resource "aws_s3_bucket" "data" {
+              bucket = "my-bucket"
+              tags   = { owner = "platform", environment = "prod" }
+            }
+        """)
+        gcp_findings = [f for f in findings if "google_" in f.message.lower() or "gcp" in f.message.lower()]
+        self.assertEqual(gcp_findings, [], f"Unexpected GCP finding in AWS-only repo: {gcp_findings}")
+
+    def test_unknown_provider_no_s3_finding(self):
+        # When provider is unknown, S3 ACL check must not run.
+        findings = self._scan("""
+            resource "null_resource" "noop" {}
+            locals {
+              acl = "public-read"
+            }
+        """)
+        s3_acl = [f for f in findings if "S3" in f.message or "public-" in f.message.lower()]
+        self.assertEqual(s3_acl, [], f"Unexpected S3 finding for unknown provider: {s3_acl}")
+
+    def test_unknown_provider_no_dynamodb_finding(self):
+        # Unknown provider with local backend: only the generic local-backend finding fires.
+        findings = self._scan("""
+            terraform {
+              backend "local" {}
+            }
+            resource "null_resource" "noop" {}
+        """)
+        dynamo = [f for f in findings if "dynamodb" in f.message.lower()]
+        self.assertEqual(dynamo, [], f"Unexpected DynamoDB finding for unknown provider: {dynamo}")
+
+    def test_aws_provider_s3_acl_finding_fires(self):
+        # With AWS detected, S3 public ACL check must still fire.
+        findings = self._scan("""
+            resource "aws_s3_bucket" "bad" {
+              bucket = "leaky"
+              acl    = "public-read"
+              tags   = { owner = "ops", environment = "prod" }
+            }
+        """)
+        s3 = [f for f in findings if f.severity == "Critical" and "public" in f.message.lower()]
+        self.assertTrue(s3, "Expected S3 public ACL finding for AWS repo")
+
+    def test_aws_provider_dynamodb_locking_fires(self):
+        # With AWS detected, missing DynamoDB locking on S3 backend must still fire.
+        findings = self._scan("""
+            provider "aws" { region = "us-east-1" }
+            terraform {
+              backend "s3" {
+                bucket = "tf-state"
+                key    = "prod/terraform.tfstate"
+                region = "us-east-1"
+              }
+            }
+            resource "aws_s3_bucket" "state" {
+              bucket = "tf-state"
+              tags   = { owner = "ops", environment = "prod" }
+            }
+        """)
+        dynamo = [f for f in findings if "dynamodb" in f.message.lower()]
+        self.assertTrue(dynamo, "Expected DynamoDB locking finding for AWS repo with S3 backend")
+
+
 if __name__ == "__main__":
     unittest.main()
