@@ -1406,6 +1406,7 @@ class RunPipeline:
             sandbox=_receipt_sandbox,
             approval=_receipt_approval,
             is_native=(effective_executor == "native"),
+            is_opencode=(effective_executor == "opencode"),
             exec_result_summary=_clean_summary,
             findings=_extracted_findings if _extracted_findings else None,
             is_review_task=_is_review_task or _is_readonly_review_task,

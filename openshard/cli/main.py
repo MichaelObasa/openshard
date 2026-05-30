@@ -2591,6 +2591,34 @@ def packs_prompt(pack_id: str):
 
 
 @cli.group()
+def adapters() -> None:
+    """External adapter utilities."""
+
+
+@adapters.command("doctor")
+def adapters_doctor() -> None:
+    """Check external adapter availability and show setup guidance."""
+    from openshard.execution.opencode_adapter import detect_opencode
+
+    click.echo("\nOpenShard Adapter Doctor\n")
+    click.echo("OpenCode")
+    avail = detect_opencode()
+    if avail.available:
+        click.echo("  Status:  detected")
+        click.echo(f"  Path:    {avail.path}")
+    else:
+        click.echo("  Status:  not installed")
+        click.echo(f"  Reason:  {avail.reason}")
+        click.echo("  Install options:")
+        for opt in avail.install_guidance:
+            click.echo(f"    {opt}")
+        click.echo("  After installing, verify with:")
+        click.echo("    opencode --version")
+        click.echo("    openshard adapters doctor")
+    click.echo("")
+
+
+@cli.group()
 def session() -> None:
     """Local session utilities."""
 

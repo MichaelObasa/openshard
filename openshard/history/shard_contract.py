@@ -532,7 +532,13 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     task = entry.get("task") or ""
 
     is_native = entry.get("workflow") == "native" or entry.get("executor") == "native"
-    agent = "OpenShard Native" if is_native else "OpenShard"
+    is_opencode = entry.get("workflow") == "opencode" or entry.get("executor") == "opencode"
+    if is_native:
+        agent = "OpenShard Native"
+    elif is_opencode:
+        agent = "OpenCode"
+    else:
+        agent = "OpenShard"
 
     profile = entry.get("execution_profile")
     strategy = _PROFILE_TO_STRATEGY.get(profile) if profile else None

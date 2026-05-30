@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-import os
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 from openshard.config.settings import load_config
@@ -18,23 +15,18 @@ _OPENCODE_MODEL_PREFIX = "openrouter/"
 
 
 def _resolve_opencode_binary() -> str:
-    """Return the path to the opencode executable, or raise RuntimeError."""
-    found = shutil.which("opencode")
-    if found:
-        return found
+    """Return the path to the opencode executable, or raise RuntimeError with install guidance."""
+    from openshard.execution.opencode_adapter import detect_opencode, get_opencode_install_guidance
 
-    if sys.platform == "win32":
-        appdata = os.environ.get("APPDATA", "")
-        if appdata:
-            for name in ("opencode.cmd", "opencode.ps1", "opencode"):
-                candidate = Path(appdata) / "npm" / name
-                if candidate.is_file():
-                    return str(candidate)
+    avail = detect_opencode()
+    if avail.available and avail.path:
+        return avail.path
 
-    raise RuntimeError(
-        "opencode binary not found. "
-        "Install OpenCode and ensure it is on your PATH."
-    )
+    guidance = get_opencode_install_guidance()
+    lines = ["opencode binary not found. Install options:"]
+    lines.extend(f"  {g}" for g in guidance)
+    lines.append("After installing: openshard adapters doctor")
+    raise RuntimeError("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
