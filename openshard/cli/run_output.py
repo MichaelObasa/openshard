@@ -661,6 +661,26 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
         )
         has_content = True
 
+    osn_obs = getattr(native_meta, "osn_observation", None)
+    if osn_obs is not None and getattr(osn_obs, "enabled", False):
+        _stack = getattr(osn_obs, "stack_signals", []) or []
+        _candidates = getattr(osn_obs, "candidate_files", []) or []
+        _tests = getattr(osn_obs, "test_files", []) or []
+        _checks = getattr(osn_obs, "suggested_checks", []) or []
+        _stack_str = ", ".join(_stack) if _stack else "unknown"
+        _checks_str = ", ".join(_checks[:2]) if _checks else "none"
+        lines.append("  OSN OBSERVATION")
+        lines.append(f"    Stack        {_stack_str}")
+        lines.append(f"    Candidates   {len(_candidates)} files")
+        lines.append(f"    Tests        {len(_tests)} files")
+        lines.append(f"    Checks       {_checks_str}")
+        lines.append("    Status       completed")
+        if detail == "full" and _candidates:
+            _MAX_FILES_FULL = 5
+            for _cf in _candidates[:_MAX_FILES_FULL]:
+                lines.append(f"    - {_cf}")
+        has_content = True
+
     osn_loop_summary = getattr(native_meta, "osn_loop_summary", None)
     if osn_loop_summary is not None and getattr(osn_loop_summary, "enabled", False):
         _attempted = getattr(osn_loop_summary, "attempted_steps", None)

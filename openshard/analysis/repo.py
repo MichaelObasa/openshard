@@ -55,7 +55,7 @@ _RISKY_KEYWORDS: tuple[str, ...] = (
 _SKIP_DIRS: frozenset[str] = frozenset({
     ".git", "node_modules", "__pycache__", ".venv", "venv",
     ".mypy_cache", ".pytest_cache", ".tox", "dist", "build",
-    ".next", ".nuxt", ".openshard",
+    ".next", ".nuxt", ".openshard", ".codegraph",
 })
 
 
