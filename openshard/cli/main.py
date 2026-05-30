@@ -701,6 +701,64 @@ def skills_stats():
         click.echo(f"  {label:<{col}}  {n:>5}  {avg_cost:>9}  {avg_dur:>8}  {pass_rate:>9}  {retry:>6}")
 
 
+@cli.group(invoke_without_command=True)
+@click.pass_context
+def advisory(ctx: click.Context):
+    """Executor advisory ranking commands (does not change routing defaults)."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@advisory.command("rank")
+@click.option("--task", required=True, help="Task description to rank executors for.")
+@click.option(
+    "--risk",
+    type=click.Choice(["low", "medium", "high"], case_sensitive=False),
+    default="low",
+    show_default=True,
+    help="Risk level hint.",
+)
+@click.option(
+    "--category",
+    default="standard",
+    show_default=True,
+    help="Task category (security, complex, boilerplate, visual, standard).",
+)
+@click.option(
+    "--opencode-preference",
+    "opencode_preference",
+    is_flag=True,
+    default=False,
+    help="Signal that OpenCode is preferred when available.",
+)
+def advisory_rank(
+    task: str,
+    risk: str,
+    category: str,
+    opencode_preference: bool,
+) -> None:
+    """Rank executor paths for a task. Advisory only — does not change execution defaults."""
+    from openshard.execution.opencode_adapter import detect_opencode
+    from openshard.routing.engine import is_readonly_task
+    from openshard.routing.executor_advisory import rank_executors, render_executor_advisory
+
+    availability = detect_opencode()
+    read_only = is_readonly_task(task)
+
+    result = rank_executors(
+        task,
+        category=category,
+        risk_level=risk,
+        read_only=read_only,
+        opencode_available=availability.available,
+        opencode_preference=opencode_preference,
+        risky_paths=[],
+    )
+
+    for line in render_executor_advisory(result):
+        click.echo(line)
+
+
 @cli.command()
 def report():
     """Display a summary report of recent executions."""
