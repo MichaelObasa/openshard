@@ -2226,6 +2226,24 @@ class RunPipeline:
                     _extra_metadata["osn_verification_contract"] = asdict(
                         _native_meta.osn_verification_contract
                     )
+                # Build and persist OSN retry diagnosis
+                if _native_meta.osn_loop_summary is not None:
+                    from openshard.native.retry_diagnosis import (
+                        build_osn_retry_diagnosis as _build_rd,
+                    )
+                    _native_meta.osn_retry_diagnosis = _build_rd(
+                        osn_loop_summary=_native_meta.osn_loop_summary,
+                        osn_verification_contract=_native_meta.osn_verification_contract,
+                        approval_required=bool(
+                            _native_meta.osn_loop_summary.approval_required
+                        ),
+                        approval_granted=bool(
+                            _native_meta.osn_loop_summary.approval_granted
+                        ),
+                    )
+                    _extra_metadata["osn_retry_diagnosis"] = asdict(
+                        _native_meta.osn_retry_diagnosis
+                    )
         if _findings_extra:
             if _extra_metadata is None:
                 _extra_metadata = {}
