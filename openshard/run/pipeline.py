@@ -2207,6 +2207,25 @@ class RunPipeline:
                     if _native_meta.osn_loop_summary is not None
                     else None
                 )
+                # Persist osn_observation (was previously in-memory only)
+                _extra_metadata["osn_observation"] = (
+                    asdict(_native_meta.osn_observation)
+                    if _native_meta.osn_observation is not None
+                    else None
+                )
+                # Build and persist OSN verification contract
+                if _native_meta.osn_loop_summary is not None:
+                    from openshard.native.verification_contract import (
+                        build_osn_verification_contract as _build_vc,
+                    )
+                    _native_meta.osn_verification_contract = _build_vc(
+                        osn_observation=_native_meta.osn_observation,
+                        osn_loop_summary=_native_meta.osn_loop_summary,
+                        is_write_task=not _readonly_task,
+                    )
+                    _extra_metadata["osn_verification_contract"] = asdict(
+                        _native_meta.osn_verification_contract
+                    )
         if _findings_extra:
             if _extra_metadata is None:
                 _extra_metadata = {}

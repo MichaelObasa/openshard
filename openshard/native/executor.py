@@ -86,6 +86,7 @@ from openshard.native.context import (
     OSNObservationPacket,
     render_osn_observation_context,
 )
+from openshard.native.verification_contract import OSNVerificationContract
 from openshard.native.repo_context import (
     NativeRepoContextSummary,
     build_repo_context_summary,
@@ -155,6 +156,7 @@ class NativeRunMeta:
     tier_dispatch_receipt: NativeTierDispatchReceipt | None = None
     osn_loop_summary: NativeOSNLoopSummary | None = None
     osn_observation: OSNObservationPacket | None = None
+    osn_verification_contract: OSNVerificationContract | None = None
     sandbox: NativeSandboxMeta | None = None
     failure_memory_routing_advisory: NativeFailureMemoryRoutingAdvisory | None = None
     plan_ledger: NativePlanLedger | None = None
