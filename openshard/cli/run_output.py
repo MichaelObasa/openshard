@@ -770,6 +770,14 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
                     lines.append(f"    - {_step_desc}: {_rs_status}{_blocked_part}")
         has_content = True
 
+    osn_retry_diag = getattr(native_meta, "osn_retry_diagnosis", None)
+    if osn_retry_diag is not None:
+        from openshard.native.retry_diagnosis import render_osn_retry_receipt
+        _retry_lines = render_osn_retry_receipt(osn_retry_diag)
+        if _retry_lines:
+            lines.extend(_retry_lines)
+            has_content = True
+
     cp = getattr(native_meta, "context_packet", None)
     if cp is not None:
         _cp_sources = len(getattr(cp, "sources", []) or [])
@@ -1481,6 +1489,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "osn_loop_summary": entry.get("osn_loop_summary"),
         "osn_observation": entry.get("osn_observation"),
         "osn_verification_contract": entry.get("osn_verification_contract"),
+        "osn_retry_diagnosis": entry.get("osn_retry_diagnosis"),
         "deepagents_adapter": entry.get("deepagents_adapter"),
         "validation_contract": entry.get("validation_contract"),
         "verification_contract_result": entry.get("verification_contract_result"),

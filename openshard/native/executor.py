@@ -87,6 +87,7 @@ from openshard.native.context import (
     render_osn_observation_context,
 )
 from openshard.native.verification_contract import OSNVerificationContract
+from openshard.native.retry_diagnosis import OSNRetryDiagnosis
 from openshard.native.repo_context import (
     NativeRepoContextSummary,
     build_repo_context_summary,
@@ -157,6 +158,7 @@ class NativeRunMeta:
     osn_loop_summary: NativeOSNLoopSummary | None = None
     osn_observation: OSNObservationPacket | None = None
     osn_verification_contract: OSNVerificationContract | None = None
+    osn_retry_diagnosis: OSNRetryDiagnosis | None = None
     sandbox: NativeSandboxMeta | None = None
     failure_memory_routing_advisory: NativeFailureMemoryRoutingAdvisory | None = None
     plan_ledger: NativePlanLedger | None = None
