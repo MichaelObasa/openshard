@@ -155,11 +155,25 @@ openshard last --more
   <img src="demos/openshard_last_--more.gif" alt="OpenShard Last --more" width="800"/>
 </p>
 
+The `--more` view includes a PROOF SUMMARY block when OSN proof metadata is present, showing observation, progress, verification, loop, retry, and PR comment status.
+
+Optional local follow-up commands after a run:
+
+```bash
+openshard reflect last                        # advisory reflection on the run (local, no model calls)
+openshard pr comment                          # generate a GitHub-ready PR comment from the run
+openshard pr comment --output pr-comment.md  # write the PR comment to a file
+```
+
 Leave feedback:
 
 ```bash
-openshard feedback --outcome accepted --note "Useful review"
+openshard feedback --outcome accepted --reason "Useful review"
 ```
+
+See the demo scripts for a recorded walkthrough:
+- [docs/demo-script-60s.md](docs/demo-script-60s.md)
+- [docs/demo-script-3min.md](docs/demo-script-3min.md)
 
 ---
 
@@ -212,6 +226,16 @@ OpenShard can also record feedback and infer session signals around a run.
 openshard last --more    # expanded receipt for the latest run
 openshard last --full    # full stored details
 ```
+
+Every Shard receipt can power two local follow-up commands:
+
+```bash
+openshard reflect last                        # local advisory reflection on the run
+openshard pr comment                          # generate a GitHub-ready PR comment
+openshard pr comment --output pr-comment.md  # write the PR comment to a file instead
+```
+
+Both commands are local and deterministic. They do not make additional model calls.
 
 Raw developer content is not stored by default.
 
@@ -295,6 +319,13 @@ openshard last                                     # Show the latest run summary
 openshard last --more                              # Show the expanded Shard receipt
 openshard last --full                              # Show full stored/debug details
 ```
+Reflect and export:
+
+```bash
+openshard reflect last                             # Advisory reflection on the last run (local, no model calls)
+openshard pr comment                               # Generate a GitHub-ready PR comment from the last run
+openshard pr comment --output pr-comment.md        # Write the PR comment to a file
+```
 Record feedback:
 
 ```bash
@@ -348,6 +379,8 @@ Useful TUI commands:
 /clear                                             # Clear the output panel
 /quit                                              # Exit the TUI
 ```
+After a run completes, the TUI shows command hints for `openshard reflect last` and `openshard pr comment`.
+
 ---
 
 ## What works today
@@ -373,6 +406,10 @@ Current features include:
 - Local eval harness
 - Eval comparison by pass rate and cost-per-pass
 - Cost comparison in `/last more`
+- OSN proof pipeline with PROOF SUMMARY in `openshard last --more` (Observation, Progress, Verification, Loop, Retry)
+- `openshard reflect last` for local advisory run reflection (deterministic, no model calls)
+- `openshard pr comment` for local GitHub PR comment generation
+- TUI post-run command hints for reflect and pr comment
 - Production-shaped Terraform demo
 - 5,500+ passing tests and green CI
 
@@ -392,6 +429,18 @@ Not built yet:
 - Feedback advisory does not automatically change routing yet
 - External harness adapters are experimental and not guaranteed
 - Not a full Claude Code, Codex, or Cursor replacement
+
+---
+
+## Local data and privacy
+
+All run receipts, history, and proof metadata are stored locally in `~/.openshard/`.
+
+No run data, file contents, or task metadata is sent to OpenShard servers. There are none.
+
+Model calls go directly to the provider you configure (Anthropic, OpenRouter, etc.) under your own API key.
+
+`openshard pr comment` generates markdown locally and outputs to stdout or a local file. Nothing is posted to GitHub automatically.
 
 ---
 
