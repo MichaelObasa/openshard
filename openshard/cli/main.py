@@ -1338,6 +1338,39 @@ def reflect_last() -> None:
         click.echo(line)
 
 
+@cli.group("pr", invoke_without_command=True)
+@click.pass_context
+def pr_group(ctx: click.Context) -> None:
+    """PR comment and local export utilities."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@pr_group.command("comment")
+@click.option("--output", default=None, help="Write markdown to this path instead of stdout.")
+def pr_comment(output: str | None) -> None:
+    """Generate a GitHub-ready PR comment from the latest OpenShard run."""
+    from openshard.history.shard_contract import build_shard_receipt
+    from openshard.github.pr_comment import build_pr_comment_summary, render_pr_comment
+
+    log_path = Path.cwd() / _LOG_PATH
+    entries = _load_run_entries(log_path)
+    if not entries:
+        click.echo("No run history found. Run an OpenShard task first.")
+        return
+    entry = entries[-1]
+    receipt = build_shard_receipt(entry, index=len(entries) - 1)
+    summary = build_pr_comment_summary(entry, receipt)
+    markdown = render_pr_comment(summary)
+    if output:
+        output_path = Path(output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(markdown, encoding="utf-8")
+        click.echo(f"PR comment written to {output}")
+    else:
+        click.echo(markdown)
+
+
 @cli.command("apply-last")
 @click.option("--dry-run", is_flag=True, default=False, help="Show what would be applied without copying files.")
 @click.option("--file", "include_files", multiple=True, help="Only apply this relative file path. Can be used multiple times.")
