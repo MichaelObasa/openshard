@@ -2681,3 +2681,74 @@ class TestPolicyDecisionsShardIntegration(unittest.TestCase):
         )
         out = render_compact_shard_receipt(receipt)
         self.assertNotIn("POLICY DECISIONS", out)
+
+
+class TestAdapterMetadataFields(unittest.TestCase):
+    """Adapter metadata fields in ShardReceipt — backward compatibility and rendering."""
+
+    def _opencode_entry(self) -> dict:
+        return {
+            "adapter": "opencode",
+            "adapter_available": True,
+            "adapter_command": ["opencode", "run", "--model", "openrouter/claude-sonnet-4-6", "fix tests"],
+            "adapter_exit_code": 0,
+            "adapter_stdout_summary": "Task completed.",
+            "adapter_stderr_summary": None,
+            "adapter_duration_ms": 1240,
+            "task": "fix tests",
+            "timestamp": "2026-05-01T10:00:00Z",
+        }
+
+    def test_build_shard_receipt_with_adapter_fields(self):
+        receipt = build_shard_receipt(self._opencode_entry())
+        self.assertEqual(receipt.adapter, "opencode")
+        self.assertTrue(receipt.adapter_available)
+        self.assertEqual(receipt.adapter_exit_code, 0)
+        self.assertEqual(receipt.adapter_duration_ms, 1240)
+        self.assertEqual(receipt.adapter_stdout_summary, "Task completed.")
+        self.assertIsNone(receipt.adapter_stderr_summary)
+        self.assertEqual(receipt.adapter_command, ["opencode", "run", "--model", "openrouter/claude-sonnet-4-6", "fix tests"])
+
+    def test_build_shard_receipt_adapter_fields_default_safely(self):
+        receipt = build_shard_receipt({"task": "fix tests", "timestamp": "2026-05-01T10:00:00Z"})
+        self.assertIsNone(receipt.adapter)
+        self.assertIsNone(receipt.adapter_available)
+        self.assertEqual(receipt.adapter_command, [])
+        self.assertIsNone(receipt.adapter_exit_code)
+        self.assertIsNone(receipt.adapter_stdout_summary)
+        self.assertIsNone(receipt.adapter_stderr_summary)
+        self.assertIsNone(receipt.adapter_duration_ms)
+
+    def test_full_receipt_adapter_section_rows(self):
+        receipt = build_shard_receipt(self._opencode_entry())
+        out = render_full_shard_receipt(receipt)
+        self.assertIn("ADAPTER", out)
+        self.assertIn("opencode", out)
+        self.assertIn("1240 ms", out)
+        self.assertIn("Task completed.", out)
+
+    def test_full_receipt_no_adapter_section_without_adapter(self):
+        receipt = build_shard_receipt({"task": "fix tests", "timestamp": "2026-05-01T10:00:00Z"})
+        out = render_full_shard_receipt(receipt)
+        self.assertNotIn("ADAPTER", out)
+
+    def test_command_preview_capped_three_tokens(self):
+        entry = self._opencode_entry()
+        entry["adapter_command"] = ["opencode", "run", "--model", "openrouter/x", "a very long task description " * 10]
+        receipt = build_shard_receipt(entry)
+        out = render_full_shard_receipt(receipt)
+        # Should show first 3 tokens + ellipsis
+        self.assertIn("opencode run --model …", out)
+        # Should not dump the full long task into the receipt
+        self.assertNotIn("a very long task description " * 5, out)
+
+    def test_adapter_command_invalid_type_defaults_to_empty(self):
+        entry = self._opencode_entry()
+        entry["adapter_command"] = "opencode run --model x fix tests"
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.adapter_command, [])
+
+    def test_compact_receipt_does_not_include_adapter(self):
+        receipt = build_shard_receipt(self._opencode_entry())
+        out = render_compact_shard_receipt(receipt)
+        self.assertNotIn("ADAPTER", out)

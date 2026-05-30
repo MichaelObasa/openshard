@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+import time
 from pathlib import Path
 
 from openshard.config.settings import load_config
@@ -69,10 +70,12 @@ class OpenCodeExecutor:
         run_in = workspace if workspace is not None else Path.cwd()
 
         binary = _resolve_opencode_binary()
+        cmd = [binary, "run", "--model", oc_model, task]
         before = _snapshot(run_in)
 
+        _t0 = time.monotonic()
         proc = subprocess.run(
-            [binary, "run", "--model", oc_model, task],
+            cmd,
             cwd=run_in,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -80,6 +83,7 @@ class OpenCodeExecutor:
             encoding="utf-8",
             errors="replace",
         )
+        _duration_ms = int((time.monotonic() - _t0) * 1000)
 
         raw_output = proc.stdout or ""
 
@@ -99,6 +103,15 @@ class OpenCodeExecutor:
             files=files,
             notes=[],
             usage=None,
+            adapter_meta={
+                "adapter": "opencode",
+                "adapter_available": True,
+                "adapter_command": cmd,
+                "adapter_exit_code": 0,
+                "adapter_stdout_summary": summary,
+                "adapter_stderr_summary": None,
+                "adapter_duration_ms": _duration_ms,
+            },
         )
 
     # ------------------------------------------------------------------

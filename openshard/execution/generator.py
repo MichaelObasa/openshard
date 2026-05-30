@@ -132,6 +132,7 @@ class ExecutionResult:
     files: list[ChangedFile]
     notes: list[str]
     usage: UsageStats | None = None
+    adapter_meta: dict | None = None
 
 
 # ---------------------------------------------------------------------------
