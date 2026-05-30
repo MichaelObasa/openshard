@@ -681,6 +681,30 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
                 lines.append(f"    - {_cf}")
         has_content = True
 
+    osn_pm = getattr(native_meta, "osn_progress_memory", None)
+    if osn_pm is not None and getattr(osn_pm, "enabled", False):
+        _pm_conf = getattr(osn_pm, "confidence", "unknown") or "unknown"
+        _pm_summary = getattr(osn_pm, "summary", "") or ""
+        _pm_files = getattr(osn_pm, "relevant_files", []) or []
+        _pm_unresolved = getattr(osn_pm, "unresolved_items", []) or []
+        _pm_next = getattr(osn_pm, "next_safe_step", "") or ""
+        lines.append("  OSN PROGRESS")
+        lines.append(f"    Confidence   {_pm_conf}")
+        if _pm_summary:
+            lines.append(f"    Summary      {_pm_summary}")
+        lines.append(f"    Files        {len(_pm_files)} relevant")
+        if _pm_unresolved:
+            lines.append(f"    Open         {len(_pm_unresolved)} unresolved")
+        if _pm_next:
+            lines.append(f"    Next         {_pm_next}")
+        if detail == "full":
+            _PM_MAX_FILES_FULL = 5
+            for _pf in _pm_files[:_PM_MAX_FILES_FULL]:
+                lines.append(f"    - {_pf}")
+            for _ui in _pm_unresolved[:5]:
+                lines.append(f"    open: {_ui}")
+        has_content = True
+
     osn_vc = getattr(native_meta, "osn_verification_contract", None)
     if osn_vc is not None and getattr(osn_vc, "enabled", False):
         _vc_status = getattr(osn_vc, "status", "not_run") or "not_run"
@@ -1490,6 +1514,7 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "osn_observation": entry.get("osn_observation"),
         "osn_verification_contract": entry.get("osn_verification_contract"),
         "osn_retry_diagnosis": entry.get("osn_retry_diagnosis"),
+        "osn_progress_memory": entry.get("osn_progress_memory"),
         "deepagents_adapter": entry.get("deepagents_adapter"),
         "validation_contract": entry.get("validation_contract"),
         "verification_contract_result": entry.get("verification_contract_result"),

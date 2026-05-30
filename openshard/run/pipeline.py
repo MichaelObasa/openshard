@@ -2244,6 +2244,19 @@ class RunPipeline:
                     _extra_metadata["osn_retry_diagnosis"] = asdict(
                         _native_meta.osn_retry_diagnosis
                     )
+                # Build and persist OSN progress memory from finalized signals
+                from openshard.native.progress_memory import (
+                    build_osn_progress_memory as _build_pm,
+                )
+                _native_meta.osn_progress_memory = _build_pm(
+                    osn_observation=_native_meta.osn_observation,
+                    osn_loop_summary=_native_meta.osn_loop_summary,
+                    osn_verification_contract=_native_meta.osn_verification_contract,
+                    osn_retry_diagnosis=_native_meta.osn_retry_diagnosis,
+                )
+                _extra_metadata["osn_progress_memory"] = asdict(
+                    _native_meta.osn_progress_memory
+                )
         if _findings_extra:
             if _extra_metadata is None:
                 _extra_metadata = {}
