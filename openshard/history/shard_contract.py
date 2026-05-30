@@ -454,6 +454,14 @@ class ShardReceipt:
     evidence_capsules: list[EvidenceCapsule] = field(default_factory=list)
     # Policy decisions — structured gate/policy outcomes; empty until populated branches
     policy_decisions: list[dict] = field(default_factory=list)
+    # Adapter execution metadata — optional; only set for explicit external adapter runs
+    adapter: str | None = None
+    adapter_available: bool | None = None
+    adapter_command: list[str] = field(default_factory=list)
+    adapter_exit_code: int | None = None
+    adapter_stdout_summary: str | None = None
+    adapter_stderr_summary: str | None = None
+    adapter_duration_ms: int | None = None
 
 
 def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
@@ -532,7 +540,11 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     task = entry.get("task") or ""
 
     is_native = entry.get("workflow") == "native" or entry.get("executor") == "native"
-    is_opencode = entry.get("workflow") == "opencode" or entry.get("executor") == "opencode"
+    is_opencode = (
+        entry.get("workflow") == "opencode"
+        or entry.get("executor") == "opencode"
+        or entry.get("adapter") == "opencode"
+    )
     if is_native:
         agent = "OpenShard Native"
     elif is_opencode:
@@ -887,6 +899,13 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         error_message=entry.get("error_message") or None,
         evidence_capsules=_evidence_capsules,
         policy_decisions=_policy_decisions,
+        adapter=entry.get("adapter") or None,
+        adapter_available=entry.get("adapter_available") if isinstance(entry.get("adapter_available"), bool) else None,
+        adapter_command=entry.get("adapter_command") if isinstance(entry.get("adapter_command"), list) else [],
+        adapter_exit_code=entry.get("adapter_exit_code") if isinstance(entry.get("adapter_exit_code"), int) else None,
+        adapter_stdout_summary=entry.get("adapter_stdout_summary") or None,
+        adapter_stderr_summary=entry.get("adapter_stderr_summary") or None,
+        adapter_duration_ms=entry.get("adapter_duration_ms") if isinstance(entry.get("adapter_duration_ms"), int) else None,
     )
 
 
@@ -1173,6 +1192,27 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
     lines.append(_row("Duration", dur))
     lines.append(_row("Status", receipt.status))
     lines.append("")
+
+    if receipt.adapter:
+        lines.append(f"{_INDENT}ADAPTER")
+        lines.append(_row("Name", receipt.adapter))
+        if receipt.adapter_available is not None:
+            lines.append(_row("Available", "yes" if receipt.adapter_available else "no"))
+        if receipt.adapter_exit_code is not None:
+            lines.append(_row("Exit code", str(receipt.adapter_exit_code)))
+        if receipt.adapter_duration_ms is not None:
+            lines.append(_row("Duration", f"{receipt.adapter_duration_ms} ms"))
+        if receipt.adapter_command:
+            _cmd_tokens = receipt.adapter_command[:3]
+            _cmd_preview = " ".join(_cmd_tokens)
+            if len(receipt.adapter_command) > 3:
+                _cmd_preview += " …"
+            lines.append(_row("Command", _cmd_preview[:120]))
+        if receipt.adapter_stdout_summary:
+            lines.append(_row("Stdout", receipt.adapter_stdout_summary[:200]))
+        if receipt.adapter_stderr_summary:
+            lines.append(_row("Stderr", receipt.adapter_stderr_summary[:200]))
+        lines.append("")
 
     if receipt.error_class:
         lines.append(f"{_INDENT}ERROR")

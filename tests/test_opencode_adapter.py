@@ -270,3 +270,195 @@ class TestShardReceiptLabel(unittest.TestCase):
         }
         receipt = build_shard_receipt(entry)
         self.assertEqual(receipt.agent, "OpenShard")
+
+    def test_adapter_field_also_triggers_opencode_label(self):
+        from openshard.history.shard_contract import build_shard_receipt
+
+        entry = {
+            "adapter": "opencode",
+            "task": "fix auth",
+            "timestamp": "2026-01-01T00:00:00",
+        }
+        receipt = build_shard_receipt(entry)
+        self.assertEqual(receipt.agent, "OpenCode")
+
+
+class TestAdapterMetaCapture(unittest.TestCase):
+    """Tests for adapter_meta populated by OpenCodeExecutor.generate()."""
+
+    def _make_proc(self, returncode=0, stdout="Task complete.\nOpenCode done."):
+        mock = MagicMock()
+        mock.returncode = returncode
+        mock.stdout = stdout
+        return mock
+
+    def _make_snapshot(self):
+        return {}
+
+    def test_adapter_meta_populated_on_success(self):
+        from openshard.execution.opencode_executor import OpenCodeExecutor
+
+        with patch("openshard.execution.opencode_executor._resolve_opencode_binary", return_value="/usr/bin/opencode"):
+            with patch("openshard.execution.opencode_executor._snapshot", return_value=self._make_snapshot()):
+                with patch("openshard.execution.opencode_executor._classify_changes", return_value=[]):
+                    with patch("subprocess.run", return_value=self._make_proc()):
+                        with patch("openshard.execution.opencode_executor.load_config", return_value={
+                            "model_tiers": [{"name": "balanced", "model": "claude-sonnet-4-6"}]
+                        }):
+                            executor = OpenCodeExecutor()
+                            result = executor.generate("fix tests", workspace=Path("/repo"))
+
+        self.assertIsNotNone(result.adapter_meta)
+        meta = result.adapter_meta
+        self.assertEqual(meta["adapter"], "opencode")
+        self.assertTrue(meta["adapter_available"])
+        self.assertEqual(meta["adapter_exit_code"], 0)
+
+    def test_adapter_meta_has_duration_ms(self):
+        from openshard.execution.opencode_executor import OpenCodeExecutor
+
+        with patch("openshard.execution.opencode_executor._resolve_opencode_binary", return_value="/usr/bin/opencode"):
+            with patch("openshard.execution.opencode_executor._snapshot", return_value=self._make_snapshot()):
+                with patch("openshard.execution.opencode_executor._classify_changes", return_value=[]):
+                    with patch("subprocess.run", return_value=self._make_proc()):
+                        with patch("openshard.execution.opencode_executor.load_config", return_value={
+                            "model_tiers": [{"name": "balanced", "model": "claude-sonnet-4-6"}]
+                        }):
+                            executor = OpenCodeExecutor()
+                            result = executor.generate("fix tests", workspace=Path("/repo"))
+
+        self.assertIsInstance(result.adapter_meta["adapter_duration_ms"], int)
+
+    def test_adapter_command_is_list(self):
+        from openshard.execution.opencode_executor import OpenCodeExecutor
+
+        with patch("openshard.execution.opencode_executor._resolve_opencode_binary", return_value="/usr/bin/opencode"):
+            with patch("openshard.execution.opencode_executor._snapshot", return_value=self._make_snapshot()):
+                with patch("openshard.execution.opencode_executor._classify_changes", return_value=[]):
+                    with patch("subprocess.run", return_value=self._make_proc()):
+                        with patch("openshard.execution.opencode_executor.load_config", return_value={
+                            "model_tiers": [{"name": "balanced", "model": "claude-sonnet-4-6"}]
+                        }):
+                            executor = OpenCodeExecutor()
+                            result = executor.generate("fix tests", workspace=Path("/repo"))
+
+        self.assertIsInstance(result.adapter_meta["adapter_command"], list)
+
+    def test_stderr_summary_is_none(self):
+        from openshard.execution.opencode_executor import OpenCodeExecutor
+
+        with patch("openshard.execution.opencode_executor._resolve_opencode_binary", return_value="/usr/bin/opencode"):
+            with patch("openshard.execution.opencode_executor._snapshot", return_value=self._make_snapshot()):
+                with patch("openshard.execution.opencode_executor._classify_changes", return_value=[]):
+                    with patch("subprocess.run", return_value=self._make_proc()):
+                        with patch("openshard.execution.opencode_executor.load_config", return_value={
+                            "model_tiers": [{"name": "balanced", "model": "claude-sonnet-4-6"}]
+                        }):
+                            executor = OpenCodeExecutor()
+                            result = executor.generate("fix tests", workspace=Path("/repo"))
+
+        self.assertIsNone(result.adapter_meta["adapter_stderr_summary"])
+
+
+class TestAdapterShardReceipt(unittest.TestCase):
+    """Tests for adapter metadata fields in ShardReceipt and receipt rendering."""
+
+    def _opencode_entry(self) -> dict:
+        return {
+            "adapter": "opencode",
+            "adapter_available": True,
+            "adapter_command": ["opencode", "run", "--model", "openrouter/claude-sonnet-4-6", "fix tests"],
+            "adapter_exit_code": 0,
+            "adapter_stdout_summary": "OpenCode done.",
+            "adapter_stderr_summary": None,
+            "adapter_duration_ms": 1240,
+            "task": "fix tests",
+            "timestamp": "2026-01-01T00:00:00Z",
+        }
+
+    def test_old_receipt_without_adapter_renders_safely(self):
+        from openshard.history.shard_contract import build_shard_receipt, render_full_shard_receipt
+
+        entry = {"task": "fix tests", "timestamp": "2026-01-01T00:00:00Z"}
+        receipt = build_shard_receipt(entry)
+        rendered = render_full_shard_receipt(receipt)
+        self.assertNotIn("ADAPTER", rendered)
+
+    def test_shard_receipt_parses_adapter_fields(self):
+        from openshard.history.shard_contract import build_shard_receipt
+
+        receipt = build_shard_receipt(self._opencode_entry())
+        self.assertEqual(receipt.adapter, "opencode")
+        self.assertTrue(receipt.adapter_available)
+        self.assertEqual(receipt.adapter_exit_code, 0)
+        self.assertEqual(receipt.adapter_duration_ms, 1240)
+        self.assertEqual(receipt.adapter_stdout_summary, "OpenCode done.")
+        self.assertIsNone(receipt.adapter_stderr_summary)
+        self.assertIsInstance(receipt.adapter_command, list)
+
+    def test_full_receipt_renders_adapter_section_when_present(self):
+        from openshard.history.shard_contract import build_shard_receipt, render_full_shard_receipt
+
+        receipt = build_shard_receipt(self._opencode_entry())
+        rendered = render_full_shard_receipt(receipt)
+        self.assertIn("ADAPTER", rendered)
+        self.assertIn("opencode", rendered)
+
+    def test_full_receipt_omits_adapter_section_when_absent(self):
+        from openshard.history.shard_contract import build_shard_receipt, render_full_shard_receipt
+
+        entry = {"task": "fix tests", "timestamp": "2026-01-01T00:00:00Z"}
+        receipt = build_shard_receipt(entry)
+        rendered = render_full_shard_receipt(receipt)
+        self.assertNotIn("ADAPTER", rendered)
+
+    def test_stdout_summary_is_safe_length(self):
+        from openshard.history.shard_contract import build_shard_receipt
+
+        entry = self._opencode_entry()
+        entry["adapter_stdout_summary"] = "x" * 500
+        receipt = build_shard_receipt(entry)
+        self.assertLessEqual(len(receipt.adapter_stdout_summary), 1000)
+
+    def test_adapter_command_is_list_not_string(self):
+        from openshard.history.shard_contract import build_shard_receipt
+
+        receipt = build_shard_receipt(self._opencode_entry())
+        self.assertIsInstance(receipt.adapter_command, list)
+
+    def test_missing_availability_represented_safely(self):
+        from openshard.history.shard_contract import build_shard_receipt
+
+        entry = self._opencode_entry()
+        entry["adapter_available"] = False
+        receipt = build_shard_receipt(entry)
+        self.assertFalse(receipt.adapter_available)
+
+    def test_compact_receipt_does_not_include_adapter_section(self):
+        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+
+        receipt = build_shard_receipt(self._opencode_entry())
+        rendered = render_compact_shard_receipt(receipt)
+        self.assertNotIn("ADAPTER", rendered)
+
+    def test_compact_receipt_renders_without_crashing(self):
+        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+
+        receipt = build_shard_receipt(self._opencode_entry())
+        rendered = render_compact_shard_receipt(receipt)
+        self.assertIsInstance(rendered, str)
+        self.assertGreater(len(rendered), 0)
+
+    def test_command_display_in_receipt_is_truncated(self):
+        from openshard.history.shard_contract import build_shard_receipt, render_full_shard_receipt
+
+        entry = self._opencode_entry()
+        entry["adapter_command"] = ["opencode", "run", "--model", "openrouter/x", "a very long task " * 20]
+        receipt = build_shard_receipt(entry)
+        rendered = render_full_shard_receipt(receipt)
+        # Command row should not dump the full long task
+        self.assertIn("opencode run", rendered)
+        for line in rendered.splitlines():
+            if "Command" in line:
+                self.assertLessEqual(len(line), 200)
+                break

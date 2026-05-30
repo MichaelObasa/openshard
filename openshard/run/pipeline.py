@@ -2181,6 +2181,11 @@ class RunPipeline:
             if _extra_metadata is None:
                 _extra_metadata = {}
             _extra_metadata.update(_feedback_receipt)
+        # Capture adapter metadata for explicit OpenCode runs
+        if opencode_mode and exec_result is not None and exec_result.adapter_meta:
+            if _extra_metadata is None:
+                _extra_metadata = {}
+            _extra_metadata.update(exec_result.adapter_meta)
         # Finalise OSN loop summary before serialising to run history
         if effective_executor == "native" and hasattr(generator, "complete_osn_loop"):
             _vloop = getattr(generator.native_meta, "verification_loop", None)
