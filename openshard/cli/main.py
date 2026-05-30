@@ -1028,6 +1028,13 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
         click.echo("")
         click.echo(render_full_shard_receipt(_shard, detail=detail))
 
+    # Proof summary (--more only) - compact OSN proof presence check
+    if detail == "more":
+        from openshard.cli.run_output import _print_proof_summary
+        _proof_nm = _native_meta_from_entry(entry)
+        if _proof_nm is not None:
+            _print_proof_summary(_proof_nm)
+
     # Stages (--full only)
     if detail == "full" and stage_runs_data:
         click.echo("\nStages")

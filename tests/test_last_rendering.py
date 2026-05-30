@@ -5056,5 +5056,131 @@ class TestLastMoreProofRendering(unittest.TestCase):
                 self.assertNotIn("Required →", line)
 
 
+class TestProofSummaryRendering(unittest.TestCase):
+    """Tests for _render_proof_summary_lines and /last more proof summary output."""
+
+    def _osn_obs_entry(self) -> dict:
+        return {
+            "task": "test task",
+            "workflow": "native",
+            "executor": "native",
+            "osn_observation": {"enabled": True, "stack_signals": ["python"], "candidate_files": [], "test_files": [], "suggested_checks": []},
+        }
+
+    def _osn_full_entry(self) -> dict:
+        entry = self._osn_obs_entry()
+        entry["osn_progress_memory"] = {"enabled": True, "confidence": "high", "summary": "ok", "relevant_files": [], "unresolved_items": [], "next_safe_step": ""}
+        entry["osn_verification_contract"] = {"enabled": True, "status": "skipped", "expected_checks": [], "attempted_checks": [], "missing_checks": [], "manual_review_required": False, "skipped_reason": ""}
+        entry["osn_loop_summary"] = {"enabled": True, "attempted_steps": 3, "completed_steps": 3, "blocked_steps": 0, "failed_steps": 0, "steps_taken": 3, "tool_calls_attempted": None, "tool_calls_blocked": None, "verification_status": "", "verification_attempted": False, "verification_passed": None, "retry_used": False, "retry_count": 0, "stopped_reason": "done", "steps": []}
+        entry["osn_retry_diagnosis"] = {"enabled": True, "status": "not_needed", "retry_allowed": False, "retry_used": False, "retry_count": 0}
+        return entry
+
+    def _render_summary_lines(self, entry: dict) -> list[str]:
+        from openshard.cli.run_output import _native_meta_from_entry, _render_proof_summary_lines
+        nm = _native_meta_from_entry(entry)
+        assert nm is not None
+        return _render_proof_summary_lines(nm)
+
+    # Pure function tests
+
+    def test_proof_summary_present_when_all_osn_sections_enabled(self):
+        lines = self._render_summary_lines(self._osn_full_entry())
+        self.assertTrue(any("PROOF SUMMARY" in line for line in lines))
+        joined = "\n".join(lines)
+        self.assertIn("Observation", joined)
+        self.assertIn("Progress", joined)
+        self.assertIn("Verification", joined)
+        self.assertIn("Loop", joined)
+        self.assertIn("Retry", joined)
+
+    def test_proof_summary_observation_present(self):
+        lines = self._render_summary_lines(self._osn_obs_entry())
+        joined = "\n".join(lines)
+        self.assertIn("PROOF SUMMARY", joined)
+        self.assertIn("present", joined)
+
+    def test_proof_summary_verification_status_reflected(self):
+        entry = self._osn_full_entry()
+        entry["osn_verification_contract"]["status"] = "skipped"
+        lines = self._render_summary_lines(entry)
+        joined = "\n".join(lines)
+        self.assertIn("skipped", joined)
+
+    def test_proof_summary_retry_status_reflected(self):
+        entry = self._osn_full_entry()
+        entry["osn_retry_diagnosis"]["status"] = "not_needed"
+        lines = self._render_summary_lines(entry)
+        joined = "\n".join(lines)
+        self.assertIn("not_needed", joined)
+
+    def test_proof_summary_omitted_when_no_osn_data(self):
+        entry = {"task": "test task", "workflow": "native", "executor": "native"}
+        lines = self._render_summary_lines(entry)
+        self.assertEqual(lines, [])
+
+    def test_proof_summary_omitted_for_non_native_run(self):
+        from openshard.cli.run_output import _native_meta_from_entry
+        entry = {"task": "test task", "osn_observation": {"enabled": True}}
+        nm = _native_meta_from_entry(entry)
+        self.assertIsNone(nm)
+
+    def test_proof_summary_pr_comment_always_available(self):
+        lines = self._render_summary_lines(self._osn_obs_entry())
+        joined = "\n".join(lines)
+        self.assertIn("PR comment", joined)
+        self.assertIn("available", joined)
+
+    def test_proof_summary_no_raw_json(self):
+        lines = self._render_summary_lines(self._osn_full_entry())
+        for line in lines:
+            self.assertNotIn("{", line)
+            self.assertNotIn("}", line)
+
+    def test_proof_summary_no_em_dash(self):
+        lines = self._render_summary_lines(self._osn_full_entry())
+        for line in lines:
+            self.assertNotIn("—", line)
+
+    def test_proof_summary_loop_completed_label(self):
+        entry = self._osn_full_entry()
+        lines = self._render_summary_lines(entry)
+        joined = "\n".join(lines)
+        self.assertIn("completed", joined)
+
+    def test_proof_summary_loop_not_recorded_when_absent(self):
+        entry = self._osn_obs_entry()
+        lines = self._render_summary_lines(entry)
+        joined = "\n".join(lines)
+        self.assertIn("not recorded", joined)
+
+    def test_proof_summary_disabled_retry_alone_does_not_trigger_block(self):
+        entry = {"task": "test task", "workflow": "native", "executor": "native"}
+        entry["osn_retry_diagnosis"] = {"enabled": False, "status": "not_needed"}
+        lines = self._render_summary_lines(entry)
+        self.assertEqual(lines, [])
+
+    # Integration tests via _render_log_entry
+
+    def test_proof_summary_appears_in_more_output(self):
+        entry = self._osn_obs_entry()
+        out = _render(entry, "more")
+        self.assertIn("PROOF SUMMARY", out)
+
+    def test_proof_summary_absent_in_default_output(self):
+        entry = self._osn_obs_entry()
+        out = _render(entry, "default")
+        self.assertNotIn("PROOF SUMMARY", out)
+
+    def test_proof_summary_not_duplicated_in_more(self):
+        entry = self._osn_full_entry()
+        out = _render(entry, "more")
+        self.assertEqual(out.count("PROOF SUMMARY"), 1)
+
+    def test_proof_summary_absent_when_no_osn_data_in_more(self):
+        entry = {"task": "test task", "workflow": "native", "executor": "native"}
+        out = _render(entry, "more")
+        self.assertNotIn("PROOF SUMMARY", out)
+
+
 if __name__ == "__main__":
     unittest.main()

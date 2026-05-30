@@ -22,7 +22,12 @@ _COMMANDS_TEXT = (
     "  /ask <question>          Ask OpenShard a product question\n"
     "  /plan <task>             Generate a local execution plan\n"
     "\n"
-    "Plain text is sent to the execution engine as a task."
+    "Plain text is sent to the execution engine as a task.\n"
+    "\n"
+    "CLI commands (run in terminal):\n"
+    "  openshard reflect last\n"
+    "  openshard pr comment\n"
+    "  openshard pr comment --output pr-comment.md"
 )
 
 _OPENSHARD_TEXT = (
@@ -46,11 +51,16 @@ _RECEIPT_TEXT = (
 )
 
 _LAST_TEXT = (
-    "  /last           — show the most recent run summary\n"
-    "  /last more      — include check actions and evidence\n"
-    "  /last full      — show the complete raw run output\n"
-    "  /feedback       — record your outcome for the last run\n"
-    "                    (accepted / rejected / partial / abandoned / retried)"
+    "  /last           - show the most recent run summary\n"
+    "  /last more      - include check actions and evidence\n"
+    "  /last full      - show the complete raw run output\n"
+    "  /feedback       - record your outcome for the last run\n"
+    "                    (accepted / rejected / partial / abandoned / retried)\n"
+    "\n"
+    "CLI commands (run in terminal):\n"
+    "  openshard reflect last          - structured run reflection\n"
+    "  openshard pr comment            - generate a GitHub PR comment\n"
+    "  openshard pr comment --output pr-comment.md"
 )
 
 _PLAN_TEXT = (

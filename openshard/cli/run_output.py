@@ -1461,6 +1461,58 @@ def _print_native_demo_block(native_meta: Any, detail: str = "default", entry: "
         click.echo(line)
 
 
+def _meta_get(obj: Any, key: str, default: Any = None) -> Any:
+    """Get a field from either a dict or a namespace/dataclass object."""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _render_proof_summary_lines(native_meta: Any) -> list[str]:
+    """Return compact PROOF SUMMARY lines for detail=more. Pure, no I/O."""
+    osn_obs = getattr(native_meta, "osn_observation", None)
+    osn_pm = getattr(native_meta, "osn_progress_memory", None)
+    osn_vc = getattr(native_meta, "osn_verification_contract", None)
+    osn_loop = getattr(native_meta, "osn_loop_summary", None)
+    osn_retry = getattr(native_meta, "osn_retry_diagnosis", None)
+
+    obs_enabled = osn_obs is not None and bool(_meta_get(osn_obs, "enabled", False))
+    pm_enabled = osn_pm is not None and bool(_meta_get(osn_pm, "enabled", False))
+    vc_enabled = osn_vc is not None and bool(_meta_get(osn_vc, "enabled", False))
+    loop_enabled = osn_loop is not None and bool(_meta_get(osn_loop, "enabled", False))
+    retry_enabled = osn_retry is not None and bool(_meta_get(osn_retry, "enabled", False))
+
+    if not any([obs_enabled, pm_enabled, vc_enabled, loop_enabled, retry_enabled]):
+        return []
+
+    obs_val = "present" if obs_enabled else "not recorded"
+    pm_val = "present" if pm_enabled else "not recorded"
+    vc_val = (_meta_get(osn_vc, "status", "not_run") or "not_run") if vc_enabled else "not recorded"
+    loop_val = "completed" if loop_enabled else "not recorded"
+    retry_val = (_meta_get(osn_retry, "status", "not_needed") or "not_needed") if retry_enabled else "not needed"
+
+    col = 14
+    return [
+        "PROOF SUMMARY",
+        f"  {'Observation':<{col}}{obs_val}",
+        f"  {'Progress':<{col}}{pm_val}",
+        f"  {'Verification':<{col}}{vc_val}",
+        f"  {'Loop':<{col}}{loop_val}",
+        f"  {'Retry':<{col}}{retry_val}",
+        f"  {'PR comment':<{col}}available",
+    ]
+
+
+def _print_proof_summary(native_meta: Any) -> None:
+    """Print the PROOF SUMMARY block via click.echo."""
+    lines = _render_proof_summary_lines(native_meta)
+    if not lines:
+        return
+    click.echo("")
+    for line in lines:
+        click.echo(line)
+
+
 def _dict_to_ns(obj: Any) -> Any:
     """Recursively convert nested dicts to SimpleNamespace for attribute access."""
     if isinstance(obj, dict):
