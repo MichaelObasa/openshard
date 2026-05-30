@@ -49,7 +49,10 @@ _SLASH_MENU_TEXT = (
     "  /ask <question>          Ask a product question\n"
     "  /plan <task>             Generate a local execution plan\n"
     "  /clear                   Clear output\n"
-    "  /quit                    Exit"
+    "  /quit                    Exit\n"
+    "\n"
+    "  CLI: openshard reflect last\n"
+    "  CLI: openshard pr comment"
 )
 
 _GIT_STATE_LABELS = {
@@ -91,7 +94,12 @@ _HELP_TEXT = (
     "Composer keys:\n"
     "  Enter           Submit task\n"
     "  Ctrl+J          Insert newline\n"
-    "  Shift+Enter     Insert newline (if terminal supports it)"
+    "  Shift+Enter     Insert newline (if terminal supports it)\n"
+    "\n"
+    "CLI commands (run in terminal):\n"
+    "  openshard reflect last\n"
+    "  openshard pr comment\n"
+    "  openshard pr comment --output pr-comment.md"
 )
 
 

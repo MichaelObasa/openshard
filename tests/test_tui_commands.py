@@ -334,3 +334,61 @@ def test_regression_fix_the_auth_bug_is_run_task():
 def test_regression_ask_fast_path_still_wins_over_plan():
     result = parse_tui_input("what models do you have")
     assert result.cmd == TuiCommand.ASK
+
+
+# ── TUI help and CLI discoverability ──────────────────────────────────────────
+
+
+def test_help_text_mentions_reflect_last():
+    from openshard.tui.app import _HELP_TEXT
+    assert "openshard reflect last" in _HELP_TEXT
+
+
+def test_help_text_mentions_pr_comment():
+    from openshard.tui.app import _HELP_TEXT
+    assert "openshard pr comment" in _HELP_TEXT
+
+
+def test_slash_menu_mentions_reflect_last():
+    from openshard.tui.app import _SLASH_MENU_TEXT
+    assert "openshard reflect last" in _SLASH_MENU_TEXT
+
+
+def test_slash_menu_mentions_pr_comment():
+    from openshard.tui.app import _SLASH_MENU_TEXT
+    assert "openshard pr comment" in _SLASH_MENU_TEXT
+
+
+def test_help_text_no_em_dash():
+    from openshard.tui.app import _HELP_TEXT
+    assert "—" not in _HELP_TEXT
+
+
+def test_slash_menu_no_em_dash():
+    from openshard.tui.app import _SLASH_MENU_TEXT
+    assert "—" not in _SLASH_MENU_TEXT
+
+
+def test_ask_commands_text_mentions_reflect_last():
+    from openshard.tui.ask_mode import _COMMANDS_TEXT
+    assert "openshard reflect last" in _COMMANDS_TEXT
+
+
+def test_ask_commands_text_mentions_pr_comment():
+    from openshard.tui.ask_mode import _COMMANDS_TEXT
+    assert "openshard pr comment" in _COMMANDS_TEXT
+
+
+def test_last_text_mentions_reflect_last():
+    from openshard.tui.ask_mode import _LAST_TEXT
+    assert "openshard reflect last" in _LAST_TEXT
+
+
+def test_last_text_mentions_pr_comment():
+    from openshard.tui.ask_mode import _LAST_TEXT
+    assert "openshard pr comment" in _LAST_TEXT
+
+
+def test_last_text_no_em_dash():
+    from openshard.tui.ask_mode import _LAST_TEXT
+    assert "—" not in _LAST_TEXT
