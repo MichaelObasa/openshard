@@ -5754,11 +5754,11 @@ class TestGenerateOSNIntegration(unittest.TestCase):
         self.assertIn("osn_loop", executor.native_meta.native_loop_steps)
 
     def test_experimental_flag_terminated_reason_valid(self):
-        _valid = {"not_run", "complete", "max_steps", "consecutive_empty", "no_steps"}
+        from openshard.native.context import _VALID_OSN_STOP_REASONS
         executor, _ = self._make_executor(native_loop="experimental", with_repo=True)
         executor.generate("fix the bug")
         if executor.native_meta.osn_loop is not None:
-            self.assertIn(executor.native_meta.osn_loop.terminated_reason, _valid)
+            self.assertIn(executor.native_meta.osn_loop.terminated_reason, _VALID_OSN_STOP_REASONS)
 
     def test_experimental_flag_no_write_file_in_trace(self):
         executor, _ = self._make_executor(native_loop="experimental", with_repo=True)

@@ -707,6 +707,43 @@ def render_native_context_quality_advisory(
     return "\n".join(lines)
 
 
+_VALID_OSN_STOP_REASONS: frozenset[str] = frozenset({
+    "completed",
+    "max_steps",
+    "no_steps",
+    "blocked_tool",
+    "approval_required",
+    "verification_failed",
+    "tool_error",
+    "empty_response_limit",
+    "retry_limit",
+    "policy_denied",
+    "unknown",
+})
+
+_OSN_STOP_REASON_ALIASES: dict[str, str] = {
+    "complete": "completed",
+    "consecutive_empty": "empty_response_limit",
+    "max steps reached": "max_steps",
+}
+
+_MAX_STEP_EVENTS_RECORDED: int = 50
+_MAX_REPEATED_BLOCKED_TOOL: int = 3
+_MAX_RETRY_COUNT: int = 1
+
+
+def normalize_osn_stop_reason(raw: str | None) -> str:
+    """Map any raw or legacy stop reason string to the canonical allowed set.
+
+    Handles None, empty string, whitespace, and mixed-case legacy values safely.
+    """
+    if not raw or not raw.strip():
+        return "unknown"
+    normalized = raw.strip().lower()
+    normalized = _OSN_STOP_REASON_ALIASES.get(normalized, normalized)
+    return normalized if normalized in _VALID_OSN_STOP_REASONS else "unknown"
+
+
 @dataclass
 class OSNLoopStep:
     step_index: int = 0
@@ -768,12 +805,20 @@ class NativeOSNLoopStep:
     step_name: str = ""  # preflight|observe|gather_context|plan_update|generate_patch|budget_check|approval|safe_write|verify|retry_once|final_receipt
     status: str = "pending"  # pending|running|skipped|passed|failed|blocked
     tool_name: str = ""
+    target_label: str = ""  # capped at 40 chars — no absolute paths
     reason: str = ""
     result_summary: str = ""  # max 120 chars — no raw content ever
+    blocked_reason: str = ""
     context_injected: bool = False
     approval_required: bool = False
     verification_status: str = ""
     warnings: list[str] = field(default_factory=list)
+    raw_content_stored: bool = False
+
+    def __post_init__(self) -> None:
+        self.raw_content_stored = False  # enforced — never store raw content
+        if len(self.target_label) > 40:
+            self.target_label = self.target_label[:40]
 
 
 @dataclass
@@ -790,6 +835,19 @@ class NativeOSNLoopSummary:
     approval_granted: bool = False
     warnings: list[str] = field(default_factory=list)
     steps: list[NativeOSNLoopStep] = field(default_factory=list)
+    # explicit counters - added in osn-loop-hardening-v1
+    loop_id: str = ""
+    attempted_steps: int = 0
+    completed_steps: int = 0
+    failed_steps: int = 0
+    blocked_steps: int = 0
+    tool_calls_attempted: int = 0
+    tool_calls_completed: int = 0
+    tool_calls_blocked: int = 0
+    verification_attempted: bool = False
+    verification_passed: bool | None = None
+    retry_count: int = 0
+    final_status: str = ""
 
 
 def render_osn_loop_context(meta: OSNLoopMeta | None) -> str:

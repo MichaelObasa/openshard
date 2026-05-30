@@ -663,10 +663,70 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
 
     osn_loop_summary = getattr(native_meta, "osn_loop_summary", None)
     if osn_loop_summary is not None and getattr(osn_loop_summary, "enabled", False):
+        _attempted = getattr(osn_loop_summary, "attempted_steps", None)
+        _completed_s = getattr(osn_loop_summary, "completed_steps", None)
+        _blocked_s = getattr(osn_loop_summary, "blocked_steps", None)
+        _failed_s = getattr(osn_loop_summary, "failed_steps", None)
         _n = getattr(osn_loop_summary, "steps_taken", 0)
-        _vst = getattr(osn_loop_summary, "verification_status", "") or "no verification"
-        _mode = getattr(osn_loop_summary, "mode", "experimental")
-        lines.append(f"  OSN loop summary: {_mode}, {_n} steps, {_vst}")
+        # prefer explicit counters; fall back to steps_taken when not yet populated
+        if _attempted is not None:
+            _steps_str = f"{_attempted} attempted, {_completed_s} completed"
+            if _blocked_s:
+                _steps_str += f", {_blocked_s} blocked"
+            if _failed_s:
+                _steps_str += f", {_failed_s} failed"
+        else:
+            _steps_str = f"{_n} steps"
+        _ta = getattr(osn_loop_summary, "tool_calls_attempted", None)
+        _tb = getattr(osn_loop_summary, "tool_calls_blocked", None)
+        _tools_str = ""
+        if _ta:  # only show when at least one tool call was attempted
+            _tools_str = f"{_ta} attempted"
+            if _tb:
+                _tools_str += f", {_tb} blocked"
+        _vst = getattr(osn_loop_summary, "verification_status", "") or ""
+        _va = getattr(osn_loop_summary, "verification_attempted", False)
+        _vp = getattr(osn_loop_summary, "verification_passed", None)
+        if _vp is True:
+            _verify_str = "passed"
+        elif _vp is False:
+            _verify_str = "failed"
+        elif _va:
+            _verify_str = _vst or "attempted"
+        elif _vst:
+            _verify_str = _vst  # backward compat - old entries with only verification_status
+        else:
+            _verify_str = "not run"
+        _ru = getattr(osn_loop_summary, "retry_used", False)
+        _rc = getattr(osn_loop_summary, "retry_count", 0)
+        _retry_str = f"yes ({_rc})" if _ru else "no"
+        _stopped = getattr(osn_loop_summary, "stopped_reason", "") or "unknown"
+        lines.append("  OSN LOOP")
+        lines.append(f"    Steps    {_steps_str}")
+        if _tools_str:
+            lines.append(f"    Tools    {_tools_str}")
+        lines.append(f"    Verify   {_verify_str}")
+        lines.append(f"    Retry    {_retry_str}")
+        lines.append(f"    Stopped  {_stopped}")
+        # Recent steps - only in default/more to avoid duplicating the full-detail block
+        if detail != "full":
+            _summary_steps = getattr(osn_loop_summary, "steps", []) or []
+            _MAX_RECENT = 5
+            if _summary_steps:
+                lines.append("    Recent steps")
+                for _rs in _summary_steps[:_MAX_RECENT]:
+                    _rs_name = _loop_event_value(_rs, "step_name", "?")
+                    _rs_status = _loop_event_value(_rs, "status", "?")
+                    _rs_tool = _loop_event_value(_rs, "tool_name", "")
+                    _rs_label = _loop_event_value(_rs, "target_label", "")
+                    _rs_blocked = _loop_event_value(_rs, "blocked_reason", "")
+                    if _rs_tool:
+                        _label_part = f" {_rs_label}" if _rs_label else ""
+                        _step_desc = f"{_rs_tool}{_label_part}"
+                    else:
+                        _step_desc = _rs_name
+                    _blocked_part = f" - {_rs_blocked}" if _rs_blocked else ""
+                    lines.append(f"    - {_step_desc}: {_rs_status}{_blocked_part}")
         has_content = True
 
     cp = getattr(native_meta, "context_packet", None)

@@ -237,7 +237,7 @@ class TestMaxStepsEnforcement(unittest.TestCase):
         rec.record_step("overflow", "passed")  # triggers blocked marker
         rec.complete(stopped_reason="completed")
         self.assertFalse(rec.summary.completed)
-        self.assertEqual(rec.summary.stopped_reason, "max steps reached")
+        self.assertEqual(rec.summary.stopped_reason, "max_steps")
 
     def test_complete_stopped_reason_is_completed_when_final_receipt_present(self):
         rec = OsnLoopRecorder()
@@ -542,6 +542,233 @@ class TestVerifyRetryReceiptIntegration(unittest.TestCase):
         executor.record_osn_loop_step("final_receipt", "passed")
         executor.complete_osn_loop(stopped_reason="completed")
         self.assertIsNone(executor.native_meta.osn_loop_summary)
+
+
+# ---------------------------------------------------------------------------
+# Hardening v1 - new counter fields and normalized stop reasons
+# ---------------------------------------------------------------------------
+
+class TestNativeOSNLoopStepHardening(unittest.TestCase):
+
+    def test_raw_content_stored_always_false(self):
+        step = NativeOSNLoopStep(step_name="verify", status="passed")
+        self.assertFalse(step.raw_content_stored)
+
+    def test_raw_content_stored_cannot_be_set_true(self):
+        step = NativeOSNLoopStep(step_name="verify", status="passed", raw_content_stored=True)
+        self.assertFalse(step.raw_content_stored)
+
+    def test_target_label_field_exists(self):
+        step = NativeOSNLoopStep(step_name="tool", status="passed", target_label="src/auth.py")
+        self.assertEqual(step.target_label, "src/auth.py")
+
+    def test_target_label_capped_at_40(self):
+        long_label = "a" * 60
+        step = NativeOSNLoopStep(step_name="tool", status="passed", target_label=long_label)
+        self.assertLessEqual(len(step.target_label), 40)
+
+    def test_blocked_reason_field_exists(self):
+        step = NativeOSNLoopStep(step_name="tool", status="blocked", blocked_reason="approval required")
+        self.assertEqual(step.blocked_reason, "approval required")
+
+    def test_step_serializes_new_fields_json_safe(self):
+        step = NativeOSNLoopStep(
+            step_name="tool",
+            status="blocked",
+            target_label="src/auth.py",
+            blocked_reason="approval required",
+        )
+        d = asdict(step)
+        self.assertIn("target_label", d)
+        self.assertIn("blocked_reason", d)
+        self.assertIn("raw_content_stored", d)
+        self.assertFalse(d["raw_content_stored"])
+        json.dumps(d)
+
+
+class TestNativeOSNLoopSummaryCounterFields(unittest.TestCase):
+
+    def test_new_fields_default_clean(self):
+        summary = NativeOSNLoopSummary()
+        self.assertEqual(summary.loop_id, "")
+        self.assertEqual(summary.attempted_steps, 0)
+        self.assertEqual(summary.completed_steps, 0)
+        self.assertEqual(summary.failed_steps, 0)
+        self.assertEqual(summary.blocked_steps, 0)
+        self.assertEqual(summary.tool_calls_attempted, 0)
+        self.assertEqual(summary.tool_calls_completed, 0)
+        self.assertEqual(summary.tool_calls_blocked, 0)
+        self.assertFalse(summary.verification_attempted)
+        self.assertIsNone(summary.verification_passed)
+        self.assertEqual(summary.retry_count, 0)
+        self.assertEqual(summary.final_status, "")
+
+    def test_summary_new_fields_json_safe(self):
+        summary = NativeOSNLoopSummary(
+            enabled=True, mode="experimental",
+            attempted_steps=2, completed_steps=1, blocked_steps=1,
+            loop_id="test-uuid",
+        )
+        d = asdict(summary)
+        json.dumps(d)
+        self.assertIn("loop_id", d)
+        self.assertIn("attempted_steps", d)
+
+
+class TestOsnLoopRecorderCounters(unittest.TestCase):
+
+    def test_loop_id_set_on_init(self):
+        rec = OsnLoopRecorder()
+        self.assertNotEqual(rec.summary.loop_id, "")
+        self.assertIsInstance(rec.summary.loop_id, str)
+
+    def test_increments_completed_steps(self):
+        rec = OsnLoopRecorder()
+        rec.record_step("preflight", "passed")
+        self.assertEqual(rec.summary.completed_steps, 1)
+        self.assertEqual(rec.summary.attempted_steps, 1)
+        self.assertEqual(rec.summary.failed_steps, 0)
+        self.assertEqual(rec.summary.blocked_steps, 0)
+
+    def test_increments_failed_steps(self):
+        rec = OsnLoopRecorder()
+        rec.record_step("verify", "failed")
+        self.assertEqual(rec.summary.failed_steps, 1)
+        self.assertEqual(rec.summary.completed_steps, 0)
+
+    def test_increments_blocked_steps(self):
+        rec = OsnLoopRecorder()
+        rec.record_step("approval", "blocked")
+        self.assertEqual(rec.summary.blocked_steps, 1)
+        self.assertEqual(rec.summary.completed_steps, 0)
+
+    def test_tool_call_counters_tracked(self):
+        rec = OsnLoopRecorder()
+        rec.record_step("read", "passed", tool_name="read_file")
+        self.assertEqual(rec.summary.tool_calls_attempted, 1)
+        self.assertEqual(rec.summary.tool_calls_completed, 1)
+        self.assertEqual(rec.summary.tool_calls_blocked, 0)
+
+    def test_tool_call_blocked_counter(self):
+        rec = OsnLoopRecorder()
+        rec.record_step("tool", "blocked", tool_name="run_command")
+        self.assertEqual(rec.summary.tool_calls_blocked, 1)
+        self.assertEqual(rec.summary.tool_calls_attempted, 1)
+        self.assertEqual(rec.summary.tool_calls_completed, 0)
+
+    def test_multiple_steps_accumulate(self):
+        rec = OsnLoopRecorder()
+        rec.record_step("preflight", "passed")
+        rec.record_step("read", "passed", tool_name="read_file")
+        rec.record_step("tool", "blocked", tool_name="run_command")
+        self.assertEqual(rec.summary.attempted_steps, 3)
+        self.assertEqual(rec.summary.completed_steps, 2)
+        self.assertEqual(rec.summary.blocked_steps, 1)
+        self.assertEqual(rec.summary.tool_calls_attempted, 2)
+        self.assertEqual(rec.summary.tool_calls_completed, 1)
+        self.assertEqual(rec.summary.tool_calls_blocked, 1)
+
+    def test_complete_sets_verification_attempted_when_status_present(self):
+        rec = OsnLoopRecorder()
+        rec.complete(stopped_reason="completed", verification_status="passed")
+        self.assertTrue(rec.summary.verification_attempted)
+
+    def test_complete_sets_verification_passed_true(self):
+        rec = OsnLoopRecorder()
+        rec.complete(stopped_reason="completed", verification_status="passed")
+        self.assertTrue(rec.summary.verification_passed)
+
+    def test_complete_sets_verification_passed_false(self):
+        rec = OsnLoopRecorder()
+        rec.complete(stopped_reason="completed", verification_status="failed")
+        self.assertFalse(rec.summary.verification_passed)
+
+    def test_complete_verification_not_attempted_when_no_status(self):
+        rec = OsnLoopRecorder()
+        rec.complete(stopped_reason="completed")
+        self.assertFalse(rec.summary.verification_attempted)
+        self.assertIsNone(rec.summary.verification_passed)
+
+    def test_complete_sets_final_status_completed(self):
+        rec = OsnLoopRecorder()
+        rec.record_step("final_receipt", "passed")
+        rec.complete(stopped_reason="completed")
+        self.assertEqual(rec.summary.final_status, "completed")
+
+    def test_complete_sets_final_status_to_stopped_reason_when_not_complete(self):
+        rec = OsnLoopRecorder()
+        rec.complete(stopped_reason="tool_error")
+        self.assertEqual(rec.summary.final_status, "tool_error")
+
+    def test_complete_normalizes_stop_reason(self):
+        rec = OsnLoopRecorder()
+        rec.complete(stopped_reason="complete")
+        self.assertEqual(rec.summary.stopped_reason, "completed")
+
+    def test_complete_retry_limit_enforced(self):
+        from openshard.native.context import _MAX_RETRY_COUNT
+        rec = OsnLoopRecorder()
+        rec.complete(stopped_reason="completed", retry_count=_MAX_RETRY_COUNT + 1)
+        self.assertEqual(rec.summary.stopped_reason, "retry_limit")
+
+    def test_complete_retry_count_stored(self):
+        rec = OsnLoopRecorder()
+        rec.complete(stopped_reason="completed", retry_count=1)
+        self.assertEqual(rec.summary.retry_count, 1)
+
+    def test_repeated_blocked_tool_warning_added(self):
+        from openshard.native.context import _MAX_REPEATED_BLOCKED_TOOL
+        rec = OsnLoopRecorder()
+        for _ in range(_MAX_REPEATED_BLOCKED_TOOL):
+            rec.record_step("tool", "blocked", tool_name="run_command")
+        self.assertIn("repeated_blocked_tool_limit", rec.summary.warnings)
+
+    def test_step_events_cap_enforced(self):
+        from openshard.native.context import _MAX_STEP_EVENTS_RECORDED
+        rec = OsnLoopRecorder()
+        # Bypass max_steps by temporarily raising it
+        rec._summary.max_steps = _MAX_STEP_EVENTS_RECORDED + 10
+        for i in range(_MAX_STEP_EVENTS_RECORDED + 5):
+            rec.record_step(f"step_{i}", "passed")
+        self.assertLessEqual(len(rec.summary.steps), _MAX_STEP_EVENTS_RECORDED)
+        self.assertIn("step_events_cap_reached", rec.summary.warnings)
+
+
+class TestNormalizeOsnStopReason(unittest.TestCase):
+
+    def setUp(self):
+        from openshard.native.context import normalize_osn_stop_reason, _VALID_OSN_STOP_REASONS
+        self._normalize = normalize_osn_stop_reason
+        self._valid = _VALID_OSN_STOP_REASONS
+
+    def test_none_returns_unknown(self):
+        self.assertEqual(self._normalize(None), "unknown")
+
+    def test_empty_string_returns_unknown(self):
+        self.assertEqual(self._normalize(""), "unknown")
+
+    def test_whitespace_returns_unknown(self):
+        self.assertEqual(self._normalize("   "), "unknown")
+
+    def test_alias_complete_to_completed(self):
+        self.assertEqual(self._normalize("complete"), "completed")
+
+    def test_alias_consecutive_empty_to_empty_response_limit(self):
+        self.assertEqual(self._normalize("consecutive_empty"), "empty_response_limit")
+
+    def test_alias_max_steps_reached_to_max_steps(self):
+        self.assertEqual(self._normalize("max steps reached"), "max_steps")
+
+    def test_mixed_case_alias(self):
+        self.assertEqual(self._normalize("Complete"), "completed")
+        self.assertEqual(self._normalize("COMPLETE"), "completed")
+
+    def test_unknown_value_returns_unknown(self):
+        self.assertEqual(self._normalize("some_garbage_value"), "unknown")
+
+    def test_all_valid_values_are_stable(self):
+        for reason in self._valid:
+            self.assertEqual(self._normalize(reason), reason)
 
 
 if __name__ == "__main__":

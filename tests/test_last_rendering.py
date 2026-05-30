@@ -3822,15 +3822,14 @@ class TestLastOSNLoopSummaryRendering(unittest.TestCase):
 
     def test_more_shows_compact_summary(self):
         out = _render(self._entry_with_osn_summary(), detail="full")
-        self.assertIn("OSN loop summary:", out)
-        self.assertIn("experimental", out)
+        self.assertIn("OSN LOOP", out)
         self.assertIn("5 steps", out)
         self.assertIn("passed", out)
 
     def test_more_uses_correct_label_not_tool_level_label(self):
-        # Tool-level line is "  osn loop: ..." (lowercase), summary line is "  OSN loop summary: ..."
+        # Tool-level line is "  osn loop: ..." (lowercase), summary section is "  OSN LOOP"
         out = _render(self._entry_with_osn_summary(), detail="full")
-        self.assertIn("OSN loop summary:", out)
+        self.assertIn("OSN LOOP", out)
 
     def test_full_shows_pipeline_header(self):
         out = _render(
@@ -3859,11 +3858,12 @@ class TestLastOSNLoopSummaryRendering(unittest.TestCase):
     def test_old_entry_without_osn_summary_renders_cleanly(self):
         entry = {"workflow": "native", "executor": "native"}
         out = _render(entry, detail="more")
-        self.assertNotIn("OSN loop summary:", out)
+        self.assertNotIn("OSN LOOP", out)
 
-    def test_default_detail_does_not_show_osn_summary(self):
+    def test_default_detail_does_not_show_osn_loop_section(self):
+        # [native] block only renders in more/full mode, not default
         out = _render(self._entry_with_osn_summary(), detail="default")
-        self.assertNotIn("OSN loop summary:", out)
+        self.assertNotIn("OSN LOOP", out)
 
     def test_existing_osn_loop_tool_steps_still_render(self):
         entry = {
@@ -3892,7 +3892,7 @@ class TestLastOSNLoopSummaryRendering(unittest.TestCase):
             },
         }
         out = _render(entry, detail="more")
-        self.assertNotIn("OSN loop summary:", out)
+        self.assertNotIn("OSN LOOP", out)
 
 
 class TestLastContractVerificationDisplay(unittest.TestCase):
