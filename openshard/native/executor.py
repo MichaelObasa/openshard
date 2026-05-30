@@ -83,6 +83,8 @@ from openshard.native.context import (
     render_native_plan,
     render_native_validation_contract,
     render_osn_loop_context,
+    OSNObservationPacket,
+    render_osn_observation_context,
 )
 from openshard.native.repo_context import (
     NativeRepoContextSummary,
@@ -152,6 +154,7 @@ class NativeRunMeta:
     routing_receipt: NativeRoutingReceipt | None = None
     tier_dispatch_receipt: NativeTierDispatchReceipt | None = None
     osn_loop_summary: NativeOSNLoopSummary | None = None
+    osn_observation: OSNObservationPacket | None = None
     sandbox: NativeSandboxMeta | None = None
     failure_memory_routing_advisory: NativeFailureMemoryRoutingAdvisory | None = None
     plan_ledger: NativePlanLedger | None = None
@@ -527,6 +530,7 @@ class NativeAgentExecutor:
         self.native_meta = NativeRunMeta()
         self.native_meta.model_policy = build_native_model_policy(model_policy)
         self._runner = NativeToolRunner(repo_root) if repo_root is not None else None
+        self._repo_root: Path | None = repo_root
         self._backend = get_backend(backend_name)
         _available = self._backend.available()
         self.native_meta.native_backend = self._backend.name
@@ -684,6 +688,35 @@ class NativeAgentExecutor:
             self.native_meta.context_budget.repo_map_built = True
             self.native_meta.repo_context_summary = build_repo_context_summary(result.output)
             self.record_loop_step("repo_context")
+
+    def _run_repo_observation_phase(self) -> None:
+        """Bounded repo observation before any planning or tool steps. OSN-scoped only.
+
+        Pure Python walk - no shell commands, no file contents, no raw output.
+        Failure is non-crashing: adds a warning and continues.
+        """
+        if self._repo_root is None:
+            self.record_osn_loop_step("repo_observation", "skipped", result_summary="no_repo_root")
+            return
+        try:
+            from openshard.native.osn_observation import build_osn_observation
+            packet = build_osn_observation(self._repo_root)
+            self.native_meta.osn_observation = packet
+            _stack = ",".join(packet.stack_signals) if packet.stack_signals else "none"
+            _summary = f"stack={_stack} candidates={len(packet.candidate_files)} tests={len(packet.test_files)}"
+            self.record_loop_step("repo_observation")
+            self.record_osn_loop_step(
+                "repo_observation", "passed",
+                result_summary=_summary,
+                context_injected=packet.enabled,
+            )
+        except Exception:
+            self.native_meta.context_warnings.append("repo_observation_failed")
+            self.record_osn_loop_step(
+                "repo_observation", "failed",
+                result_summary="observation_error",
+                warnings=["repo_observation_failed"],
+            )
 
     def _run_observe_phase(self, task: str, repo_facts=None) -> None:
         if self._runner is None:
@@ -1406,6 +1439,8 @@ class NativeAgentExecutor:
         max_tokens: int | None = None,
         is_review_task: bool = False,
     ) -> ExecutionResult:
+        if self._native_loop == "experimental":
+            self._run_repo_observation_phase()
         self._run_preflight()
         self.record_osn_loop_step(
             "preflight", "passed",
@@ -1487,6 +1522,11 @@ class NativeAgentExecutor:
         if summary is not None:
             context_parts.append(render_repo_context_summary(summary))
             _injected_sources.add("repo_summary")
+
+        obs_packet_block = render_osn_observation_context(self.native_meta.osn_observation)
+        if obs_packet_block:
+            context_parts.append(obs_packet_block)
+            _injected_sources.add("osn_observation")
 
         observation = self.native_meta.observation
         if observation is not None:

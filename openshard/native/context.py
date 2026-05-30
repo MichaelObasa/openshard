@@ -850,6 +850,61 @@ class NativeOSNLoopSummary:
     final_status: str = ""
 
 
+# Caps for OSNObservationPacket fields - enforced in __post_init__
+_OBS_MAX_CANDIDATE_FILES: int = 10
+_OBS_MAX_CONFIG_FILES: int = 8
+_OBS_MAX_TEST_FILES: int = 8
+_OBS_MAX_RISKY_MARKERS: int = 6
+_OBS_MAX_SUGGESTED_CHECKS: int = 6
+_OBS_MAX_SUMMARY_CHARS: int = 200
+
+
+@dataclass
+class OSNObservationPacket:
+    """Bounded, safe repo observation packet populated before OSN planning.
+
+    Never stores raw file contents, absolute paths, raw prompts, or command output.
+    All lists are capped in __post_init__.
+    """
+    enabled: bool = False
+    repo_root_present: bool = False
+    stack_signals: list[str] = field(default_factory=list)
+    candidate_files: list[str] = field(default_factory=list)
+    config_files: list[str] = field(default_factory=list)
+    test_files: list[str] = field(default_factory=list)
+    risky_markers: list[str] = field(default_factory=list)
+    suggested_checks: list[str] = field(default_factory=list)
+    observation_summary: str = ""
+    files_considered: int = 0
+    files_capped: bool = False
+    source: str = "repo_observation_v1"
+
+    def __post_init__(self) -> None:
+        self.candidate_files = self.candidate_files[:_OBS_MAX_CANDIDATE_FILES]
+        self.config_files = self.config_files[:_OBS_MAX_CONFIG_FILES]
+        self.test_files = self.test_files[:_OBS_MAX_TEST_FILES]
+        self.risky_markers = self.risky_markers[:_OBS_MAX_RISKY_MARKERS]
+        self.suggested_checks = self.suggested_checks[:_OBS_MAX_SUGGESTED_CHECKS]
+        if len(self.observation_summary) > _OBS_MAX_SUMMARY_CHARS:
+            self.observation_summary = self.observation_summary[:_OBS_MAX_SUMMARY_CHARS]
+
+
+def render_osn_observation_context(packet: OSNObservationPacket | None) -> str:
+    """Prompt-safe compact observation block. No raw content, no file contents, no absolute paths."""
+    if packet is None or not packet.enabled:
+        return ""
+    lines = ["[repo observation]"]
+    if packet.stack_signals:
+        lines.append(f"stack: {', '.join(packet.stack_signals)}")
+    if packet.candidate_files:
+        lines.append(f"candidates: {', '.join(packet.candidate_files[:5])}")
+    if packet.test_files:
+        lines.append(f"tests: {', '.join(packet.test_files[:3])}")
+    if packet.suggested_checks:
+        lines.append(f"checks: {', '.join(packet.suggested_checks[:3])}")
+    return "\n".join(lines)
+
+
 def render_osn_loop_context(meta: OSNLoopMeta | None) -> str:
     """Bounded prompt-safe OSN loop context block.
 
