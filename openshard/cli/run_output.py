@@ -681,6 +681,27 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
                 lines.append(f"    - {_cf}")
         has_content = True
 
+    osn_vc = getattr(native_meta, "osn_verification_contract", None)
+    if osn_vc is not None and getattr(osn_vc, "enabled", False):
+        _vc_status = getattr(osn_vc, "status", "not_run") or "not_run"
+        _vc_expected = getattr(osn_vc, "expected_checks", []) or []
+        _vc_attempted = getattr(osn_vc, "attempted_checks", []) or []
+        _vc_missing = getattr(osn_vc, "missing_checks", []) or []
+        _vc_review = getattr(osn_vc, "manual_review_required", False)
+        _vc_reason = getattr(osn_vc, "skipped_reason", "") or ""
+        lines.append("  OSN VERIFICATION")
+        lines.append(f"    Status       {_vc_status}")
+        if _vc_expected:
+            lines.append(f"    Expected     {', '.join(_vc_expected[:4])}")
+        if _vc_attempted:
+            lines.append(f"    Attempted    {', '.join(_vc_attempted[:4])}")
+        if _vc_missing:
+            lines.append(f"    Missing      {', '.join(_vc_missing[:4])}")
+        lines.append(f"    Review       {'yes' if _vc_review else 'no'}")
+        if _vc_reason:
+            lines.append(f"    Reason       {_vc_reason}")
+        has_content = True
+
     osn_loop_summary = getattr(native_meta, "osn_loop_summary", None)
     if osn_loop_summary is not None and getattr(osn_loop_summary, "enabled", False):
         _attempted = getattr(osn_loop_summary, "attempted_steps", None)
@@ -1458,6 +1479,8 @@ def _native_meta_from_entry(entry: dict) -> Any | None:
         "failure_memory": entry.get("failure_memory"),
         "osn_loop": entry.get("osn_loop"),
         "osn_loop_summary": entry.get("osn_loop_summary"),
+        "osn_observation": entry.get("osn_observation"),
+        "osn_verification_contract": entry.get("osn_verification_contract"),
         "deepagents_adapter": entry.get("deepagents_adapter"),
         "validation_contract": entry.get("validation_contract"),
         "verification_contract_result": entry.get("verification_contract_result"),
