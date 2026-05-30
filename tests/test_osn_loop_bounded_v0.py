@@ -404,5 +404,44 @@ class TestNativeLoopApprovalGate(unittest.TestCase):
         self.assertFalse(dec.required)
 
 
+# ---------------------------------------------------------------------------
+# Hardening v1 - bounds constants and run_command safety
+# ---------------------------------------------------------------------------
+
+class TestBoundsConstants(unittest.TestCase):
+
+    def test_max_step_events_recorded_constant_exists(self):
+        from openshard.native.context import _MAX_STEP_EVENTS_RECORDED
+        self.assertIsInstance(_MAX_STEP_EVENTS_RECORDED, int)
+        self.assertGreater(_MAX_STEP_EVENTS_RECORDED, 0)
+
+    def test_max_repeated_blocked_tool_constant_exists(self):
+        from openshard.native.context import _MAX_REPEATED_BLOCKED_TOOL
+        self.assertIsInstance(_MAX_REPEATED_BLOCKED_TOOL, int)
+        self.assertGreater(_MAX_REPEATED_BLOCKED_TOOL, 0)
+
+    def test_max_retry_count_constant_exists(self):
+        from openshard.native.context import _MAX_RETRY_COUNT
+        self.assertIsInstance(_MAX_RETRY_COUNT, int)
+        self.assertGreaterEqual(_MAX_RETRY_COUNT, 1)
+
+    def test_run_command_not_in_loop_allowed_tools(self):
+        from openshard.native.executor import _LOOP_ALLOWED_TOOLS
+        self.assertNotIn("run_command", _LOOP_ALLOWED_TOOLS)
+
+    def test_write_file_not_in_loop_allowed_tools(self):
+        from openshard.native.executor import _LOOP_ALLOWED_TOOLS
+        self.assertNotIn("write_file", _LOOP_ALLOWED_TOOLS)
+
+    def test_valid_stop_reasons_contains_expected_values(self):
+        from openshard.native.context import _VALID_OSN_STOP_REASONS
+        required = {
+            "completed", "max_steps", "no_steps", "blocked_tool", "approval_required",
+            "verification_failed", "tool_error", "empty_response_limit", "retry_limit",
+            "policy_denied", "unknown",
+        }
+        self.assertTrue(required.issubset(_VALID_OSN_STOP_REASONS))
+
+
 if __name__ == "__main__":
     unittest.main()

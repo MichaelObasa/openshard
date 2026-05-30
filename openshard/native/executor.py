@@ -74,6 +74,7 @@ from openshard.native.context import (
     build_native_validation_contract,
     build_native_model_policy,
     build_osn_loop_meta,
+    normalize_osn_stop_reason,
     render_native_change_budget,
     render_native_context_packet,
     render_native_context_quality_advisory,
@@ -981,7 +982,7 @@ class NativeAgentExecutor:
         executed_steps: list[OSNLoopStep] = []
         consecutive_empty = 0
         warnings: list[str] = []
-        terminated_reason = "complete"
+        terminated_reason = "completed"
 
         for idx, (tool_name, raw_target, reason) in enumerate(queue):
             if idx >= _MAX_OSN_LOOP_STEPS:
@@ -1029,7 +1030,7 @@ class NativeAgentExecutor:
             ))
 
             if consecutive_empty >= _MAX_OSN_CONSECUTIVE_EMPTY:
-                terminated_reason = "consecutive_empty"
+                terminated_reason = "empty_response_limit"
                 break
 
         steps_run = sum(1 for s in executed_steps if not s.skipped)
@@ -1038,7 +1039,7 @@ class NativeAgentExecutor:
             steps_queued=steps_queued,
             max_steps=_MAX_OSN_LOOP_STEPS,
             consecutive_empty=consecutive_empty,
-            terminated_reason=terminated_reason,
+            terminated_reason=normalize_osn_stop_reason(terminated_reason),
             steps=executed_steps,
             warnings=warnings,
         )

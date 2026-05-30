@@ -529,7 +529,7 @@ class TestRunExperimentalLoop(unittest.TestCase):
         executor.native_meta.read_search_findings = [f"file:src/f{i}.py" for i in range(5)]
         executor._run_experimental_loop("some task")
         meta = executor.native_meta.osn_loop
-        self.assertEqual(meta.terminated_reason, "consecutive_empty")
+        self.assertEqual(meta.terminated_reason, "empty_response_limit")
         self.assertLessEqual(runner.run.call_count, 3)
 
     def test_osn_loop_meta_populated(self):
@@ -566,7 +566,7 @@ class TestRunExperimentalLoop(unittest.TestCase):
         self.assertGreater(len(executor.native_meta.tool_trace), initial_trace_len)
 
     def test_terminated_reason_valid_values(self):
-        valid = {"not_run", "complete", "max_steps", "consecutive_empty", "no_steps"}
+        from openshard.native.context import _VALID_OSN_STOP_REASONS
         executor, _ = _make_executor()
         runner = MagicMock()
         runner.run.return_value = NativeToolResult(tool_name="read_file", ok=True, output="content")
@@ -574,7 +574,7 @@ class TestRunExperimentalLoop(unittest.TestCase):
         executor._runner = runner
         executor.native_meta.read_search_findings = ["file:src/foo.py"]
         executor._run_experimental_loop("some task")
-        self.assertIn(executor.native_meta.osn_loop.terminated_reason, valid)
+        self.assertIn(executor.native_meta.osn_loop.terminated_reason, _VALID_OSN_STOP_REASONS)
 
     def test_no_steps_queued_gives_no_steps_reason(self):
         executor, _ = _make_executor()
