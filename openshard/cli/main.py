@@ -1316,6 +1316,28 @@ def last(more: bool, full: bool):
     _render_log_entry(entries[-1], detail, index=len(entries) - 1)
 
 
+@cli.group("reflect")
+def reflect_group() -> None:
+    """Post-run reflection and advisory review."""
+
+
+@reflect_group.command("last")
+def reflect_last() -> None:
+    """Show a reflection on the most recent run."""
+    from openshard.reflection.reflector import build_run_reflection, render_run_reflection
+    from openshard.history.shard_contract import build_shard_receipt
+
+    log_path = Path.cwd() / _LOG_PATH
+    entries = _load_run_entries(log_path)
+    if not entries:
+        click.echo("No run history found. Run a task first with 'openshard run'.")
+        return
+    receipt = build_shard_receipt(entries[-1], index=len(entries) - 1)
+    reflection = build_run_reflection(receipt)
+    for line in render_run_reflection(reflection):
+        click.echo(line)
+
+
 @cli.command("apply-last")
 @click.option("--dry-run", is_flag=True, default=False, help="Show what would be applied without copying files.")
 @click.option("--file", "include_files", multiple=True, help="Only apply this relative file path. Can be used multiple times.")
