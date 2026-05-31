@@ -2483,6 +2483,21 @@ def _build_osn_verification_contract_with_loop(native_meta: Any, *, is_write_tas
     )
 
 
+def _promote_sandbox_git_metadata(extra_metadata: dict | None) -> None:
+    """Promote git_base_branch and git_base_commit_hash from sandbox sub-dict to top-level."""
+    if extra_metadata is None:
+        return
+    _sandbox = extra_metadata.get("sandbox")
+    if not isinstance(_sandbox, dict):
+        return
+    _gb = _sandbox.get("git_base_branch")
+    _gc = _sandbox.get("git_base_commit_hash")
+    if _gb is not None:
+        extra_metadata["git_base_branch"] = _gb
+    if _gc is not None:
+        extra_metadata["git_base_commit_hash"] = _gc
+
+
 def _log_run(
     start: float,
     task: str,
