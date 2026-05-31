@@ -462,6 +462,9 @@ class ShardReceipt:
     adapter_stdout_summary: str | None = None
     adapter_stderr_summary: str | None = None
     adapter_duration_ms: int | None = None
+    # Safe workspace identity — set when a sandbox was used for this run
+    safe_workspace_kind: str | None = None
+    safe_workspace_display_name: str | None = None
 
 
 def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
@@ -906,6 +909,8 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         adapter_stdout_summary=entry.get("adapter_stdout_summary") or None,
         adapter_stderr_summary=entry.get("adapter_stderr_summary") or None,
         adapter_duration_ms=entry.get("adapter_duration_ms") if isinstance(entry.get("adapter_duration_ms"), int) else None,
+        safe_workspace_kind=((entry.get("sandbox") or {}).get("sandbox_type") or None),
+        safe_workspace_display_name=((entry.get("sandbox") or {}).get("safe_workspace_display_name") or None),
     )
 
 
@@ -1268,6 +1273,7 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
         or receipt.git_base_branch is not None
         or receipt.git_base_commit_hash is not None
         or receipt.git_dirty is not None
+        or receipt.safe_workspace_display_name is not None
     )
     if _git_new:
         lines.append(f"{_INDENT}GIT")
@@ -1279,6 +1285,10 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
             lines.append(_row("Base commit", receipt.git_base_commit_hash))
         if receipt.git_dirty is not None:
             lines.append(_row("Dirty", "yes" if receipt.git_dirty else "no"))
+        if receipt.safe_workspace_kind and receipt.safe_workspace_kind != "none":
+            lines.append(_row("Workspace", receipt.safe_workspace_kind))
+        if receipt.safe_workspace_display_name:
+            lines.append(_row("Workspace ID", receipt.safe_workspace_display_name))
         lines.append("")
 
     _ctx_util = (

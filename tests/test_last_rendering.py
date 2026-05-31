@@ -5182,5 +5182,171 @@ class TestProofSummaryRendering(unittest.TestCase):
         self.assertNotIn("PROOF SUMMARY", out)
 
 
+class TestSafeWorkspaceReceipt(unittest.TestCase):
+    """Tests for safe workspace and git metadata in receipt rendering."""
+
+    def _render_full(self, receipt):
+        from openshard.history.shard_contract import render_full_shard_receipt
+        return render_full_shard_receipt(receipt)
+
+    def _build_receipt(self, entry):
+        from openshard.history.shard_contract import build_shard_receipt
+        return build_shard_receipt(entry)
+
+    def _base_receipt(self, **kwargs):
+        from openshard.history.shard_contract import ShardReceipt
+        defaults = {
+            "shard_id": "shard-20260531-0001",
+            "created_at": "2026-05-31T10:00:00Z",
+            "task_short": "test task",
+            "task_full": "test task",
+            "agent": "OpenShard Native",
+            "strategy": "Not recorded",
+            "model_display": "Claude Sonnet 4.6",
+            "risk": "Low",
+            "sandbox": "On",
+            "files_changed": 0,
+            "checks_display": "Not run",
+            "approval": "Not required",
+            "cost_display": "$0.0000",
+            "result": "ok",
+            "status": "Passed",
+            "duration_seconds": 1.0,
+        }
+        defaults.update(kwargs)
+        return ShardReceipt(**defaults)
+
+    def test_render_full_shows_workspace_rows_for_worktree(self):
+        receipt = self._base_receipt(
+            safe_workspace_kind="worktree",
+            safe_workspace_display_name="osn/run-abc",
+            git_base_branch="main",
+            git_base_commit_hash="a" * 40,
+        )
+        out = self._render_full(receipt)
+        self.assertIn("GIT", out)
+        self.assertIn("Workspace", out)
+        self.assertIn("worktree", out)
+        self.assertIn("osn/run-abc", out)
+        self.assertIn("Base branch", out)
+        self.assertIn("Base commit", out)
+
+    def test_render_full_shows_workspace_rows_for_temp(self):
+        receipt = self._base_receipt(
+            safe_workspace_kind="temp",
+            safe_workspace_display_name="osn-temp",
+        )
+        out = self._render_full(receipt)
+        self.assertIn("GIT", out)
+        self.assertIn("Workspace", out)
+        self.assertIn("temp", out)
+        self.assertIn("osn-temp", out)
+
+    def test_render_full_no_git_section_when_all_fields_none(self):
+        receipt = self._base_receipt()
+        out = self._render_full(receipt)
+        self.assertNotIn("GIT", out)
+        self.assertNotIn("Workspace", out)
+
+    def test_workspace_kind_none_does_not_show_workspace_row(self):
+        receipt = self._base_receipt(safe_workspace_kind="none")
+        out = self._render_full(receipt)
+        self.assertNotIn("Workspace", out)
+
+    def test_old_entry_with_sandbox_type_only_no_git_section(self):
+        """
+        Old receipts that have a sandbox object but no new git/workspace fields must
+        not produce a GIT section.  safe_workspace_kind alone (populated from
+        sandbox_type on old entries) must not trigger _git_new.
+        """
+        entry = {
+            "task": "test",
+            "timestamp": "2026-05-31T10:00:00Z",
+            "sandbox": {"sandbox_type": "temp"},
+            # no git_base_branch, no git_base_commit_hash, no safe_workspace_display_name
+        }
+        receipt = self._build_receipt(entry)
+        self.assertEqual(receipt.safe_workspace_kind, "temp")
+        self.assertIsNone(receipt.safe_workspace_display_name)
+        out = self._render_full(receipt)
+        self.assertNotIn("GIT", out)
+        self.assertNotIn("Workspace", out)
+
+    def test_old_entry_with_worktree_sandbox_type_only_no_git_section(self):
+        """Same check for worktree sandbox_type on an old entry."""
+        entry = {
+            "task": "test",
+            "timestamp": "2026-05-31T10:00:00Z",
+            "sandbox": {"sandbox_type": "worktree", "worktree_branch": "osn/run-old"},
+        }
+        receipt = self._build_receipt(entry)
+        self.assertEqual(receipt.safe_workspace_kind, "worktree")
+        self.assertIsNone(receipt.safe_workspace_display_name)
+        out = self._render_full(receipt)
+        self.assertNotIn("GIT", out)
+        self.assertNotIn("Workspace", out)
+
+    def test_old_entry_missing_sandbox_renders_without_crash(self):
+        entry = {"task": "test", "timestamp": "2026-05-31T10:00:00Z"}
+        receipt = self._build_receipt(entry)
+        self.assertIsNone(receipt.safe_workspace_kind)
+        self.assertIsNone(receipt.safe_workspace_display_name)
+        out = self._render_full(receipt)
+        self.assertNotIn("Workspace", out)
+
+    def test_build_shard_receipt_reads_safe_workspace_kind_from_sandbox(self):
+        entry = {
+            "task": "test",
+            "timestamp": "2026-05-31T10:00:00Z",
+            "sandbox": {
+                "sandbox_type": "worktree",
+                "safe_workspace_display_name": "osn/run-abc",
+                "sandbox_enabled": True,
+            },
+            "git_base_branch": "main",
+            "git_base_commit_hash": "a" * 40,
+        }
+        receipt = self._build_receipt(entry)
+        self.assertEqual(receipt.safe_workspace_kind, "worktree")
+        self.assertEqual(receipt.safe_workspace_display_name, "osn/run-abc")
+        self.assertEqual(receipt.git_base_branch, "main")
+
+    def test_build_shard_receipt_temp_sandbox(self):
+        entry = {
+            "task": "test",
+            "timestamp": "2026-05-31T10:00:00Z",
+            "sandbox": {
+                "sandbox_type": "temp",
+                "safe_workspace_display_name": "osn-temp",
+                "sandbox_enabled": True,
+            },
+        }
+        receipt = self._build_receipt(entry)
+        self.assertEqual(receipt.safe_workspace_kind, "temp")
+        self.assertEqual(receipt.safe_workspace_display_name, "osn-temp")
+
+    def test_build_shard_receipt_no_crash_missing_sandbox_key(self):
+        entry = {"task": "test", "timestamp": "2026-05-31T10:00:00Z"}
+        receipt = self._build_receipt(entry)
+        self.assertIsNone(receipt.safe_workspace_kind)
+
+    def test_safe_workspace_display_name_not_absolute_path_in_receipt(self):
+        import re
+        entry = {
+            "task": "test",
+            "timestamp": "2026-05-31T10:00:00Z",
+            "sandbox": {
+                "sandbox_type": "worktree",
+                "safe_workspace_display_name": "osn/run-2026-05-31t10-00-00",
+                "sandbox_enabled": True,
+            },
+        }
+        receipt = self._build_receipt(entry)
+        name = receipt.safe_workspace_display_name
+        self.assertIsNotNone(name)
+        self.assertFalse(name.startswith("/"), f"display name looks like absolute path: {name}")
+        self.assertFalse(bool(re.match(r"[A-Za-z]:\\", name)), f"display name looks like Windows path: {name}")
+
+
 if __name__ == "__main__":
     unittest.main()
