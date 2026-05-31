@@ -233,5 +233,38 @@ class TestNeedsApprovalCommand(unittest.TestCase):
         self.assertEqual(mock_run.call_args.args[0], ["make", "test"])
 
 
+class TestCommandNotFound(unittest.TestCase):
+
+    def test_not_found_capture_returns_exit_1(self):
+        with (
+            patch("subprocess.run", side_effect=FileNotFoundError("not found")),
+            patch("click.echo"),
+        ):
+            code, output = _run_verification_plan(_safe_plan(), Path("/tmp"), capture=True)
+        self.assertEqual(code, 1)
+        self.assertIn("not found", output)
+
+    def test_not_found_stream_returns_exit_1(self):
+        with (
+            patch("subprocess.run", side_effect=FileNotFoundError("not found")),
+            patch("click.echo") as mock_echo,
+        ):
+            result = _run_verification_plan(_safe_plan(), Path("/tmp"), capture=False)
+        self.assertEqual(result, 1)
+        msgs = [str(a) for call in mock_echo.call_args_list for a in call.args]
+        assert any("not found" in m for m in msgs)
+
+    def test_not_found_message_does_not_expose_raw_path(self):
+        with (
+            patch("subprocess.run", side_effect=FileNotFoundError),
+            patch("click.echo"),
+        ):
+            _, output = _run_verification_plan(
+                _safe_plan(["/usr/local/bin/pytest"]), Path("/tmp"), capture=True
+            )
+        self.assertNotIn("/usr/local/bin/pytest", output)
+        self.assertIn("not found", output)
+
+
 if __name__ == "__main__":
     unittest.main()

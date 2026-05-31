@@ -710,6 +710,9 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
         _vc_status = getattr(osn_vc, "status", "not_run") or "not_run"
         _vc_expected = getattr(osn_vc, "expected_checks", []) or []
         _vc_attempted = getattr(osn_vc, "attempted_checks", []) or []
+        _vc_passed = getattr(osn_vc, "passed_checks", []) or []
+        _vc_failed = getattr(osn_vc, "failed_checks", []) or []
+        _vc_skipped = getattr(osn_vc, "skipped_checks", []) or []
         _vc_missing = getattr(osn_vc, "missing_checks", []) or []
         _vc_review = getattr(osn_vc, "manual_review_required", False)
         _vc_reason = getattr(osn_vc, "skipped_reason", "") or ""
@@ -719,6 +722,12 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
             lines.append(f"    Expected     {', '.join(_vc_expected[:4])}")
         if _vc_attempted:
             lines.append(f"    Attempted    {', '.join(_vc_attempted[:4])}")
+        if _vc_passed:
+            lines.append(f"    Passed       {', '.join(_vc_passed[:4])}")
+        if _vc_failed:
+            lines.append(f"    Failed       {', '.join(_vc_failed[:4])}")
+        if _vc_skipped:
+            lines.append(f"    Skipped      {', '.join(_vc_skipped[:4])}")
         if _vc_missing:
             lines.append(f"    Missing      {', '.join(_vc_missing[:4])}")
         lines.append(f"    Review       {'yes' if _vc_review else 'no'}")

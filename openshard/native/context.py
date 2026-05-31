@@ -91,6 +91,9 @@ class RetryMetadata:
         self.raw_content_stored = False
 
 
+_MAX_CHECK_NAMES: int = 8
+
+
 @dataclass
 class NativeVerificationLoop:
     attempted: bool = False
@@ -100,6 +103,12 @@ class NativeVerificationLoop:
     output_chars: int = 0
     truncated: bool = False
     retry_metadata: "RetryMetadata | None" = None
+    # Per-check proof wiring (v1: one command per plan)
+    check_attempted: list[str] = field(default_factory=list)
+    check_passed: list[str] = field(default_factory=list)
+    check_failed: list[str] = field(default_factory=list)
+    check_skipped: list[str] = field(default_factory=list)
+    check_skipped_reasons: list[str] = field(default_factory=list)
 
 
 @dataclass

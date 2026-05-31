@@ -5,6 +5,7 @@ import shlex
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -230,6 +231,24 @@ def build_verification_plan(config: dict, repo_facts) -> VerificationPlan:
         reason=reason,
     )
     return VerificationPlan(commands=[cmd])
+
+
+def _safe_token_label(token: str) -> str:
+    """Return the basename of a path token, handling both POSIX and Windows styles."""
+    if "/" not in token and "\\" not in token:
+        return token
+    win_name = PureWindowsPath(token).name
+    posix_name = PurePosixPath(token).name
+    return min((win_name, posix_name), key=len) or token
+
+
+def safe_check_label(cmd: VerificationCommand) -> str:
+    """Return a path-free display label for a verification command (max 50 chars)."""
+    safe = [
+        "python" if t == sys.executable else _safe_token_label(t)
+        for t in cmd.argv
+    ]
+    return " ".join(safe)[:50]
 
 
 def render_verification_plan(plan: VerificationPlan) -> str:

@@ -53,6 +53,7 @@ def build_osn_verification_contract(
     osn_observation: object | None,
     osn_loop_summary: object | None,
     is_write_task: bool = False,
+    verification_loop: object | None = None,
 ) -> OSNVerificationContract:
     """Build a deterministic verification contract from recorded signals.
 
@@ -65,6 +66,22 @@ def build_osn_verification_contract(
     if osn_observation is not None:
         raw_checks = getattr(osn_observation, "suggested_checks", []) or []
         contract.expected_checks = list(raw_checks)[:_MAX_CHECKS]
+
+    # Populate per-check proof from real execution results
+    _loop_skipped_reasons: list[str] = []
+    if verification_loop is not None:
+        _ca = getattr(verification_loop, "check_attempted", []) or []
+        _cp = getattr(verification_loop, "check_passed", []) or []
+        _cf = getattr(verification_loop, "check_failed", []) or []
+        _cs = getattr(verification_loop, "check_skipped", []) or []
+        _loop_skipped_reasons = list(getattr(verification_loop, "check_skipped_reasons", []) or [])
+        contract.attempted_checks = list(_ca)[:_MAX_CHECKS]
+        contract.passed_checks = list(_cp)[:_MAX_CHECKS]
+        contract.failed_checks = list(_cf)[:_MAX_CHECKS]
+        contract.skipped_checks = list(_cs)[:_MAX_CHECKS]
+        # Seed expected_checks from execution plan when observation has none
+        if not contract.expected_checks:
+            contract.expected_checks = (_ca + _cs)[:_MAX_CHECKS]
 
     if osn_loop_summary is None:
         contract.status = "not_run"
@@ -114,6 +131,10 @@ def build_osn_verification_contract(
         contract.manual_review_required = True
         contract.summary = "stopped: verification failed"
 
+    # Prefer specific command reason over the generic fallback when we have one
+    if _loop_skipped_reasons and contract.skipped_checks:
+        contract.skipped_reason = _loop_skipped_reasons[0][:_MAX_REASON_CHARS]
+
     # missing_checks = expected checks not found in attempted
     contract.missing_checks = [
         c for c in contract.expected_checks if c not in contract.attempted_checks
@@ -155,6 +176,12 @@ def render_osn_verification_receipt(
         lines.append(f"    Expected     {', '.join(contract.expected_checks[:4])}")
     if contract.attempted_checks:
         lines.append(f"    Attempted    {', '.join(contract.attempted_checks[:4])}")
+    if contract.passed_checks:
+        lines.append(f"    Passed       {', '.join(contract.passed_checks[:4])}")
+    if contract.failed_checks:
+        lines.append(f"    Failed       {', '.join(contract.failed_checks[:4])}")
+    if contract.skipped_checks:
+        lines.append(f"    Skipped      {', '.join(contract.skipped_checks[:4])}")
     if contract.missing_checks:
         lines.append(f"    Missing      {', '.join(contract.missing_checks[:4])}")
     lines.append(f"    Review       {'yes' if contract.manual_review_required else 'no'}")

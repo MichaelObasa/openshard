@@ -93,7 +93,7 @@ from openshard.skills.discovery import discover_skills
 from openshard.skills.matcher import MatchedSkill, match_skills
 from openshard.run.validator_policy import ValidatorPolicyDecision, should_run_validator
 from openshard.verification.executor import run_verification_plan as _run_verification_plan, confirm_or_abort  # noqa: F401
-from openshard.verification.plan import CommandSafety, VerificationPlan, build_verification_plan
+from openshard.verification.plan import CommandSafety, VerificationPlan, build_verification_plan, safe_check_label
 
 
 def _build_explicit_file_context(task: str, *, root: Path | None = None) -> str:
@@ -1552,6 +1552,13 @@ class RunPipeline:
                 _loop_meta.output_chars = len(_loop_output)
                 _loop_meta.truncated = len(_loop_output) > 1200
                 _loop_meta.passed = _loop_code == 0
+                # Record per-check proof — safe labels only, no raw paths
+                _check_label = safe_check_label(_verification_plan.commands[0])
+                _loop_meta.check_attempted = [_check_label]
+                if _loop_code == 0:
+                    _loop_meta.check_passed = [_check_label]
+                else:
+                    _loop_meta.check_failed = [_check_label]
                 _vst_first = "passed" if _loop_meta.passed else "failed"
                 if hasattr(generator, "record_osn_loop_step"):
                     generator.record_osn_loop_step("verify", _vst_first, verification_status=_vst_first)
@@ -1677,6 +1684,13 @@ class RunPipeline:
                     generator.native_meta.plan_ledger, "Run verification", _vplan_status
                 )
             if not _loop_meta.attempted:
+                # Record skipped check labels for commands that were blocked or needed approval
+                for _cmd in _verification_plan.commands:
+                    if _cmd.safety != CommandSafety.safe:
+                        _loop_meta.check_skipped.append(safe_check_label(_cmd))
+                        _loop_meta.check_skipped_reasons.append(
+                            f"{_cmd.safety.value}: {_cmd.reason}"[:80]
+                        )
                 record_native_edit_loop_attempt(
                     _edit_loop,
                     attempt_index=1,
@@ -2215,13 +2229,10 @@ class RunPipeline:
                 )
                 # Build and persist OSN verification contract
                 if _native_meta.osn_loop_summary is not None:
-                    from openshard.native.verification_contract import (
-                        build_osn_verification_contract as _build_vc,
-                    )
-                    _native_meta.osn_verification_contract = _build_vc(
-                        osn_observation=_native_meta.osn_observation,
-                        osn_loop_summary=_native_meta.osn_loop_summary,
-                        is_write_task=not _readonly_task,
+                    _native_meta.osn_verification_contract = (
+                        _build_osn_verification_contract_with_loop(
+                            _native_meta, is_write_task=not _readonly_task
+                        )
                     )
                     _extra_metadata["osn_verification_contract"] = asdict(
                         _native_meta.osn_verification_contract
@@ -2454,6 +2465,22 @@ def _safe_git_info(path: Path) -> dict[str, object]:
         return result
     except Exception:
         return {"repo_name": repo_name}
+
+
+def _build_osn_verification_contract_with_loop(native_meta: Any, *, is_write_task: bool):
+    """Build the OSN verification contract wired to actual execution results.
+
+    Extracted so that the verification_loop wiring can be independently tested
+    without standing up the full pipeline. Changing the signature here breaks
+    test_osn_verification_contract.py::test_54_pipeline_helper_wires_verification_loop.
+    """
+    from openshard.native.verification_contract import build_osn_verification_contract
+    return build_osn_verification_contract(
+        osn_observation=native_meta.osn_observation,
+        osn_loop_summary=native_meta.osn_loop_summary,
+        is_write_task=is_write_task,
+        verification_loop=native_meta.verification_loop,
+    )
 
 
 def _log_run(
