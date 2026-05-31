@@ -2165,6 +2165,7 @@ class RunPipeline:
                     else None
                 ),
             }
+        _promote_sandbox_git_metadata(_extra_metadata)
         # For non-native staged/direct runs, save tier_dispatch_receipt at top level
         if _native_meta is None and _tier_dispatch_receipt is not None:
             from dataclasses import asdict as _asdict
@@ -2454,6 +2455,21 @@ def _safe_git_info(path: Path) -> dict[str, object]:
         return result
     except Exception:
         return {"repo_name": repo_name}
+
+
+def _promote_sandbox_git_metadata(extra_metadata: dict | None) -> None:
+    """Promote git_base_branch and git_base_commit_hash from sandbox sub-dict to top-level."""
+    if extra_metadata is None:
+        return
+    _sandbox = extra_metadata.get("sandbox")
+    if not isinstance(_sandbox, dict):
+        return
+    _gb = _sandbox.get("git_base_branch")
+    _gc = _sandbox.get("git_base_commit_hash")
+    if _gb is not None:
+        extra_metadata["git_base_branch"] = _gb
+    if _gc is not None:
+        extra_metadata["git_base_commit_hash"] = _gc
 
 
 def _log_run(
