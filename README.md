@@ -332,7 +332,8 @@ Record feedback:
 openshard feedback --outcome accepted              # Mark the latest run as accepted
 openshard feedback --outcome partial               # Mark the latest run as partly useful
 openshard feedback --outcome rejected              # Mark the latest run as not useful
-openshard feedback --outcome needs_work            # Mark the latest run as needing more work
+openshard feedback --outcome abandoned             # Mark the latest run as abandoned
+openshard feedback --outcome accepted --reason "kept as-is"  # Optionally include a free-text reason
 ```
 Infer local session signals:
 
