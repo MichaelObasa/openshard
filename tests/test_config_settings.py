@@ -175,3 +175,32 @@ class TestNoConfigFallback(unittest.TestCase):
         self.assertIn("model_tiers", cfg)
         self.assertIn("approval_mode", cfg)
         self.assertIsInstance(cfg["model_tiers"], list)
+
+
+# ---------------------------------------------------------------------------
+# Bundled default_config.yml via importlib.resources
+# ---------------------------------------------------------------------------
+
+class TestBundledConfig(unittest.TestCase):
+
+    def test_bundled_config_accessible(self):
+        from importlib.resources import files
+        pkg_cfg = files("openshard.config").joinpath("default_config.yml")
+        with pkg_cfg.open("r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+        self.assertIsInstance(data, dict)
+        self.assertIn("model_tiers", data)
+
+    def test_load_config_returns_dict_in_clean_environment(self):
+        """No env var, no local config in CWD → must return a dict, never raise."""
+        clean_env = {k: v for k, v in os.environ.items() if k != "OPENSHARD_CONFIG"}
+        with tempfile.TemporaryDirectory() as tmp:
+            orig = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch.dict(os.environ, clean_env, clear=True):
+                    cfg = load_config()
+                self.assertIsInstance(cfg, dict)
+                self.assertIn("model_tiers", cfg)
+            finally:
+                os.chdir(orig)

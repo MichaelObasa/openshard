@@ -1,15 +1,19 @@
-"""Tests for build_stage_displays() and the post-run stage summary panel.
+"""Tests for build_stage_displays(), the post-run stage summary panel, and
+terminal-safety helpers.
 
-Most tests are pure unit tests against build_stage_displays() — no CLI
+Most tests are pure unit tests against build_stage_displays() - no CLI
 invocation needed. A single integration smoke test checks that openshard last
 rendering is unaffected.
 """
 from __future__ import annotations
 
+import sys
+import types as _types
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
-from openshard.cli.run_output import build_stage_displays, render_run_timeline
+from openshard.cli.run_output import _safe_console_text, build_stage_displays, render_run_timeline
 from openshard.execution.stages import Stage, StageRun
 from openshard.routing.engine import RoutingDecision
 
@@ -511,3 +515,74 @@ class TestReceiptPanel(unittest.TestCase):
         out = self._render_plain(self._write_stages(n_files=3), mode_label="Run")
         self.assertIn("Work", out)
         self.assertIn("3 files changed", out)
+
+
+# ---------------------------------------------------------------------------
+# _safe_console_text — Windows CP1252 safety
+# ---------------------------------------------------------------------------
+
+class TestSafeConsoleText(unittest.TestCase):
+
+    def _mock_stdout(self, encoding: str):
+        mock_stdout = _types.SimpleNamespace(encoding=encoding)
+        return patch.object(sys, "stdout", mock_stdout)
+
+    def test_utf8_preserves_arrow(self):
+        with self._mock_stdout("utf-8"):
+            result = _safe_console_text("A → B")
+        self.assertEqual(result, "A → B")
+
+    def test_cp1252_does_not_raise(self):
+        with self._mock_stdout("cp1252"):
+            result = _safe_console_text("A → B")
+        self.assertIsInstance(result, str)
+
+    def test_cp1252_arrow_becomes_ascii(self):
+        with self._mock_stdout("cp1252"):
+            result = _safe_console_text("A → B")
+        self.assertEqual(result, "A -> B")
+
+    def test_ascii_em_dash_becomes_hyphen(self):
+        # — is in CP1252 (0x97) so it encodes fine there; use ascii to test substitution
+        with self._mock_stdout("ascii"):
+            result = _safe_console_text("foo — bar")
+        self.assertEqual(result, "foo - bar")
+
+    def test_ascii_en_dash_becomes_hyphen(self):
+        # – is in CP1252 (0x96) so it encodes fine there; use ascii to test substitution
+        with self._mock_stdout("ascii"):
+            result = _safe_console_text("foo – bar")
+        self.assertEqual(result, "foo - bar")
+
+    def test_cp1252_checkmark_becomes_ok(self):
+        with self._mock_stdout("cp1252"):
+            result = _safe_console_text("✓ done")
+        self.assertEqual(result, "OK done")
+
+    def test_cp1252_cross_becomes_x(self):
+        with self._mock_stdout("cp1252"):
+            result = _safe_console_text("✖ failed")
+        self.assertEqual(result, "X failed")
+
+    def test_cp1252_warning_becomes_bang(self):
+        with self._mock_stdout("cp1252"):
+            result = _safe_console_text("⚠ caution")
+        self.assertEqual(result, "! caution")
+
+    def test_ascii_passthrough(self):
+        text = "plain ASCII text"
+        with self._mock_stdout("ascii"):
+            result = _safe_console_text(text)
+        self.assertEqual(result, text)
+
+    def test_empty_string(self):
+        with self._mock_stdout("cp1252"):
+            result = _safe_console_text("")
+        self.assertEqual(result, "")
+
+    def test_receipt_model_line_cp1252(self):
+        """The receipt model line that caused the original crash now renders legibly."""
+        receipt_line = "  Routing       Auto → DeepSeek V4 Pro"
+        with self._mock_stdout("cp1252"):
+            result = _safe_console_text(receipt_line)
+        self.assertEqual(result, "  Routing       Auto -> DeepSeek V4 Pro")
