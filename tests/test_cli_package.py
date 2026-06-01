@@ -28,3 +28,22 @@ class TestCliPackage(unittest.TestCase):
     def test_package_version_importable(self):
         import openshard
         self.assertRegex(openshard.__version__, r"^\d+\.\d+")
+
+    def test_run_help_exits_zero(self):
+        result = CliRunner().invoke(cli, ["run", "--help"])
+        self.assertEqual(result.exit_code, 0)
+
+    def test_reflect_last_help_exits_zero(self):
+        result = CliRunner().invoke(cli, ["reflect", "last", "--help"])
+        self.assertEqual(result.exit_code, 0)
+
+    def test_pr_comment_help_exits_zero(self):
+        result = CliRunner().invoke(cli, ["pr", "comment", "--help"])
+        self.assertEqual(result.exit_code, 0)
+
+    def test_run_dry_run_no_config_crash(self):
+        """Config loading must not crash; any failure should be API-related, not config-related."""
+        result = CliRunner().invoke(cli, ["run", "test task", "--dry-run"])
+        output = result.output or ""
+        self.assertNotIn("Config file not found", output)
+        self.assertNotIn("dist-packages/config.yml", output)

@@ -1,4 +1,5 @@
 import json
+import locale
 import re
 import sys
 import threading
@@ -13,6 +14,35 @@ from openshard.execution.generator import ChangedFile, ExecutionGenerator
 from openshard.execution.stages import StageRun
 from openshard.routing.engine import MODEL_STRONG, RoutingDecision
 from openshard.run.timeline import normalize_timeline, timeline_symbol
+
+
+_ASCII_FALLBACKS: tuple[tuple[str, str], ...] = (
+    ("→", "->"),   # →
+    ("–", "-"),    # –
+    ("—", "-"),    # —
+    ("✓", "OK"),   # ✓
+    ("✔", "OK"),   # ✔
+    ("✖", "X"),    # ✖
+    ("⚠", "!"),    # ⚠
+)
+
+
+def _safe_console_text(text: str) -> str:
+    """Return *text* encoded safely for the current stdout.
+
+    On UTF-8 terminals the string is returned unchanged. On narrow encodings
+    (e.g. Windows CP1252) common symbols are substituted with readable ASCII
+    equivalents before the final errors="replace" pass, so output stays legible
+    rather than showing '?'.
+    """
+    encoding = getattr(sys.stdout, "encoding", None) or locale.getpreferredencoding(False) or "utf-8"
+    try:
+        text.encode(encoding)
+        return text
+    except (UnicodeEncodeError, LookupError):
+        for char, replacement in _ASCII_FALLBACKS:
+            text = text.replace(char, replacement)
+        return text.encode(encoding, errors="replace").decode(encoding)
 
 
 class _Spinner:
@@ -2348,7 +2378,7 @@ def render_post_run(
         routing_selected_model=routing_selected_model or None,
     )
     click.echo("")
-    click.echo(render_compact_shard_receipt(receipt))
+    click.echo(_safe_console_text(render_compact_shard_receipt(receipt)))
 
     if detail == "default":
         return
