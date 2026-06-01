@@ -2179,6 +2179,7 @@ class RunPipeline:
                     else None
                 ),
             }
+        _promote_sandbox_git_metadata(_extra_metadata)
         # For non-native staged/direct runs, save tier_dispatch_receipt at top level
         if _native_meta is None and _tier_dispatch_receipt is not None:
             from dataclasses import asdict as _asdict

@@ -3230,6 +3230,9 @@ class NativeSandboxMeta:
     worktree_path: str | None = None
     worktree_branch: str | None = None
     fallback_reason: str | None = None
+    git_base_branch: str | None = None
+    git_base_commit_hash: str | None = None
+    safe_workspace_display_name: str | None = None
 
 
 _ADVISORY_MODEL_FAILURE_THRESHOLD: int = 2
