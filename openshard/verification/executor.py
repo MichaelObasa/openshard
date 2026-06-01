@@ -76,6 +76,11 @@ def run_verification_plan(
         if not capture:
             click.echo(msg)
         return (1, msg) if capture else 1
+    except FileNotFoundError:
+        msg = f"  {label} not found"
+        if not capture:
+            click.echo(msg)
+        return (1, msg) if capture else 1
 
     if capture:
         return proc.returncode, proc.stdout or ""

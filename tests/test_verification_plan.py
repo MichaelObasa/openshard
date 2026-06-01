@@ -13,6 +13,7 @@ from openshard.verification.plan import (
     classify_command_safety,
     parse_command_to_argv,
     render_verification_plan,
+    safe_check_label,
 )
 
 
@@ -251,3 +252,59 @@ def test_render_shows_config_source():
     assert "config" in rendered
     assert "safe" in rendered
     assert "python -m pytest" in rendered
+
+
+# ---------------------------------------------------------------------------
+# safe_check_label
+# ---------------------------------------------------------------------------
+
+
+def _make_cmd_for_label(argv: list[str]) -> object:
+    from openshard.verification.plan import VerificationCommand, CommandSafety, VerificationKind, VerificationSource
+    return VerificationCommand(
+        name="tests",
+        argv=argv,
+        kind=VerificationKind.test,
+        source=VerificationSource.detected,
+        safety=CommandSafety.safe,
+        reason="safe",
+    )
+
+
+def test_safe_check_label_simple():
+    cmd = _make_cmd_for_label(["pytest"])
+    assert safe_check_label(cmd) == "pytest"
+
+
+def test_safe_check_label_strips_sys_executable():
+    cmd = _make_cmd_for_label([sys.executable, "-m", "pytest"])
+    label = safe_check_label(cmd)
+    assert sys.executable not in label
+    assert "python" in label
+    assert "pytest" in label
+
+
+def test_safe_check_label_strips_posix_absolute_path():
+    cmd = _make_cmd_for_label(["/usr/local/bin/pytest"])
+    label = safe_check_label(cmd)
+    assert "/" not in label
+    assert label == "pytest"
+
+
+def test_safe_check_label_strips_windows_absolute_path():
+    cmd = _make_cmd_for_label(["C:\\Python311\\python.exe", "-m", "pytest"])
+    label = safe_check_label(cmd)
+    assert "C:\\" not in label
+    assert "Python311" not in label
+    assert "pytest" in label
+
+
+def test_safe_check_label_caps_at_50():
+    long_token = "a" * 60
+    cmd = _make_cmd_for_label([long_token])
+    assert len(safe_check_label(cmd)) <= 50
+
+
+def test_safe_check_label_npm_run_test():
+    cmd = _make_cmd_for_label(["npm", "run", "test"])
+    assert safe_check_label(cmd) == "npm run test"

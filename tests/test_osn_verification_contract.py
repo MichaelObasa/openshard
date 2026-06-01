@@ -463,5 +463,275 @@ class TestRegression(unittest.TestCase):
         self.assertEqual(c.status, "unknown")
 
 
+# ---------------------------------------------------------------------------
+# 40-50: Per-check proof wiring (verification_loop parameter)
+# ---------------------------------------------------------------------------
+
+def _make_vloop(
+    *,
+    check_attempted: list[str] | None = None,
+    check_passed: list[str] | None = None,
+    check_failed: list[str] | None = None,
+    check_skipped: list[str] | None = None,
+    check_skipped_reasons: list[str] | None = None,
+) -> Any:
+    return SimpleNamespace(
+        check_attempted=check_attempted or [],
+        check_passed=check_passed or [],
+        check_failed=check_failed or [],
+        check_skipped=check_skipped or [],
+        check_skipped_reasons=check_skipped_reasons or [],
+    )
+
+
+class TestVerificationLoopWiring(unittest.TestCase):
+    def setUp(self) -> None:
+        from openshard.native.verification_contract import build_osn_verification_contract
+        self.build = build_osn_verification_contract
+
+    def test_40_loop_none_is_backward_compat(self) -> None:
+        loop_summary = _make_loop_summary(verification_attempted=True, verification_passed=True)
+        contract = self.build(
+            osn_observation=None,
+            osn_loop_summary=loop_summary,
+            verification_loop=None,
+        )
+        self.assertEqual(contract.attempted_checks, [])
+        self.assertEqual(contract.passed_checks, [])
+
+    def test_41_attempted_checks_populated_from_loop(self) -> None:
+        loop_summary = _make_loop_summary(verification_attempted=True, verification_passed=True)
+        vloop = _make_vloop(check_attempted=["pytest"], check_passed=["pytest"])
+        contract = self.build(
+            osn_observation=None,
+            osn_loop_summary=loop_summary,
+            verification_loop=vloop,
+        )
+        self.assertEqual(contract.attempted_checks, ["pytest"])
+
+    def test_42_passed_checks_populated_from_loop(self) -> None:
+        loop_summary = _make_loop_summary(verification_attempted=True, verification_passed=True)
+        vloop = _make_vloop(check_attempted=["pytest"], check_passed=["pytest"])
+        contract = self.build(
+            osn_observation=None,
+            osn_loop_summary=loop_summary,
+            verification_loop=vloop,
+        )
+        self.assertEqual(contract.passed_checks, ["pytest"])
+        self.assertEqual(contract.failed_checks, [])
+
+    def test_43_failed_checks_populated_from_loop(self) -> None:
+        loop_summary = _make_loop_summary(verification_attempted=True, verification_passed=False)
+        vloop = _make_vloop(check_attempted=["pytest"], check_failed=["pytest"])
+        contract = self.build(
+            osn_observation=None,
+            osn_loop_summary=loop_summary,
+            verification_loop=vloop,
+        )
+        self.assertEqual(contract.failed_checks, ["pytest"])
+        self.assertEqual(contract.passed_checks, [])
+
+    def test_44_skipped_checks_and_reason_from_loop(self) -> None:
+        loop_summary = _make_loop_summary(verification_attempted=False)
+        vloop = _make_vloop(
+            check_skipped=["make test"],
+            check_skipped_reasons=["needs_approval: medium-risk command"],
+        )
+        contract = self.build(
+            osn_observation=None,
+            osn_loop_summary=loop_summary,
+            verification_loop=vloop,
+        )
+        self.assertEqual(contract.skipped_checks, ["make test"])
+        self.assertIn("needs_approval", contract.skipped_reason)
+
+    def test_45_expected_checks_seeded_from_loop_when_obs_empty(self) -> None:
+        loop_summary = _make_loop_summary(verification_attempted=True, verification_passed=True)
+        vloop = _make_vloop(check_attempted=["pytest"], check_passed=["pytest"])
+        contract = self.build(
+            osn_observation=None,
+            osn_loop_summary=loop_summary,
+            verification_loop=vloop,
+        )
+        self.assertIn("pytest", contract.expected_checks)
+
+    def test_46_obs_expected_checks_not_overridden_by_loop(self) -> None:
+        obs = _make_observation(suggested_checks=["ruff", "pytest"])
+        loop_summary = _make_loop_summary(verification_attempted=True, verification_passed=True)
+        vloop = _make_vloop(check_attempted=["pytest"], check_passed=["pytest"])
+        contract = self.build(
+            osn_observation=obs,
+            osn_loop_summary=loop_summary,
+            verification_loop=vloop,
+        )
+        self.assertIn("ruff", contract.expected_checks)
+
+    def test_47_check_lists_capped_at_max(self) -> None:
+        many = [f"check_{i}" for i in range(15)]
+        loop_summary = _make_loop_summary(verification_attempted=True, verification_passed=True)
+        vloop = _make_vloop(check_attempted=many, check_passed=many)
+        contract = self.build(
+            osn_observation=None,
+            osn_loop_summary=loop_summary,
+            verification_loop=vloop,
+        )
+        self.assertLessEqual(len(contract.attempted_checks), 8)
+        self.assertLessEqual(len(contract.passed_checks), 8)
+
+    def test_48_render_shows_passed_row(self) -> None:
+        from openshard.native.verification_contract import OSNVerificationContract, render_osn_verification_receipt
+        contract = OSNVerificationContract(
+            enabled=True, status="passed",
+            attempted_checks=["pytest"], passed_checks=["pytest"],
+        )
+        lines = render_osn_verification_receipt(contract)
+        self.assertTrue(any("Passed" in ln for ln in lines))
+        self.assertTrue(any("pytest" in ln for ln in lines))
+
+    def test_49_render_shows_failed_row(self) -> None:
+        from openshard.native.verification_contract import OSNVerificationContract, render_osn_verification_receipt
+        contract = OSNVerificationContract(
+            enabled=True, status="failed",
+            attempted_checks=["pytest"], failed_checks=["pytest"],
+        )
+        lines = render_osn_verification_receipt(contract)
+        self.assertTrue(any("Failed" in ln for ln in lines))
+
+    def test_50_render_shows_skipped_row(self) -> None:
+        from openshard.native.verification_contract import OSNVerificationContract, render_osn_verification_receipt
+        contract = OSNVerificationContract(
+            enabled=True, status="skipped",
+            skipped_checks=["make test"],
+            skipped_reason="needs_approval: medium-risk",
+        )
+        lines = render_osn_verification_receipt(contract)
+        self.assertTrue(any("Skipped" in ln for ln in lines))
+        self.assertTrue(any("make test" in ln for ln in lines))
+
+    def test_51_render_backward_compat_empty_per_check_lists(self) -> None:
+        from openshard.native.verification_contract import OSNVerificationContract, render_osn_verification_receipt
+        contract = OSNVerificationContract(enabled=True, status="passed")
+        lines = render_osn_verification_receipt(contract)
+        self.assertTrue(any("OSN VERIFICATION" in ln for ln in lines))
+        self.assertFalse(any("Passed" in ln for ln in lines))
+        self.assertFalse(any("Failed" in ln for ln in lines))
+
+
+class TestVerificationLoopWiringIntegration(unittest.TestCase):
+    """Integration test: proves build_osn_verification_contract consumes verification_loop
+    check fields and surfaces them in the contract output, as wired by the pipeline."""
+
+    def test_54_pipeline_helper_wires_verification_loop(self) -> None:
+        """Imports _build_osn_verification_contract_with_loop from the real pipeline module
+        and calls it with a native_meta stub. Proves the helper passes verification_loop
+        into build_osn_verification_contract — the wiring cannot be silently removed."""
+        from openshard.run.pipeline import _build_osn_verification_contract_with_loop
+        from openshard.native.context import NativeVerificationLoop
+
+        loop = NativeVerificationLoop()
+        loop.attempted = True
+        loop.passed = True
+        loop.check_attempted = ["pytest"]
+        loop.check_passed = ["pytest"]
+
+        native_meta = SimpleNamespace(
+            osn_observation=_make_observation(suggested_checks=[]),
+            osn_loop_summary=_make_loop_summary(
+                verification_attempted=True, verification_passed=True
+            ),
+            verification_loop=loop,
+        )
+
+        contract = _build_osn_verification_contract_with_loop(
+            native_meta, is_write_task=False
+        )
+
+        self.assertEqual(contract.attempted_checks, ["pytest"])
+        self.assertEqual(contract.passed_checks, ["pytest"])
+        self.assertEqual(contract.status, "passed")
+
+    def test_52_pipeline_wiring_round_trip(self) -> None:
+        """Simulate the pipeline flow: populate NativeVerificationLoop per-check fields,
+        pass to build_osn_verification_contract, assert contract reflects actual results."""
+        from openshard.native.context import NativeVerificationLoop
+        from openshard.native.verification_contract import build_osn_verification_contract
+        from openshard.verification.plan import (
+            CommandSafety, VerificationCommand, VerificationKind,
+            VerificationPlan, VerificationSource, safe_check_label,
+        )
+
+        # Simulate a safe plan with one pytest command
+        cmd = VerificationCommand(
+            name="tests", argv=["pytest"],
+            kind=VerificationKind.test, source=VerificationSource.detected,
+            safety=CommandSafety.safe, reason="matches safe prefix: pytest",
+        )
+        plan = VerificationPlan(commands=[cmd])
+
+        # Simulate the pipeline populating the loop (as wired in pipeline.py)
+        loop = NativeVerificationLoop()
+        loop.attempted = True
+        loop.exit_code = 0
+        loop.passed = True
+        check_label = safe_check_label(plan.commands[0])
+        loop.check_attempted = [check_label]
+        loop.check_passed = [check_label]
+
+        # Simulate build_osn_verification_contract call with verification_loop
+        loop_summary = _make_loop_summary(verification_attempted=True, verification_passed=True)
+        contract = build_osn_verification_contract(
+            osn_observation=None,
+            osn_loop_summary=loop_summary,
+            is_write_task=True,
+            verification_loop=loop,
+        )
+
+        self.assertEqual(contract.status, "passed")
+        self.assertEqual(contract.attempted_checks, ["pytest"])
+        self.assertEqual(contract.passed_checks, ["pytest"])
+        self.assertEqual(contract.failed_checks, [])
+        self.assertIn("pytest", contract.expected_checks)
+        self.assertFalse(contract.manual_review_required)
+
+    def test_53_pipeline_wiring_skipped_unsafe_command(self) -> None:
+        """Simulate: command not-all-safe → check_skipped populated → contract reflects it."""
+        from openshard.native.context import NativeVerificationLoop
+        from openshard.native.verification_contract import build_osn_verification_contract
+        from openshard.verification.plan import (
+            CommandSafety, VerificationCommand, VerificationKind,
+            VerificationPlan, VerificationSource, safe_check_label,
+        )
+
+        cmd = VerificationCommand(
+            name="verification", argv=["make", "test"],
+            kind=VerificationKind.unknown, source=VerificationSource.detected,
+            safety=CommandSafety.needs_approval,
+            reason="medium-risk command requires approval: make",
+        )
+        plan = VerificationPlan(commands=[cmd])
+
+        # Simulate not-all-safe branch in pipeline
+        loop = NativeVerificationLoop()
+        loop.attempted = False
+        check_label = safe_check_label(plan.commands[0])
+        loop.check_skipped = [check_label]
+        loop.check_skipped_reasons = [
+            f"{cmd.safety.value}: {cmd.reason}"[:80]
+        ]
+
+        loop_summary = _make_loop_summary(verification_attempted=False)
+        contract = build_osn_verification_contract(
+            osn_observation=None,
+            osn_loop_summary=loop_summary,
+            is_write_task=True,
+            verification_loop=loop,
+        )
+
+        self.assertEqual(contract.status, "skipped")
+        self.assertEqual(contract.skipped_checks, ["make test"])
+        self.assertIn("needs_approval", contract.skipped_reason)
+        self.assertTrue(contract.manual_review_required)
+
+
 if __name__ == "__main__":
     unittest.main()
