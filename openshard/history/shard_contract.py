@@ -849,6 +849,41 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
             ):
                 _policy_decisions.append(_pd)
 
+    # Context utilisation — read flat keys written by _populate_context_usage_metadata.
+    _ctx_considered = entry.get("context_files_considered_count")
+    if not isinstance(_ctx_considered, int):
+        _ctx_considered = None
+    _ctx_injected = entry.get("context_files_injected_count")
+    if not isinstance(_ctx_injected, int):
+        _ctx_injected = None
+    _ctx_ratio_raw = entry.get("context_utilisation_ratio")
+    if isinstance(_ctx_ratio_raw, bool) or not isinstance(_ctx_ratio_raw, (int, float)):
+        _ctx_ratio_raw = None
+    _ctx_ratio: float | None = float(_ctx_ratio_raw) if _ctx_ratio_raw is not None else None
+
+    # Execution spans — read list written by _populate_execution_span_metadata.
+    _execution_spans: list[ExecutionSpan] = []
+    _raw_spans = entry.get("execution_spans") or []
+    if isinstance(_raw_spans, list):
+        for _s in _raw_spans:
+            if not isinstance(_s, dict):
+                continue
+            _s_id = _s.get("span_id")
+            _s_name = _s.get("name")
+            if not _s_id or not _s_name:
+                continue
+            _s_dur = _s.get("duration_ms")
+            _execution_spans.append(ExecutionSpan(
+                span_id=str(_s_id),
+                name=str(_s_name),
+                kind=str(_s.get("kind") or "phase"),
+                started_at=_s.get("started_at") or None,
+                duration_ms=int(_s_dur) if isinstance(_s_dur, int) else None,
+                status=_s.get("status") or None,
+                error_class=_s.get("error_class") or None,
+                summary=str(_s["summary"])[:200] if _s.get("summary") else None,
+            ))
+
     return ShardReceipt(
         shard_id=entry.get("shard_id") or _make_shard_id(timestamp, index),
         created_at=timestamp,
@@ -900,6 +935,10 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         git_base_commit_hash=entry.get("git_base_commit_hash") or None,
         error_class=entry.get("error_class") or None,
         error_message=entry.get("error_message") or None,
+        context_files_considered_count=_ctx_considered,
+        context_files_injected_count=_ctx_injected,
+        context_utilisation_ratio=_ctx_ratio,
+        execution_spans=_execution_spans,
         evidence_capsules=_evidence_capsules,
         policy_decisions=_policy_decisions,
         adapter=entry.get("adapter") or None,
