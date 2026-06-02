@@ -2320,6 +2320,9 @@ class RunPipeline:
                 _extra_metadata["policy_decisions"] = _appended
         except Exception:
             pass  # Never break the run
+        # Promote context utilisation and execution spans into top-level metadata.
+        _populate_context_usage_metadata(_extra_metadata)
+        _populate_execution_span_metadata(_extra_metadata)
         try:
             _log_run(start, _task_display, generator, retry_triggered, final_files,
                      verification_attempted=(write and verify),
@@ -2497,6 +2500,78 @@ def _promote_sandbox_git_metadata(extra_metadata: dict | None) -> None:
         extra_metadata["git_base_branch"] = _gb
     if _gc is not None:
         extra_metadata["git_base_commit_hash"] = _gc
+
+
+def _populate_context_usage_metadata(extra_metadata: dict | None) -> None:
+    """Promote context utilisation fields from nested context_provenance to top-level.
+
+    Reads extra_metadata["context_provenance"]["total_items"] and
+    ["injected_sources"] and writes three flat keys:
+      context_files_considered_count
+      context_files_injected_count
+      context_utilisation_ratio   (None when total is zero)
+
+    No-ops when extra_metadata is None, when context_provenance is absent or
+    malformed, or when the counts are not integers. Never raises.
+    """
+    if extra_metadata is None:
+        return
+    try:
+        cp = extra_metadata.get("context_provenance")
+        if not isinstance(cp, dict):
+            return
+        total = cp.get("total_items")
+        injected = cp.get("injected_sources")
+        if not isinstance(total, int) or not isinstance(injected, int):
+            return
+        extra_metadata["context_files_considered_count"] = total
+        extra_metadata["context_files_injected_count"] = injected
+        extra_metadata["context_utilisation_ratio"] = (
+            round(injected / total, 4) if total > 0 else None
+        )
+    except Exception:
+        pass
+
+
+def _populate_execution_span_metadata(extra_metadata: dict | None) -> None:
+    """Convert native_loop_trace phase events into execution_spans dicts.
+
+    Each NativeLoopEvent (phase, status, summary) becomes a span dict
+    compatible with ExecutionSpan. Timestamps and durations are not available
+    from the loop trace and are left as None. Blank-phase events are skipped.
+    Long summaries are capped at 200 characters. No raw content is stored.
+
+    No-ops when extra_metadata is None, when native_loop_trace is absent,
+    empty, or malformed. Never raises.
+    """
+    if extra_metadata is None:
+        return
+    try:
+        loop_events = extra_metadata.get("native_loop_trace")
+        if not isinstance(loop_events, list) or not loop_events:
+            return
+        spans: list[dict] = []
+        for i, ev in enumerate(loop_events):
+            if not isinstance(ev, dict):
+                continue
+            phase = str(ev.get("phase") or "").strip()
+            if not phase:
+                continue
+            raw_summary = ev.get("summary") or None
+            spans.append({
+                "span_id": f"phase-{i}-{phase}",
+                "name": phase,
+                "kind": "phase",
+                "started_at": None,
+                "duration_ms": None,
+                "status": str(ev.get("status") or "completed"),
+                "error_class": None,
+                "summary": str(raw_summary)[:200] if raw_summary else None,
+            })
+        if spans:
+            extra_metadata["execution_spans"] = spans
+    except Exception:
+        pass
 
 
 def _log_run(
