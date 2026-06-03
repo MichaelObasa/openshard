@@ -1684,6 +1684,93 @@ def stats_completeness(as_json: bool, limit: int) -> None:
             click.echo(f"    - {rec}")
 
 
+@stats_group.command("failures")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Machine-readable output (valid JSON only).")
+@click.option("--limit", default=20, type=click.IntRange(min=1),
+              help="Classify only the most recent N receipts (default 20).")
+def stats_failures(as_json: bool, limit: int) -> None:
+    """Classify recent runs into stable failure categories.
+
+    Local, deterministic, receipt-based: reads existing Shard/run metadata and
+    classifies each recent run into one failure category (or no failure). No
+    network, no model calls; no secrets, raw error messages, or absolute paths
+    leak.
+    """
+    from openshard.history.shard_contract import build_shard_receipt
+    from openshard.history.failures import evaluate_failures
+
+    log_path = Path.cwd() / _LOG_PATH
+    entries = _load_run_entries(log_path)
+
+    if not entries:
+        if as_json:
+            payload = _machine_envelope(
+                "stats failures", "not_found",
+                runs_checked=0,
+                category_counts={},
+                top_categories=[],
+                recommendations=[],
+                failures=[],
+            )
+            click.echo(json.dumps(payload, indent=2))
+        else:
+            click.echo("No run history found. Run 'openshard run' to get started.")
+        return
+
+    recent = entries[-limit:]
+    pairs = [
+        (entry, build_shard_receipt(entry, index=len(entries) - len(recent) + offset))
+        for offset, entry in enumerate(recent)
+    ]
+    report = evaluate_failures(pairs)
+
+    if as_json:
+        payload = _machine_envelope(
+            "stats failures", "ok",
+            runs_checked=report.runs_checked,
+            category_counts=report.category_counts,
+            top_categories=report.top_categories,
+            recommendations=report.recommendations,
+            failures=[
+                {
+                    "shard_id": fc.shard_id,
+                    "category": fc.category,
+                    "confidence": fc.confidence,
+                    "reasons": fc.reasons,
+                    "signals": fc.signals,
+                }
+                for fc in report.failures
+            ],
+        )
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    failure_total = sum(
+        count for name, count in report.category_counts.items()
+        if name != "no_failure_detected"
+    )
+
+    click.echo("\nFailure taxonomy")
+    click.echo(f"  runs checked: {report.runs_checked}")
+    click.echo(f"  failures:     {failure_total}")
+
+    if report.top_categories:
+        click.echo("\n  top failure categories:")
+        for tc in report.top_categories:
+            click.echo(f"    {tc['category']:<22}{tc['count']}")
+
+    if report.recommendations:
+        click.echo("\n  recommendations:")
+        for rec in report.recommendations:
+            click.echo(f"    - {rec}")
+
+    if report.failures:
+        click.echo("\n  recent failures:")
+        for fc in report.failures:
+            click.echo(f"    {fc.shard_id:<12}{fc.category} ({fc.confidence})")
+
+
 @cli.command("apply-last")
 @click.option("--dry-run", is_flag=True, default=False, help="Show what would be applied without copying files.")
 @click.option("--file", "include_files", multiple=True, help="Only apply this relative file path. Can be used multiple times.")
