@@ -8,7 +8,16 @@ from pathlib import Path
 import click
 
 from openshard import __version__
-from openshard.config.settings import load_config, get_api_key, get_anthropic_api_key, get_openai_api_key
+from openshard.config.settings import (
+    load_config,
+    load_config_safe,
+    save_config,
+    find_config_path,
+    get_onboarding,
+    get_api_key,
+    get_anthropic_api_key,
+    get_openai_api_key,
+)
 from openshard.planning.generator import PlanGenerator
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
 from openshard.run.pipeline import (
@@ -2756,6 +2765,203 @@ def session_infer(path: str | None) -> None:
     base_path = Path(path) if path else None
     signals = run_inference(base_path)
     click.echo(f"Inferred {len(signals)} signal(s).")
+
+
+def _current_state() -> dict:
+    """Build the shared onboarding state from the current on-disk config."""
+    from openshard.config import onboarding as ob
+
+    config, valid, path = load_config_safe()
+    return ob.build_state(
+        version=__version__,
+        config_found=path is not None,
+        config_path=path,
+        config_valid=valid,
+        onboarding=get_onboarding(config),
+    )
+
+
+def _echo_warnings_next_steps(state: dict) -> None:
+    warnings = state.get("warnings") or []
+    next_steps = state.get("next_steps") or []
+    if warnings:
+        click.echo("\nWarnings:")
+        for w in warnings:
+            click.echo(f"  ! {w}")
+    if next_steps:
+        click.echo("\nNext steps:")
+        for s in next_steps:
+            click.echo(f"  - {s}")
+
+
+@cli.command()
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output.")
+@click.option("--yes", "-y", "assume_yes", is_flag=True, default=False,
+              help="Non-interactive: apply defaults/flags without prompting.")
+@click.option("--mode", "mode", default=None, help="Usage mode (see options).")
+@click.option("--provider", "provider", default=None, help="Provider preference (see options).")
+@click.option("--model-mode", "model_mode", default=None, help="Model mode (see options).")
+@click.option("--output-mode", "output_mode", default=None, help="Output mode (see options).")
+@click.option("--force", is_flag=True, default=False, help="Overwrite existing onboarding without prompting.")
+def init(as_json: bool, assume_yes: bool, mode: str | None, provider: str | None,
+         model_mode: str | None, output_mode: str | None, force: bool) -> None:
+    """Set up OpenShard for first use (interactive, or --yes / --json)."""
+    from openshard.config import onboarding as ob
+
+    mode_keys = [k for k, _, _ in ob.MODES]
+    provider_keys = [k for k, _, _ in ob.PROVIDERS]
+    model_mode_keys = [k for k, _, _ in ob.MODEL_MODES]
+    output_mode_keys = [k for k, _, _ in ob.OUTPUT_MODES]
+
+    def _validate(name: str, value: str | None, allowed: list[str]) -> None:
+        if value is not None and value not in allowed:
+            raise click.BadParameter(
+                f"'{value}' is not a valid {name}. Choose from: {', '.join(allowed)}.",
+            )
+
+    _validate("mode", mode, mode_keys)
+    _validate("provider", provider, provider_keys)
+    _validate("model-mode", model_mode, model_mode_keys)
+    _validate("output-mode", output_mode, output_mode_keys)
+
+    # --json without --yes: read-only discovery. Never writes.
+    if as_json and not assume_yes:
+        payload = {"options": ob.options_catalog(), "state": _current_state()}
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    def _prompt(label: str, items: list[tuple[str, str, str]], default: str) -> str:
+        click.echo(f"\n{label}:")
+        for key, opt_label, desc in items:
+            click.echo(f"  {key:<16} {opt_label} — {desc}")
+        keys = [k for k, _, _ in items]
+        return click.prompt("  Choice", type=click.Choice(keys), default=default,
+                            show_choices=False)
+
+    if assume_yes:
+        sel_mode = mode or ("native" if ob.any_api_key_present() else "local_only")
+        sel_provider = provider or ob.default_provider()
+        sel_model_mode = model_mode or "balanced"
+        sel_output_mode = output_mode or "human"
+    else:
+        sel_mode = mode or _prompt("Usage mode", ob.MODES,
+                                   "native" if ob.any_api_key_present() else "local_only")
+        sel_provider = provider or _prompt("Provider", ob.PROVIDERS, ob.default_provider())
+        sel_model_mode = model_mode or _prompt("Model mode", ob.MODEL_MODES, "balanced")
+        sel_output_mode = output_mode or _prompt("Output mode", ob.OUTPUT_MODES, "human")
+
+        click.echo("\nSafety:")
+        for note in ob.SAFETY_NOTES:
+            click.echo(f"  - {note}")
+
+    existing = find_config_path()
+    overwrite_warning = None
+    if existing is not None and not force:
+        if assume_yes:
+            overwrite_warning = (
+                "Existing config found; onboarding settings were replaced "
+                "(model settings preserved)."
+            )
+        else:
+            if not click.confirm(
+                "\nConfig already exists. Overwrite onboarding settings? "
+                "(existing model settings are preserved)",
+                default=True,
+            ):
+                click.echo("Aborted; no changes made.")
+                return
+
+    onboarding_block = {
+        "schema_version": ob.SCHEMA_VERSION,
+        "mode": sel_mode,
+        "provider": sel_provider,
+        "model_mode": sel_model_mode,
+        "output_mode": sel_output_mode,
+        "completed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+
+    # Merge over the full loaded base so model_tiers and friends are preserved.
+    base = load_config_safe()[0]
+    base["onboarding"] = onboarding_block
+    written_path = save_config(base)
+
+    config, valid, _ = load_config_safe()
+    state = ob.build_state(
+        version=__version__,
+        config_found=True,
+        config_path=written_path,
+        config_valid=valid,
+        onboarding=get_onboarding(config),
+    )
+    if overwrite_warning:
+        state["warnings"].insert(0, overwrite_warning)
+
+    if as_json:
+        click.echo(json.dumps(state, indent=2))
+        return
+
+    click.echo(f"\nWrote {state['config_path_display']}")
+    click.echo(f"  mode:        {sel_mode}")
+    click.echo(f"  provider:    {sel_provider}")
+    click.echo(f"  model_mode:  {sel_model_mode}")
+    click.echo(f"  output_mode: {sel_output_mode}")
+    _echo_warnings_next_steps(state)
+
+
+@cli.command()
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output.")
+def doctor(as_json: bool) -> None:
+    """Diagnose OpenShard configuration and setup state."""
+    from openshard.config import onboarding as ob
+
+    state = _current_state()
+    state["git_repo"] = ob.detect_git_repo()
+
+    if as_json:
+        click.echo(json.dumps(state, indent=2))
+        return
+
+    click.echo("\nOpenShard Doctor\n")
+    click.echo(f"  version:      {state['openshard_version']}")
+    click.echo(f"  config found: {'yes' if state['config_found'] else 'no'}")
+    click.echo(f"  config path:  {state['config_path_display'] or '-'}")
+    click.echo(f"  config valid: {'yes' if state['config_valid'] else 'no'}")
+    click.echo(f"  git repo:     {'yes' if state['git_repo'] else 'no'}")
+    click.echo("\n  Onboarding:")
+    click.echo(f"    mode:        {state['mode'] or '-'}")
+    click.echo(f"    provider:    {state['provider'] or '-'}")
+    click.echo(f"    model_mode:  {state['model_mode'] or '-'}")
+    click.echo(f"    output_mode: {state['output_mode'] or '-'}")
+    click.echo("\n  API keys (environment):")
+    for prov, present in ob.api_key_present().items():
+        click.echo(f"    {prov:<12} {'yes' if present else 'no'}")
+    _echo_warnings_next_steps(state)
+    click.echo("")
+
+
+@cli.group("config")
+def config_cmd() -> None:
+    """Configuration utilities."""
+
+
+@config_cmd.command("show")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output.")
+def config_show(as_json: bool) -> None:
+    """Show the active configuration with secrets redacted."""
+    import yaml
+
+    from openshard.config import onboarding as ob
+
+    config, valid, _ = load_config_safe()
+    safe = ob.redact(config)
+
+    if as_json:
+        click.echo(json.dumps(safe, indent=2))
+        return
+
+    if not valid:
+        click.echo("Warning: config could not be parsed; showing safe defaults.\n")
+    click.echo(yaml.safe_dump(safe, sort_keys=False, default_flow_style=False).rstrip())
 
 
 if __name__ == "__main__":
