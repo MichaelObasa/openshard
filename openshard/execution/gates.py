@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
 
+from openshard.policy.decision import PolicyDecision, resolve_policy_decisions
+
 SAFE_COMMANDS = [
     "python -m pytest",
     "npm test",
@@ -80,3 +82,33 @@ class GateEvaluator:
         if mismatches:
             return GateDecision(True, f"Stack mismatch: {', '.join(mismatches[:3])}")
         return GateDecision(False, "")
+
+
+def resolve_gate_decisions(decisions: List[GateDecision]) -> GateDecision:
+    """Combine multiple gate decisions through the canonical policy resolver's
+    deny > ask > allow ordering instead of ad-hoc if/elif logic.
+
+    ``required=True`` maps to ``"ask"``, ``required=False`` to ``"allow"``.
+    Decisions are passed in priority order; index-based ``decision_id`` values
+    (``gate-0000``, ``gate-0001``, ...) make the resolver's lexicographic
+    tie-break preserve that input order, so equal-rank ties are deterministic.
+
+    Returns a single GateDecision the caller can act on unchanged. The
+    ``"deny"`` branch is future-safe only — ``GateDecision`` cannot express
+    deny today, so gates never produce it.
+    """
+    if not decisions:
+        return GateDecision(False, "")
+    pds = [
+        PolicyDecision(
+            decision_id=f"gate-{i:04d}",
+            action="gate",
+            resource=None,
+            decision="ask" if d.required else "allow",
+            reason=d.reason or "",
+        )
+        for i, d in enumerate(decisions)
+    ]
+    resolved = resolve_policy_decisions(pds)
+    required = resolved.decision in ("ask", "deny")
+    return GateDecision(required, resolved.reason or "")
