@@ -211,6 +211,67 @@ def _render_repo_map(
         click.echo(f"  ! {warning}")
 
 
+def _render_repo_plan(
+    plan: dict,
+    *,
+    cache_hit: bool,
+    cache_path_display: str,
+) -> None:
+    """Render a repo-aware plan dict (the ``--json`` body) as a human summary.
+
+    ``plan`` is :meth:`RepoAwarePlan.to_dict` output. Paths in ``repo_context``
+    are already relative/sanitised by the repo-map layer, and ``task`` is already
+    sanitised by the planner.
+    """
+    ctx = plan.get("repo_context", {}) or {}
+    click.echo("\nOpenShard Plan")
+
+    click.echo("\nTask:")
+    click.echo(f"  {plan.get('task', '')}")
+
+    click.echo("\nRepo context:")
+    stack: list[str] = []
+    stack.extend(ctx.get("languages", []) or [])
+    stack.extend(ctx.get("frameworks", []) or [])
+    click.echo(f"  Stack: {', '.join(stack) if stack else 'unknown'}")
+
+    test_commands = ctx.get("test_commands", []) or []
+    if test_commands:
+        click.echo(f"  Test command: {', '.join(test_commands)}")
+    else:
+        click.echo("  Test command: none detected")
+
+    important = ctx.get("important_files", []) or []
+    if important:
+        n = len(important)
+        sample = ", ".join(important[:3])
+        suffix = f" + {n - 3} more" if n > 3 else ""
+        click.echo(f"  Suggested files to inspect: {sample}{suffix}")
+
+    risky = ctx.get("risky_areas", []) or []
+    if risky:
+        n = len(risky)
+        sample = ", ".join(risky[:3])
+        suffix = f" + {n - 3} more" if n > 3 else ""
+        click.echo(f"  Risky areas: {n} ({sample}{suffix})")
+
+    click.echo(f"  Git: {'dirty' if ctx.get('git_dirty') else 'clean'}")
+    state = "cache hit" if cache_hit else "rebuilt"
+    click.echo(f"  Repo map: {cache_path_display} ({state})")
+
+    click.echo("\nSuggested plan:")
+    for i, step in enumerate(plan.get("plan_steps", []) or [], 1):
+        click.echo(f"  {i}. {step}")
+
+    click.echo("\nSafety notes:")
+    for note in plan.get("safety_notes", []) or []:
+        click.echo(f"  - {note}")
+
+    warnings = plan.get("warnings", []) or []
+    for warning in warnings:
+        click.echo(f"  ! {warning}")
+
+
 _MODEL_SHORT: dict[str, str] = {
     "deepseek/deepseek-v4-flash":      "DeepSeek V4 Flash",
     "deepseek/deepseek-v4-pro":        "DeepSeek V4 Pro",
