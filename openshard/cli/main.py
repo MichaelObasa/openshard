@@ -1499,6 +1499,100 @@ def pr_comment(output: str | None, as_json: bool, github_step_summary: bool, git
     _warn_missing_github_env(github_step_summary, ss_available, github_output, go_available)
 
 
+@cli.group("ci", invoke_without_command=True)
+@click.pass_context
+def ci_group(ctx: click.Context) -> None:
+    """CI policy checks over the latest OpenShard run receipt."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@ci_group.command("check")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Machine-readable output (valid JSON only).")
+@click.option("--strict", is_flag=True, default=False,
+              help="Treat warnings as failures (exit 1).")
+@click.option("--github-output", "github_output", is_flag=True, default=False,
+              help="Write safe key=value outputs to $GITHUB_OUTPUT (GitHub Actions).")
+def ci_check(as_json: bool, strict: bool, github_output: bool) -> None:
+    """Evaluate the latest Shard receipt and return a CI verdict.
+
+    Local, deterministic, receipt-based: reduces the most recent OpenShard run
+    to pass / warn / fail / skip. No GitHub API, no gh, no network, no auth.
+    Exit code is 1 only for fail (and for warnings under --strict); otherwise 0.
+    """
+    from openshard.history.shard_contract import build_shard_receipt
+    from openshard.ci.policy_check import evaluate_ci_check
+
+    log_path = Path.cwd() / _LOG_PATH
+    entries = _load_run_entries(log_path)
+
+    if not entries:
+        reasons = ["No OpenShard run found to evaluate."]
+        if as_json:
+            body: dict = {
+                "exit_code": 0,
+                "reasons": reasons,
+                "checks": {
+                    "verification": "unknown",
+                    "manual_review_required": False,
+                    "secret_scan_findings": 0,
+                },
+            }
+            if github_output:
+                go_available, go_written = _ci_write_github_output("skip", 0, len(reasons))
+                body["github_output_available"] = go_available
+                body["github_output_written"] = go_written
+            click.echo(json.dumps(_machine_envelope("ci check", "skip", **body), indent=2))
+        else:
+            click.echo("OpenShard CI Check: skip")
+            for reason in reasons:
+                click.echo(f"  - {reason}")
+            if github_output:
+                go_available, _ = _ci_write_github_output("skip", 0, len(reasons))
+                if not go_available:
+                    click.echo(
+                        "warning: GITHUB_OUTPUT is not set; outputs not written.", err=True
+                    )
+        sys.exit(0)
+
+    entry = entries[-1]
+    receipt = build_shard_receipt(entry, index=len(entries) - 1)
+    result = evaluate_ci_check(entry, receipt, strict=strict)
+
+    if as_json:
+        body = {
+            "exit_code": result.exit_code,
+            "reasons": result.reasons,
+            "checks": result.checks,
+        }
+        if github_output:
+            go_available, go_written = _ci_write_github_output(
+                result.status, result.exit_code, len(result.reasons)
+            )
+            body["github_output_available"] = go_available
+            body["github_output_written"] = go_written
+        payload = _machine_envelope(
+            "ci check", result.status, shard_id=result.shard_id,
+            warnings=result.warnings, **body,
+        )
+        click.echo(json.dumps(payload, indent=2))
+        sys.exit(result.exit_code)
+
+    click.echo(f"OpenShard CI Check: {result.status}")
+    for reason in result.reasons:
+        click.echo(f"  - {reason}")
+    for warning in result.warnings:
+        click.echo(f"  - {warning}")
+    if github_output:
+        go_available, _ = _ci_write_github_output(
+            result.status, result.exit_code, len(result.reasons)
+        )
+        if not go_available:
+            click.echo("warning: GITHUB_OUTPUT is not set; outputs not written.", err=True)
+    sys.exit(result.exit_code)
+
+
 @cli.command("apply-last")
 @click.option("--dry-run", is_flag=True, default=False, help="Show what would be applied without copying files.")
 @click.option("--file", "include_files", multiple=True, help="Only apply this relative file path. Can be used multiple times.")
@@ -1877,6 +1971,19 @@ def _github_output_pairs(
         if output_path_key and output_display:
             pairs[output_path_key] = output_display
     return pairs
+
+
+def _ci_write_github_output(
+    status: str, exit_code: int, reasons_count: int
+) -> tuple[bool, bool]:
+    """Write the CI-check scalar outputs to $GITHUB_OUTPUT. Returns (available, written)."""
+    return _write_github_output(
+        {
+            "openshard_ci_status": status,
+            "openshard_ci_exit_code": str(exit_code),
+            "openshard_ci_reasons_count": str(reasons_count),
+        }
+    )
 
 
 def _warn_missing_github_env(
