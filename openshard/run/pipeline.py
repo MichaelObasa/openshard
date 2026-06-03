@@ -28,7 +28,7 @@ from openshard.cli.run_output import (
     _should_shrink,
     render_post_run,
 )
-from openshard.run.timeline import RunTimelineEvent
+from openshard.run.timeline import RunTimelineEvent, make_timeline_event
 from openshard.config.settings import get_anthropic_api_key, get_openai_api_key
 from openshard.execution.gates import GateEvaluator, VALID_APPROVAL_MODES, resolve_gate_decisions
 from openshard.execution.generator import (
@@ -303,7 +303,7 @@ class RunPipeline:
         _timeline: list[RunTimelineEvent] = []
 
         try:
-            _timeline.append(RunTimelineEvent("run_started", "Started run", kind="run"))
+            _timeline.append(make_timeline_event("run_started", "Started run", kind="run"))
             _cfg = self._config
             _cfg_workflow = _cfg.get("workflow", "").strip().lower()
             _cfg_executor_legacy = _cfg.get("executor", "direct").strip().lower()
@@ -324,7 +324,7 @@ class RunPipeline:
                     )
                 effective_workflow = _wf
                 _policy_reason = ""
-                _timeline.append(RunTimelineEvent("workflow_pack_loaded", "Loaded workflow pack", kind="workflow", target=_wf))
+                _timeline.append(make_timeline_event("workflow_pack_loaded", "Loaded workflow pack", kind="workflow", target=_wf))
                 try:
                     from openshard.workflow_packs.packs import load_packs as _load_packs_fn
                     _pack_label = next(
@@ -593,12 +593,12 @@ class RunPipeline:
         _repo_facts: RepoFacts | None = None
         try:
             _repo_facts = analyze_repo(Path.cwd())
-            _timeline.append(RunTimelineEvent("repo_scanned", "Scanned repo", kind="scan"))
+            _timeline.append(make_timeline_event("repo_scanned", "Scanned repo", kind="scan"))
         except Exception:
             pass
 
         if _routed_model:
-            _timeline.append(RunTimelineEvent(
+            _timeline.append(make_timeline_event(
                 "model_selected",
                 f"Routed to {_model_label(_routed_model)}",
                 kind="route",
@@ -1011,8 +1011,8 @@ class RunPipeline:
                     finally:
                         spinner.stop()
                         if not _stage_ok:
-                            _timeline.append(RunTimelineEvent("model_response_received", "Model request failed", kind="model", status="failed"))
-                    _timeline.append(RunTimelineEvent("model_response_received", "Model responded", kind="model", target=_stage_model))
+                            _timeline.append(make_timeline_event("model_response_received", "Model request failed", kind="model", status="failed"))
+                    _timeline.append(make_timeline_event("model_response_received", "Model responded", kind="model", target=_stage_model))
                     stage_runs.append(StageRun(
                         stage=_stage,
                         model=_stage_model,
@@ -1057,8 +1057,8 @@ class RunPipeline:
             finally:
                 spinner.stop()
                 if not _single_ok:
-                    _timeline.append(RunTimelineEvent("model_response_received", "Model request failed", kind="model", status="failed"))
-            _timeline.append(RunTimelineEvent("model_response_received", "Model responded", kind="model", target=_effective_model))
+                    _timeline.append(make_timeline_event("model_response_received", "Model request failed", kind="model", status="failed"))
+            _timeline.append(make_timeline_event("model_response_received", "Model responded", kind="model", target=_effective_model))
             if effective_executor == "native" and generator.native_meta.plan_ledger is not None:
                 from openshard.native.context import update_native_plan_ledger_status
                 generator.native_meta.plan_ledger = update_native_plan_ledger_status(
@@ -1278,7 +1278,7 @@ class RunPipeline:
                         _extraction_source = _extraction_source or "static-review"
             except Exception:
                 pass
-            _timeline.append(RunTimelineEvent(
+            _timeline.append(make_timeline_event(
                 "static_findings_detected",
                 f"Found {len(_extracted_findings)} raw findings",
                 kind="scan",
@@ -1294,7 +1294,7 @@ class RunPipeline:
             except Exception:
                 pass
             if _review_checks:
-                _timeline.append(RunTimelineEvent(
+                _timeline.append(make_timeline_event(
                     "review_checks_recorded",
                     "Recorded review checks",
                     kind="check",
@@ -1380,11 +1380,11 @@ class RunPipeline:
         except Exception:
             pass
         if _is_review_task:
-            _timeline.append(RunTimelineEvent(
+            _timeline.append(make_timeline_event(
                 "review_memo_rendered", "Generated review memo",
                 kind="review", count=len(_extracted_findings),
             ))
-        _timeline.append(RunTimelineEvent("run_completed", "Run completed", kind="run"))
+        _timeline.append(make_timeline_event("run_completed", "Run completed", kind="run"))
         render_post_run(
             stage_runs=stage_runs,
             routing_decision=routing_decision,
@@ -2764,7 +2764,7 @@ def _log_run(
 
     if run_timeline is not None:
         _tl = list(run_timeline)
-        _tl.append(RunTimelineEvent("receipt_saved", "Saved Shard receipt", kind="receipt").to_dict())
+        _tl.append(make_timeline_event("receipt_saved", "Saved Shard receipt", kind="receipt").to_dict())
         entry["run_timeline"] = _tl
 
     from openshard.history.shard_contract import _make_shard_id as _msi
