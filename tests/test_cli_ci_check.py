@@ -184,7 +184,9 @@ def test_github_output_written_when_env_set():
 
 
 def test_github_output_missing_env_does_not_crash():
-    result = _invoke(["--github-output"], entries=[_PASS], env={})
+    # Empty string == treated as unset by _write_github_output; explicit so the
+    # CI runner's own $GITHUB_OUTPUT cannot leak into this "missing env" case.
+    result = _invoke(["--github-output"], entries=[_PASS], env={"GITHUB_OUTPUT": ""})
     assert result.exit_code == 0
     assert "GITHUB_OUTPUT is not set" in result.output
 
@@ -209,7 +211,10 @@ def test_json_github_output_reports_both_booleans():
 
 
 def test_json_github_output_missing_env_booleans_false():
-    result = _invoke(["--json", "--github-output"], entries=[_PASS], env={})
+    # Empty string == treated as unset; explicit so CI's $GITHUB_OUTPUT cannot leak in.
+    result = _invoke(
+        ["--json", "--github-output"], entries=[_PASS], env={"GITHUB_OUTPUT": ""}
+    )
     payload = json.loads(result.output)
     assert payload["github_output_available"] is False
     assert payload["github_output_written"] is False
