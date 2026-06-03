@@ -1310,10 +1310,27 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
 @cli.command()
 @click.option("--more", is_flag=True, default=False, help="Show file list, model names, and token breakdown.")
 @click.option("--full", is_flag=True, default=False, help="Show all stored details including verification and workspace.")
-def last(more: bool, full: bool):
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output.")
+def last(more: bool, full: bool, as_json: bool):
     """Show details of the most recent run without rerunning it."""
-    detail = "full" if full else ("more" if more else "default")
     log_path = Path.cwd() / _LOG_PATH
+
+    if as_json:
+        from openshard.history.shard_contract import build_shard_receipt
+
+        entries = _load_run_entries(log_path)
+        if not entries:
+            click.echo(json.dumps(_machine_envelope("last", "not_found", run=None), indent=2))
+            return
+        entry = entries[-1]
+        receipt = build_shard_receipt(entry, index=len(entries) - 1)
+        payload = _machine_envelope(
+            "last", "ok", shard_id=receipt.shard_id, run=_export_run_entry(entry)
+        )
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    detail = "full" if full else ("more" if more else "default")
     if not log_path.exists():
         click.echo("No run history found. Run a task first with 'openshard run'.")
         return
@@ -1338,7 +1355,8 @@ def reflect_group() -> None:
 
 
 @reflect_group.command("last")
-def reflect_last() -> None:
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output.")
+def reflect_last(as_json: bool) -> None:
     """Show a reflection on the most recent run."""
     from openshard.reflection.reflector import build_run_reflection, render_run_reflection
     from openshard.history.shard_contract import build_shard_receipt
@@ -1346,10 +1364,22 @@ def reflect_last() -> None:
     log_path = Path.cwd() / _LOG_PATH
     entries = _load_run_entries(log_path)
     if not entries:
-        click.echo("No run history found. Run a task first with 'openshard run'.")
+        if as_json:
+            click.echo(json.dumps(_machine_envelope("reflect last", "not_found", reflection=None), indent=2))
+        else:
+            click.echo("No run history found. Run a task first with 'openshard run'.")
         return
     receipt = build_shard_receipt(entries[-1], index=len(entries) - 1)
     reflection = build_run_reflection(receipt)
+    if as_json:
+        from dataclasses import asdict
+
+        payload = _machine_envelope(
+            "reflect last", "ok", shard_id=receipt.shard_id,
+            warnings=list(reflection.warnings), reflection=asdict(reflection),
+        )
+        click.echo(json.dumps(payload, indent=2))
+        return
     for line in render_run_reflection(reflection):
         click.echo(line)
 
@@ -1363,8 +1393,9 @@ def pr_group(ctx: click.Context) -> None:
 
 
 @pr_group.command("comment")
-@click.option("--output", default=None, help="Write markdown to this path instead of stdout.")
-def pr_comment(output: str | None) -> None:
+@click.option("--output", default=None, help="Write output to this path instead of stdout.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output.")
+def pr_comment(output: str | None, as_json: bool) -> None:
     """Generate a GitHub-ready PR comment from the latest OpenShard run."""
     from openshard.history.shard_contract import build_shard_receipt
     from openshard.github.pr_comment import build_pr_comment_summary, render_pr_comment
@@ -1372,11 +1403,34 @@ def pr_comment(output: str | None) -> None:
     log_path = Path.cwd() / _LOG_PATH
     entries = _load_run_entries(log_path)
     if not entries:
-        click.echo("No run history found. Run an OpenShard task first.")
+        if as_json:
+            click.echo(json.dumps(_machine_envelope("pr comment", "not_found", summary=None), indent=2))
+        else:
+            click.echo("No run history found. Run an OpenShard task first.")
         return
     entry = entries[-1]
     receipt = build_shard_receipt(entry, index=len(entries) - 1)
     summary = build_pr_comment_summary(entry, receipt)
+
+    if as_json:
+        from dataclasses import asdict
+
+        body: dict = {"summary": asdict(summary)}
+        if output:
+            body["written"] = True
+            body["output_path_display"] = _safe_output_display(output)
+        payload = _machine_envelope(
+            "pr comment", "ok", shard_id=receipt.shard_id,
+            warnings=list(summary.warnings), **body,
+        )
+        rendered = json.dumps(payload, indent=2)
+        if output:
+            output_path = Path(output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(rendered + "\n", encoding="utf-8")
+        click.echo(rendered)
+        return
+
     markdown = render_pr_comment(summary)
     if output:
         output_path = Path(output)
@@ -1676,6 +1730,37 @@ def _load_run_entries(log_path: Path) -> list[dict]:
         except json.JSONDecodeError:
             continue
     return entries
+
+
+# Schema version for the machine-readable (--json) output contract. Bump only on
+# breaking envelope changes; the underlying structures keep their own source/version.
+_MACHINE_OUTPUT_SCHEMA_VERSION = "1"
+
+
+def _machine_envelope(
+    command: str,
+    status: str,
+    shard_id: str | None = None,
+    warnings: list[str] | None = None,
+    **body: object,
+) -> dict:
+    """Build the stable machine-readable envelope shared by all --json commands."""
+    return {
+        "schema_version": _MACHINE_OUTPUT_SCHEMA_VERSION,
+        "command": command,
+        "status": status,
+        "shard_id": shard_id,
+        "warnings": warnings or [],
+        **body,
+    }
+
+
+def _safe_output_display(output: str) -> str:
+    """Return a path safe to echo in JSON: relative as-is, absolute -> bare filename."""
+    p = output.replace("\\", "/")
+    if p.startswith("/") or (len(p) > 1 and p[1] == ":"):
+        return Path(output).name
+    return output
 
 
 _ALLOWED_OUTCOMES_V1 = ["accepted", "rejected", "partial", "abandoned", "retried"]
