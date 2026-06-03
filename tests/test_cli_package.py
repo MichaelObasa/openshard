@@ -41,6 +41,18 @@ class TestCliPackage(unittest.TestCase):
         result = CliRunner().invoke(cli, ["pr", "comment", "--help"])
         self.assertEqual(result.exit_code, 0)
 
+    def test_init_help_exits_zero(self):
+        result = CliRunner().invoke(cli, ["init", "--help"])
+        self.assertEqual(result.exit_code, 0)
+
+    def test_doctor_help_exits_zero(self):
+        result = CliRunner().invoke(cli, ["doctor", "--help"])
+        self.assertEqual(result.exit_code, 0)
+
+    def test_config_show_help_exits_zero(self):
+        result = CliRunner().invoke(cli, ["config", "show", "--help"])
+        self.assertEqual(result.exit_code, 0)
+
     def test_run_dry_run_no_config_crash(self):
         """Config loading must not crash; any failure should be API-related, not config-related."""
         result = CliRunner().invoke(cli, ["run", "test task", "--dry-run"])

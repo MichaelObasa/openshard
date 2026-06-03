@@ -70,6 +70,85 @@ def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
     return dict(_DEFAULTS)
 
 
+def config_search_path(cwd: Path | None = None) -> Path:
+    """Return the path where ``openshard init`` writes its config.
+
+    This is always ``<cwd>/.openshard/config.yml`` — the highest-priority
+    location in :func:`load_config`'s search order after explicit overrides.
+    """
+    base = cwd if cwd is not None else Path.cwd()
+    return base / ".openshard" / "config.yml"
+
+
+def find_config_path(cwd: Path | None = None) -> Path | None:
+    """Return the config path :func:`load_config` would read, or ``None``.
+
+    Mirrors :func:`load_config`'s search order for the discoverable
+    locations: ``OPENSHARD_CONFIG`` env var, ``.openshard/config.yml`` and
+    ``config.yml`` in *cwd*. The bundled default and built-in ``_DEFAULTS`` are
+    not real on-disk user configs, so they are reported as "not found".
+    """
+    base = cwd if cwd is not None else Path.cwd()
+
+    env_path = os.environ.get("OPENSHARD_CONFIG", "")
+    if env_path:
+        p = Path(env_path)
+        return p if p.exists() else None
+
+    hidden = base / ".openshard" / "config.yml"
+    if hidden.exists():
+        return hidden
+
+    cwd_cfg = base / "config.yml"
+    if cwd_cfg.exists():
+        return cwd_cfg
+
+    return None
+
+
+def load_config_safe(
+    path: str | os.PathLike | None = None,
+    cwd: Path | None = None,
+) -> tuple[dict[str, Any], bool, Path | None]:
+    """Load config without raising; degrade to defaults on any failure.
+
+    Returns ``(config, config_valid, resolved_path)`` where *config_valid* is
+    ``False`` when an on-disk config exists but could not be parsed (malformed
+    YAML, unreadable). In that case *config* falls back to ``_DEFAULTS`` so
+    callers like ``doctor``/``config show`` keep working instead of crashing.
+    """
+    resolved = find_config_path(cwd=cwd)
+    if resolved is None:
+        try:
+            return load_config(path=path), True, None
+        except Exception:
+            return dict(_DEFAULTS), True, None
+
+    try:
+        return _load_yaml(resolved), True, resolved
+    except Exception:
+        return dict(_DEFAULTS), False, resolved
+
+
+def save_config(config: dict[str, Any], path: str | os.PathLike | None = None) -> Path:
+    """Write *config* as YAML, creating the parent directory if needed.
+
+    Defaults to ``<cwd>/.openshard/config.yml`` (see :func:`config_search_path`).
+    Never writes secrets — API keys live only in the environment.
+    """
+    target = Path(path) if path is not None else config_search_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(config, fh, sort_keys=False, default_flow_style=False)
+    return target
+
+
+def get_onboarding(config: dict[str, Any]) -> dict[str, Any]:
+    """Return the additive ``onboarding`` block from *config*, or ``{}``."""
+    value = config.get("onboarding")
+    return value if isinstance(value, dict) else {}
+
+
 def get_api_key() -> str:
     """Return the OpenRouter API key from the environment.
 
