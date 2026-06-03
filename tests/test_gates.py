@@ -1,4 +1,4 @@
-from openshard.execution.gates import GateEvaluator
+from openshard.execution.gates import GateDecision, GateEvaluator, resolve_gate_decisions
 
 
 def make_gate(mode, risky=None, threshold=0.10):
@@ -92,3 +92,38 @@ def test_ask_prompts_for_file_write_empty_list():
     g = make_gate("ask")
     dec = g.check_file_write([])
     assert dec.required
+
+
+# resolve_gate_decisions: route combined gate decisions through the
+# canonical deny > ask > allow policy resolver.
+# Deny dominance is intentionally NOT tested here — GateDecision cannot express
+# deny (only required: bool). That ordering stays covered by test_policy_decision.py.
+def test_resolve_empty_returns_not_required():
+    dec = resolve_gate_decisions([])
+    assert not dec.required
+    assert dec.reason == ""
+
+def test_resolve_all_allow_not_required():
+    dec = resolve_gate_decisions([GateDecision(False, ""), GateDecision(False, "")])
+    assert not dec.required
+
+def test_resolve_ask_beats_allow():
+    dec = resolve_gate_decisions([GateDecision(False, ""), GateDecision(True, "risky path")])
+    assert dec.required
+    assert dec.reason == "risky path"
+
+def test_resolve_multiple_asks_preserve_priority_order():
+    # First (highest priority) ask wins the tie deterministically.
+    dec = resolve_gate_decisions([GateDecision(True, "file write"), GateDecision(True, "risky path")])
+    assert dec.required
+    assert dec.reason == "file write"
+
+def test_resolve_missing_reason_does_not_crash():
+    dec = resolve_gate_decisions([GateDecision(True, "")])
+    assert dec.required
+    assert dec.reason == ""
+
+def test_resolve_deterministic_output():
+    inputs = [GateDecision(True, "file write"), GateDecision(True, "risky path")]
+    results = {resolve_gate_decisions(inputs).reason for _ in range(5)}
+    assert results == {"file write"}

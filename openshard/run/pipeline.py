@@ -30,7 +30,7 @@ from openshard.cli.run_output import (
 )
 from openshard.run.timeline import RunTimelineEvent
 from openshard.config.settings import get_anthropic_api_key, get_openai_api_key
-from openshard.execution.gates import GateEvaluator, VALID_APPROVAL_MODES
+from openshard.execution.gates import GateEvaluator, VALID_APPROVAL_MODES, resolve_gate_decisions
 from openshard.execution.generator import (
     ChangedFile,
     ExecutionGenerator,
@@ -1493,10 +1493,11 @@ class RunPipeline:
                 _file_paths = [f.path for f in exec_result.files if f.path]
                 _fw_dec = gate.check_file_write(_file_paths)
                 _rp_dec = gate.check_risky_paths(_file_paths)
-                if _fw_dec.required:
-                    confirm_or_abort(_fw_dec.reason)
-                elif _rp_dec.required:
-                    confirm_or_abort(_rp_dec.reason)
+                # Priority order: file-write before risky-paths. Route both
+                # through the canonical deny > ask > allow resolver.
+                _combined_dec = resolve_gate_decisions([_fw_dec, _rp_dec])
+                if _combined_dec.required:
+                    confirm_or_abort(_combined_dec.reason)
                 if effective_executor == "native" and hasattr(generator, "build_patch_proposal"):
                     generator.build_patch_proposal(exec_result.files)
                 if effective_executor == "native" and hasattr(generator, "build_change_budget_preview"):
