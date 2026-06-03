@@ -1,5 +1,6 @@
 import datetime
 import json
+import os
 import sys
 import tempfile
 import time
@@ -1395,50 +1396,107 @@ def pr_group(ctx: click.Context) -> None:
 @pr_group.command("comment")
 @click.option("--output", default=None, help="Write output to this path instead of stdout.")
 @click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output.")
-def pr_comment(output: str | None, as_json: bool) -> None:
-    """Generate a GitHub-ready PR comment from the latest OpenShard run."""
+@click.option("--github-step-summary", "github_step_summary", is_flag=True, default=False,
+              help="Append the markdown receipt to $GITHUB_STEP_SUMMARY (GitHub Actions).")
+@click.option("--github-output", "github_output", is_flag=True, default=False,
+              help="Write safe key=value outputs to $GITHUB_OUTPUT (GitHub Actions).")
+def pr_comment(output: str | None, as_json: bool, github_step_summary: bool, github_output: bool) -> None:
+    """Generate a GitHub-ready PR comment from the latest OpenShard run.
+
+    The --github-step-summary and --github-output flags write to the files
+    referenced by $GITHUB_STEP_SUMMARY and $GITHUB_OUTPUT. This is a local,
+    file-based Actions layer only: no GitHub API, no gh, no network, no auth.
+    """
     from openshard.history.shard_contract import build_shard_receipt
     from openshard.github.pr_comment import build_pr_comment_summary, render_pr_comment
 
     log_path = Path.cwd() / _LOG_PATH
     entries = _load_run_entries(log_path)
+
     if not entries:
+        ss_available = ss_written = go_available = go_written = False
+        if github_output:
+            go_available, go_written = _write_github_output(
+                {"openshard_available": "false", "openshard_status": "not_found"}
+            )
+        if github_step_summary:
+            ss_available, ss_written = _write_github_step_summary(
+                "## OpenShard\n\nNo OpenShard run found. Run an OpenShard task first."
+            )
         if as_json:
-            click.echo(json.dumps(_machine_envelope("pr comment", "not_found", summary=None), indent=2))
+            body: dict = {"summary": None}
+            if github_step_summary:
+                body["github_step_summary_available"] = ss_available
+                body["github_step_summary_written"] = ss_written
+            if github_output:
+                body["github_output_available"] = go_available
+                body["github_output_written"] = go_written
+            click.echo(json.dumps(_machine_envelope("pr comment", "not_found", **body), indent=2))
         else:
             click.echo("No run history found. Run an OpenShard task first.")
+            _warn_missing_github_env(github_step_summary, ss_available, github_output, go_available)
         return
+
     entry = entries[-1]
     receipt = build_shard_receipt(entry, index=len(entries) - 1)
     summary = build_pr_comment_summary(entry, receipt)
+    markdown = render_pr_comment(summary)
 
     if as_json:
         from dataclasses import asdict
 
-        body: dict = {"summary": asdict(summary)}
+        body = {"summary": asdict(summary)}
         if output:
+            output_path = Path(output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(
+                _machine_envelope("pr comment", "ok", shard_id=receipt.shard_id,
+                                  warnings=list(summary.warnings), summary=asdict(summary)),
+                indent=2) + "\n", encoding="utf-8")
             body["written"] = True
             body["output_path_display"] = _safe_output_display(output)
+        if github_output:
+            go_pairs = _github_output_pairs(
+                "ok", receipt.shard_id, summary.manual_review_required,
+                output_path_key="openshard_output_path" if output else None,
+                output_display=_safe_output_display(output) if output else None,
+            )
+            go_available, go_written = _write_github_output(go_pairs)
+            body["github_output_available"] = go_available
+            body["github_output_written"] = go_written
+        if github_step_summary:
+            ss_available, ss_written = _write_github_step_summary(markdown)
+            body["github_step_summary_available"] = ss_available
+            body["github_step_summary_written"] = ss_written
         payload = _machine_envelope(
             "pr comment", "ok", shard_id=receipt.shard_id,
             warnings=list(summary.warnings), **body,
         )
-        rendered = json.dumps(payload, indent=2)
-        if output:
-            output_path = Path(output)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(rendered + "\n", encoding="utf-8")
-        click.echo(rendered)
+        click.echo(json.dumps(payload, indent=2))
         return
 
-    markdown = render_pr_comment(summary)
+    comment_path_display: str | None = None
     if output:
         output_path = Path(output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(markdown, encoding="utf-8")
+        if output_path.exists():
+            comment_path_display = _safe_output_display(output)
         click.echo(f"PR comment written to {output}")
     else:
         click.echo(markdown)
+
+    ss_available = go_available = True
+    if github_output:
+        go_pairs = _github_output_pairs(
+            "ok", receipt.shard_id, summary.manual_review_required,
+            output_path_key="openshard_comment_path" if comment_path_display else None,
+            output_display=comment_path_display,
+        )
+        go_available, _ = _write_github_output(go_pairs)
+    if github_step_summary:
+        ss_available, _ = _write_github_step_summary(markdown)
+    _warn_missing_github_env(github_step_summary, ss_available, github_output, go_available)
 
 
 @cli.command("apply-last")
@@ -1761,6 +1819,77 @@ def _safe_output_display(output: str) -> str:
     if p.startswith("/") or (len(p) > 1 and p[1] == ":"):
         return Path(output).name
     return output
+
+
+def _write_github_step_summary(markdown: str) -> tuple[bool, bool]:
+    """Append markdown to $GITHUB_STEP_SUMMARY. Returns (available, written).
+
+    available is True when the env var is set; written is True when the append
+    succeeded. No network, no secrets - markdown is already sanitized upstream.
+    """
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return (False, False)
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(markdown.rstrip("\n") + "\n")
+        return (True, True)
+    except OSError:
+        return (True, False)
+
+
+def _write_github_output(pairs: dict[str, str]) -> tuple[bool, bool]:
+    """Append safe key=value lines to $GITHUB_OUTPUT. Returns (available, written).
+
+    Values are coerced to str and stripped of CR/LF so each output stays on a
+    single line (no heredoc / invalid-character cases). Keys are fixed literals.
+    """
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        return (False, False)
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            for key, value in pairs.items():
+                safe_value = str(value).replace("\r", " ").replace("\n", " ")
+                fh.write(f"{key}={safe_value}\n")
+        return (True, True)
+    except OSError:
+        return (True, False)
+
+
+def _github_output_pairs(
+    status: str,
+    shard_id: str | None,
+    manual_review_required: bool | None,
+    output_path_key: str | None = None,
+    output_display: str | None = None,
+) -> dict[str, str]:
+    """Build the safe scalar key=value map for $GITHUB_OUTPUT."""
+    pairs: dict[str, str] = {
+        "openshard_available": "true" if status == "ok" else "false",
+        "openshard_status": status,
+    }
+    if status == "ok":
+        if shard_id:
+            pairs["openshard_shard_id"] = shard_id
+        if manual_review_required is not None:
+            pairs["openshard_manual_review_required"] = "true" if manual_review_required else "false"
+        if output_path_key and output_display:
+            pairs[output_path_key] = output_display
+    return pairs
+
+
+def _warn_missing_github_env(
+    github_step_summary: bool,
+    ss_available: bool,
+    github_output: bool,
+    go_available: bool,
+) -> None:
+    """Warn on stderr (human mode only) when a requested GitHub env var is unset."""
+    if github_step_summary and not ss_available:
+        click.echo("warning: GITHUB_STEP_SUMMARY is not set; step summary not written.", err=True)
+    if github_output and not go_available:
+        click.echo("warning: GITHUB_OUTPUT is not set; outputs not written.", err=True)
 
 
 _ALLOWED_OUTCOMES_V1 = ["accepted", "rejected", "partial", "abandoned", "retried"]
