@@ -77,7 +77,10 @@ def _sanitize_meta(value: str | None, *, cap: int = _WARNING_CAP) -> str | None:
     s = value.replace("\r", " ").replace("\n", " ").strip()
     norm = s.replace("\\", "/")
     if norm.startswith("/") or (len(norm) > 1 and norm[1] == ":"):
-        s = Path(s).name
+        # Take the basename from the normalised path so Windows-style backslash
+        # separators are handled the same on POSIX and Windows (Path(...).name
+        # does not split on "\" under POSIX).
+        s = norm.rstrip("/").rsplit("/", 1)[-1]
     if len(s) > cap:
         s = s[:cap]
     return s
