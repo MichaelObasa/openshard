@@ -111,6 +111,23 @@ class TestCounts(unittest.TestCase):
         self.assertEqual(m["summary"]["file_count"], 1)
         self.assertNotIn("javascript", m["summary"]["languages"])
 
+    def test_tmp_dir_is_skipped(self):
+        # .tmp holds local build/package smoke artefacts - must be ignored like
+        # node_modules so plans never suggest files from it.
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d, ".tmp", "pkg-smoke")
+            tmp.mkdir(parents=True)
+            Path(tmp, "auth.py").write_text("x = 1\n", encoding="utf-8")
+            Path(tmp, "package.json").write_text("{}\n", encoding="utf-8")
+            Path(d, "main.py").touch()
+            m = _build(d).to_dict()
+        self.assertIn(".tmp", m["ignored_directories"])
+        self.assertEqual(m["summary"]["file_count"], 1)
+        blob = json.dumps(m)
+        self.assertNotIn(".tmp/", blob)
+        self.assertNotIn("javascript", m["summary"]["languages"])
+        self.assertNotIn("pkg-smoke/auth.py", m["risky_areas"])
+
     def test_walk_cap_sets_warning(self):
         with tempfile.TemporaryDirectory() as d:
             for i in range(6):

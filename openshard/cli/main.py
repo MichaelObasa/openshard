@@ -41,6 +41,7 @@ from openshard.cli.run_output import (
     _print_summary as _print_summary,
     _render_repo_summary as _render_repo_summary,
     _render_repo_map as _render_repo_map,
+    _render_repo_plan as _render_repo_plan,
     _format_model_slug as _format_model_slug,
     _model_label,
     _profile_display_label,
@@ -1617,45 +1618,14 @@ def repo_map_cmd(as_json: bool, refresh: bool, output: str | None) -> None:
     dirty tree always rebuilds; --refresh forces a rebuild. Output and cache contain
     no file contents, raw secrets, or absolute paths.
     """
-    from openshard.analysis.repo_map import (
-        RepoMap,
-        build_repo_map,
-        compute_repo_fingerprint,
-        MAX_WARNINGS,
-        _DIRTY_WARNING,
-    )
-    from openshard.analysis.repo_map_cache import (
-        cache_path_for,
-        load_repo_map_cache,
-        save_repo_map_cache,
-    )
+    from openshard.analysis.repo_map_loader import load_or_build_repo_map
 
     root = Path.cwd()
-    fingerprint, git, _ = compute_repo_fingerprint(root)
-    cache_abs, cache_display = cache_path_for(fingerprint, base=root)
-    dirty = git.dirty
-
-    cached = None
-    if not refresh and not dirty:
-        cached = load_repo_map_cache(cache_abs)
-
-    if cached is not None:
-        repo_map_obj = RepoMap.from_dict(cached)
-        cache_hit = True
-    else:
-        repo_map_obj = build_repo_map(root)
-        save_repo_map_cache(cache_abs, repo_map_obj.to_dict())
-        cache_hit = False
-
-    repo_map_dict = repo_map_obj.to_dict()
-
-    # The dirty-rebuild reason is a cache-decision warning, surfaced alongside the
-    # construction warnings the map already carries.
-    warnings = list(repo_map_dict.get("warnings", []))
-    if dirty and _DIRTY_WARNING not in warnings:
-        warnings.append(_DIRTY_WARNING)
-    warnings = warnings[:MAX_WARNINGS]
-    repo_map_dict["warnings"] = warnings
+    loaded = load_or_build_repo_map(root, refresh=refresh)
+    repo_map_dict = loaded.repo_map
+    cache_hit = loaded.cache_hit
+    cache_display = loaded.cache_path_display
+    warnings = loaded.warnings
 
     output_display: str | None = None
     if output:
@@ -1680,6 +1650,44 @@ def repo_map_cmd(as_json: bool, refresh: bool, output: str | None) -> None:
     _render_repo_map(repo_map_dict, cache_hit=cache_hit, cache_path_display=cache_display)
     if output_display is not None:
         click.echo(f"  Wrote: {output_display}")
+
+
+@repo_group.command("plan")
+@click.argument("task")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Machine-readable output (valid JSON only).")
+@click.option("--refresh", is_flag=True, default=False,
+              help="Rebuild the repo map instead of reusing the cache.")
+def repo_plan_cmd(task: str, as_json: bool, refresh: bool) -> None:
+    """Produce a read-only, repo-aware plan for TASK from repo-map metadata.
+
+    Local, deterministic, metadata-only: no model calls, no network, no file
+    contents read, no source files written, and the task is never executed. Uses
+    the repo-map cache (a clean git tree reuses it; a dirty tree or --refresh
+    rebuilds). Output contains no file contents, raw secrets, or absolute paths;
+    the task argument is sanitised before display.
+    """
+    from openshard.analysis.repo_map_loader import load_or_build_repo_map
+    from openshard.planning.repo_plan import build_repo_aware_plan
+
+    root = Path.cwd()
+    loaded = load_or_build_repo_map(root, refresh=refresh)
+    plan = build_repo_aware_plan(task, loaded.repo_map, cache_hit=loaded.cache_hit)
+
+    if as_json:
+        payload = _machine_envelope(
+            "repo plan", "ok", warnings=loaded.warnings, **plan.to_dict()
+        )
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    render_dict = plan.to_dict()
+    render_dict["warnings"] = loaded.warnings
+    _render_repo_plan(
+        render_dict,
+        cache_hit=loaded.cache_hit,
+        cache_path_display=loaded.cache_path_display,
+    )
 
 
 @cli.group("stats", invoke_without_command=True)
