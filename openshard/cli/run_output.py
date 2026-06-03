@@ -156,6 +156,61 @@ def _render_repo_summary(facts: RepoFacts) -> None:
         click.echo(f"  Changed: {n} files  ({sample}{suffix})")
 
 
+def _render_repo_map(
+    repo_map: dict,
+    *,
+    cache_hit: bool,
+    cache_path_display: str,
+) -> None:
+    """Render a repo-map dict (the ``repo_map`` body) as a short human summary.
+
+    Mirrors ``_render_repo_summary`` style (count + 3-sample truncation). Paths
+    are already relative/sanitised by construction.
+    """
+    summary = repo_map.get("summary", {}) or {}
+    click.echo("\nRepo map")
+
+    stack: list[str] = []
+    stack.extend(summary.get("languages", []) or [])
+    stack.extend(summary.get("frameworks", []) or [])
+    if stack:
+        click.echo(f"  Stack: {', '.join(stack)}")
+
+    managers = summary.get("package_managers", []) or []
+    if managers:
+        click.echo(f"  Package managers: {', '.join(managers)}")
+
+    click.echo(
+        f"  Files: {summary.get('file_count', 0)}  "
+        f"Dirs: {summary.get('directory_count', 0)}"
+    )
+
+    important = repo_map.get("important_files", []) or []
+    if important:
+        n = len(important)
+        sample = ", ".join(important[:3])
+        suffix = f" + {n - 3} more" if n > 3 else ""
+        click.echo(f"  Important: {n} files  ({sample}{suffix})")
+
+    risky = repo_map.get("risky_areas", []) or []
+    if risky:
+        n = len(risky)
+        sample = ", ".join(risky[:3])
+        suffix = f" + {n - 3} more" if n > 3 else ""
+        click.echo(f"  Risky: {n} areas  ({sample}{suffix})")
+
+    test_commands = summary.get("test_commands", []) or []
+    if test_commands:
+        click.echo(f"  Tests: {', '.join(test_commands)}")
+
+    state = "cache hit" if cache_hit else "rebuilt"
+    click.echo(f"  Cache: {cache_path_display}  ({state})")
+
+    warnings = repo_map.get("warnings", []) or []
+    for warning in warnings:
+        click.echo(f"  ! {warning}")
+
+
 _MODEL_SHORT: dict[str, str] = {
     "deepseek/deepseek-v4-flash":      "DeepSeek V4 Flash",
     "deepseek/deepseek-v4-pro":        "DeepSeek V4 Pro",

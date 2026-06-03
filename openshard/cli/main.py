@@ -40,6 +40,7 @@ from openshard.cli.run_output import (
     _Spinner as _Spinner,
     _print_summary as _print_summary,
     _render_repo_summary as _render_repo_summary,
+    _render_repo_map as _render_repo_map,
     _format_model_slug as _format_model_slug,
     _model_label,
     _profile_display_label,
@@ -1591,6 +1592,94 @@ def ci_check(as_json: bool, strict: bool, github_output: bool) -> None:
         if not go_available:
             click.echo("warning: GITHUB_OUTPUT is not set; outputs not written.", err=True)
     sys.exit(result.exit_code)
+
+
+@cli.group("repo", invoke_without_command=True)
+@click.pass_context
+def repo_group(ctx: click.Context) -> None:
+    """Local repo-map cache: build, reuse, and inspect repo metadata."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@repo_group.command("map")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Machine-readable output (valid JSON only).")
+@click.option("--refresh", is_flag=True, default=False,
+              help="Rebuild the repo map instead of reusing the cache.")
+@click.option("--output", default=None,
+              help="Also write the repo-map JSON to this path.")
+def repo_map_cmd(as_json: bool, refresh: bool, output: str | None) -> None:
+    """Build or load the local repo-map cache for the current directory.
+
+    Local, deterministic, metadata-only: no model calls, no network. Caches under
+    .openshard/cache/repo-<fingerprint>.json. A clean git tree reuses the cache; a
+    dirty tree always rebuilds; --refresh forces a rebuild. Output and cache contain
+    no file contents, raw secrets, or absolute paths.
+    """
+    from openshard.analysis.repo_map import (
+        RepoMap,
+        build_repo_map,
+        compute_repo_fingerprint,
+        MAX_WARNINGS,
+        _DIRTY_WARNING,
+    )
+    from openshard.analysis.repo_map_cache import (
+        cache_path_for,
+        load_repo_map_cache,
+        save_repo_map_cache,
+    )
+
+    root = Path.cwd()
+    fingerprint, git, _ = compute_repo_fingerprint(root)
+    cache_abs, cache_display = cache_path_for(fingerprint, base=root)
+    dirty = git.dirty
+
+    cached = None
+    if not refresh and not dirty:
+        cached = load_repo_map_cache(cache_abs)
+
+    if cached is not None:
+        repo_map_obj = RepoMap.from_dict(cached)
+        cache_hit = True
+    else:
+        repo_map_obj = build_repo_map(root)
+        save_repo_map_cache(cache_abs, repo_map_obj.to_dict())
+        cache_hit = False
+
+    repo_map_dict = repo_map_obj.to_dict()
+
+    # The dirty-rebuild reason is a cache-decision warning, surfaced alongside the
+    # construction warnings the map already carries.
+    warnings = list(repo_map_dict.get("warnings", []))
+    if dirty and _DIRTY_WARNING not in warnings:
+        warnings.append(_DIRTY_WARNING)
+    warnings = warnings[:MAX_WARNINGS]
+    repo_map_dict["warnings"] = warnings
+
+    output_display: str | None = None
+    if output:
+        output_path = Path(output)
+        if output_path.parent != Path("."):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(repo_map_dict, indent=2) + "\n", encoding="utf-8")
+        output_display = _safe_output_display(output)
+
+    if as_json:
+        body: dict = {
+            "cache_hit": cache_hit,
+            "cache_path_display": cache_display,
+            "repo_map": repo_map_dict,
+        }
+        if output_display is not None:
+            body["output_path_display"] = output_display
+        payload = _machine_envelope("repo map", "ok", warnings=warnings, **body)
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    _render_repo_map(repo_map_dict, cache_hit=cache_hit, cache_path_display=cache_display)
+    if output_display is not None:
+        click.echo(f"  Wrote: {output_display}")
 
 
 @cli.group("stats", invoke_without_command=True)
