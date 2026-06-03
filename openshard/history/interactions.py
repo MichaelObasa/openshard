@@ -6,7 +6,100 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from openshard.run.timeline import (
+    _is_absolute_path,
+    _sanitize_metadata,
+    _sanitize_text,
+)
+
 _INTERACTIONS_PATH = Path(".openshard") / "interactions.jsonl"
+
+# Caps for sanitised free-text fields.
+_MAX_SUMMARY_CHARS = 120
+_MAX_REASON_CHARS = 80
+_MAX_PATH_CHARS = 120
+_MAX_FILE_PATHS = 20
+
+# Canonical interaction vocabulary (the flat v1 enum)...
+_CANONICAL_EVENT_TYPES = frozenset(
+    {
+        "accepted",
+        "rejected",
+        "edited",
+        "retried",
+        "manual_edit",
+        "wrong_file",
+        "wrong_scope",
+        "failed_tests",
+        "bad_style",
+        "missed_requirement",
+        "too_expensive",
+        "too_slow",
+        "unsafe_command",
+        "unclear_output",
+    }
+)
+# ...plus the namespaced types emitted by the existing feedback integration.
+_LEGACY_EVENT_TYPES = frozenset(
+    {
+        "feedback_accepted",
+        "feedback_rejected",
+        "feedback_partial",
+        "feedback_abandoned",
+        "feedback_retried",
+        "feedback_noted",
+    }
+)
+ALLOWED_EVENT_TYPES = _CANONICAL_EVENT_TYPES | _LEGACY_EVENT_TYPES
+_EVENT_TYPE_FALLBACK = "unclear_output"
+
+ALLOWED_SEVERITIES = frozenset({"info", "low", "medium", "high"})
+_SEVERITY_FALLBACK = "info"
+
+
+def _sanitize_file_paths(paths) -> list[str]:
+    """Keep only relative, secret-free, capped file paths. Absolute paths are dropped."""
+    if not isinstance(paths, list):
+        return []
+    safe: list[str] = []
+    for p in paths:
+        if len(safe) >= _MAX_FILE_PATHS:
+            break
+        if not isinstance(p, str) or _is_absolute_path(p):
+            continue
+        clean = _sanitize_text(p, _MAX_PATH_CHARS)
+        if clean is not None:
+            safe.append(clean)
+    return safe
+
+
+def sanitize_event(event: "DeveloperInteractionEvent") -> "DeveloperInteractionEvent":
+    """Return a privacy-safe copy of ``event``.
+
+    Caps + scrubs free text (drops absolute paths/secrets), keeps only relative file
+    paths, reduces metadata to small scalars, validates event_type/severity against the
+    allowed enums (falling back safely), and forces raw_content_stored False. Applied at
+    both write time and load time so legacy on-disk entries are sanitised before display
+    or export.
+    """
+    event_type = event.event_type if event.event_type in ALLOWED_EVENT_TYPES else _EVENT_TYPE_FALLBACK
+    severity = event.severity if event.severity in ALLOWED_SEVERITIES else _SEVERITY_FALLBACK
+    return DeveloperInteractionEvent(
+        schema_version=event.schema_version,
+        event_id=event.event_id,
+        run_id=event.run_id,
+        timestamp=event.timestamp,
+        actor=event.actor,
+        event_type=event_type,
+        summary=_sanitize_text(event.summary, _MAX_SUMMARY_CHARS) or "",
+        related_stage=event.related_stage,
+        related_file_paths=_sanitize_file_paths(event.related_file_paths),
+        correction_reason=_sanitize_text(event.correction_reason, _MAX_REASON_CHARS),
+        severity=severity,
+        accepted=event.accepted,
+        metadata=_sanitize_metadata(event.metadata),
+        raw_content_stored=False,
+    )
 
 
 @dataclass
@@ -75,7 +168,7 @@ def _dict_to_event(d: dict) -> DeveloperInteractionEvent:
 def log_interaction_event(event: DeveloperInteractionEvent) -> None:
     interactions_path = Path.cwd() / _INTERACTIONS_PATH
     interactions_path.parent.mkdir(parents=True, exist_ok=True)
-    d = _event_to_dict(event)
+    d = _event_to_dict(sanitize_event(event))
     d["raw_content_stored"] = False
     with interactions_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(d) + "\n")
@@ -91,7 +184,7 @@ def load_interaction_events() -> list[DeveloperInteractionEvent]:
         if not line:
             continue
         try:
-            events.append(_dict_to_event(json.loads(line)))
+            events.append(sanitize_event(_dict_to_event(json.loads(line))))
         except (json.JSONDecodeError, KeyError, TypeError):
             continue
     return events

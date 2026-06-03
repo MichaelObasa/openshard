@@ -14,7 +14,23 @@ from openshard.history.interactions import (
     interaction_events_for_run,
     load_interaction_events,
     log_interaction_event,
+    sanitize_event,
 )
+
+# A fake AWS-style key and absolute paths used to prove no raw content leaks.
+_FAKE_SECRET = "AKIAABCDEFGHIJKLMNOP"
+_ABS_POSIX = "/home/user/secret.env"
+_ABS_WIN = "C:\\Users\\Michael\\secret.env"
+
+
+def _write_raw_jsonl(records: list[dict]) -> Path:
+    """Write raw (un-sanitised) JSONL lines, simulating legacy on-disk entries."""
+    path = Path(".openshard") / "interactions.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        for rec in records:
+            fh.write(json.dumps(rec) + "\n")
+    return path
 
 
 def _make_event(**kwargs) -> DeveloperInteractionEvent:
@@ -115,22 +131,22 @@ class TestAppendOnlyLogging(unittest.TestCase):
         with runner.isolated_filesystem():
             log_interaction_event(_make_event(event_type="feedback_accepted"))
             log_interaction_event(_make_event(event_type="feedback_rejected"))
-            log_interaction_event(_make_event(event_type="feedback_edited"))
+            log_interaction_event(_make_event(event_type="edited"))
 
             path = Path(".openshard") / "interactions.jsonl"
             lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
             self.assertEqual(len(lines), 3)
             types = [json.loads(ln)["event_type"] for ln in lines]
-            self.assertEqual(types, ["feedback_accepted", "feedback_rejected", "feedback_edited"])
+            self.assertEqual(types, ["feedback_accepted", "feedback_rejected", "edited"])
 
     def test_append_does_not_overwrite(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
-            log_interaction_event(_make_event(event_type="first"))
-            log_interaction_event(_make_event(event_type="second"))
+            log_interaction_event(_make_event(event_type="accepted"))
+            log_interaction_event(_make_event(event_type="rejected"))
             events = load_interaction_events()
-            self.assertEqual(events[0].event_type, "first")
-            self.assertEqual(events[1].event_type, "second")
+            self.assertEqual(events[0].event_type, "accepted")
+            self.assertEqual(events[1].event_type, "rejected")
 
 
 class TestLoadInteractionEvents(unittest.TestCase):
@@ -156,15 +172,15 @@ class TestLoadInteractionEvents(unittest.TestCase):
             path = Path(".openshard") / "interactions.jsonl"
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("w", encoding="utf-8") as fh:
-                fh.write(json.dumps(_event_to_dict(_make_event(event_type="good"))) + "\n")
+                fh.write(json.dumps(_event_to_dict(_make_event(event_type="accepted"))) + "\n")
                 fh.write("not valid json\n")
                 fh.write("\n")
-                fh.write(json.dumps(_event_to_dict(_make_event(event_type="also-good"))) + "\n")
+                fh.write(json.dumps(_event_to_dict(_make_event(event_type="rejected"))) + "\n")
 
             loaded = load_interaction_events()
             self.assertEqual(len(loaded), 2)
-            self.assertEqual(loaded[0].event_type, "good")
-            self.assertEqual(loaded[1].event_type, "also-good")
+            self.assertEqual(loaded[0].event_type, "accepted")
+            self.assertEqual(loaded[1].event_type, "rejected")
 
 
 class TestFilterByRunId(unittest.TestCase):
@@ -377,6 +393,159 @@ class TestInteractionsCLI(unittest.TestCase):
                 row = json.loads(ln)
                 self.assertIn("event_type", row)
                 self.assertIs(row["raw_content_stored"], False)
+
+
+class TestSanitisation(unittest.TestCase):
+    """sanitize_event caps + scrubs fields and validates enums."""
+
+    def test_summary_secret_dropped(self):
+        evt = _make_event(summary=f"leaked key {_FAKE_SECRET} here")
+        self.assertEqual(sanitize_event(evt).summary, "")
+
+    def test_summary_absolute_path_dropped(self):
+        evt = _make_event(summary=_ABS_POSIX)
+        self.assertEqual(sanitize_event(evt).summary, "")
+
+    def test_summary_capped(self):
+        evt = _make_event(summary="x" * 500)
+        self.assertLessEqual(len(sanitize_event(evt).summary), 120)
+
+    def test_correction_reason_sanitised(self):
+        evt = _make_event(correction_reason=_ABS_WIN)
+        self.assertIsNone(sanitize_event(evt).correction_reason)
+        clean = _make_event(correction_reason="wrong-file")
+        self.assertEqual(sanitize_event(clean).correction_reason, "wrong-file")
+
+    def test_related_file_paths_relative_only(self):
+        evt = _make_event(related_file_paths=["src/ok.py", _ABS_POSIX, _ABS_WIN])
+        self.assertEqual(sanitize_event(evt).related_file_paths, ["src/ok.py"])
+
+    def test_metadata_scalar_only(self):
+        evt = _make_event(
+            metadata={
+                "rating": "bad",
+                "count": 3,
+                "ok": True,
+                "nested": {"a": 1},
+                "items": [1, 2, 3],
+                "secret": _FAKE_SECRET,
+                "path": _ABS_POSIX,
+            }
+        )
+        meta = sanitize_event(evt).metadata
+        self.assertEqual(meta, {"rating": "bad", "count": 3, "ok": True})
+
+    def test_invalid_event_type_fallback(self):
+        self.assertEqual(sanitize_event(_make_event(event_type="bogus")).event_type, "unclear_output")
+
+    def test_canonical_event_type_preserved(self):
+        self.assertEqual(sanitize_event(_make_event(event_type="wrong_file")).event_type, "wrong_file")
+
+    def test_legacy_event_type_preserved(self):
+        for et in ("feedback_accepted", "feedback_rejected", "feedback_abandoned"):
+            self.assertEqual(sanitize_event(_make_event(event_type=et)).event_type, et)
+
+    def test_invalid_severity_fallback(self):
+        self.assertEqual(sanitize_event(_make_event(severity="warning")).severity, "info")
+
+    def test_valid_severity_preserved(self):
+        self.assertEqual(sanitize_event(_make_event(severity="high")).severity, "high")
+
+    def test_raw_content_stored_always_false(self):
+        self.assertIs(sanitize_event(_make_event()).raw_content_stored, False)
+
+
+class TestSanitiseOnWrite(unittest.TestCase):
+
+    def test_new_writes_sanitised_at_log_time(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            log_interaction_event(
+                _make_event(
+                    summary=f"{_ABS_POSIX} {_FAKE_SECRET}",
+                    correction_reason=_ABS_WIN,
+                    related_file_paths=[_ABS_POSIX, "src/ok.py"],
+                    metadata={"secret": _FAKE_SECRET, "rating": "bad"},
+                )
+            )
+            raw = (Path(".openshard") / "interactions.jsonl").read_text(encoding="utf-8")
+            self.assertNotIn(_FAKE_SECRET, raw)
+            self.assertNotIn(_ABS_POSIX, raw)
+            self.assertNotIn("C:\\Users", raw)
+            stored = json.loads(raw.strip())
+            self.assertEqual(stored["summary"], "")
+            self.assertIsNone(stored["correction_reason"])
+            self.assertEqual(stored["related_file_paths"], ["src/ok.py"])
+            self.assertEqual(stored["metadata"], {"rating": "bad"})
+            self.assertIs(stored["raw_content_stored"], False)
+
+
+class TestLegacyEntryNoLeak(unittest.TestCase):
+    """Unsafe entries already on disk must not leak through display or export."""
+
+    def _raw_unsafe_record(self) -> dict:
+        return {
+            "schema_version": 1,
+            "event_id": "legacy-1",
+            "run_id": "run-legacy",
+            "timestamp": "2025-01-01T00:00:00Z",
+            "actor": "developer",
+            "event_type": "feedback_rejected",
+            "summary": f"{_ABS_POSIX} contains {_FAKE_SECRET}",
+            "related_stage": "execution",
+            "related_file_paths": ["/etc/passwd", "src/ok.py"],
+            "correction_reason": _ABS_WIN,
+            "severity": "warning",
+            "accepted": False,
+            "metadata": {"secret": _FAKE_SECRET, "path": _ABS_POSIX, "rating": "bad"},
+            "raw_content_stored": True,
+        }
+
+    def test_legacy_unsafe_not_leaked_in_interactions_last(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_raw_jsonl([self._raw_unsafe_record()])
+            result = runner.invoke(cli, ["interactions", "--last", "5"])
+            self.assertEqual(result.exit_code, 0)
+            self.assertNotIn(_FAKE_SECRET, result.output)
+            self.assertNotIn(_ABS_POSIX, result.output)
+            self.assertNotIn("/etc/passwd", result.output)
+            self.assertNotIn("C:\\Users", result.output)
+
+    def test_legacy_unsafe_not_leaked_in_export(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_raw_jsonl([self._raw_unsafe_record()])
+            result = runner.invoke(cli, ["export-interactions"])
+            self.assertEqual(result.exit_code, 0)
+            self.assertNotIn(_FAKE_SECRET, result.output)
+            self.assertNotIn(_ABS_POSIX, result.output)
+            self.assertNotIn("/etc/passwd", result.output)
+            self.assertNotIn("C:\\Users", result.output)
+            row = json.loads(result.output.strip())
+            self.assertEqual(row["summary"], "")
+            self.assertIsNone(row["correction_reason"])
+            self.assertEqual(row["related_file_paths"], ["src/ok.py"])
+            self.assertEqual(row["metadata"], {"rating": "bad"})
+
+    def test_redacted_clears_all_four_fields(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_interactions([
+                _make_event(
+                    summary="clean summary",
+                    correction_reason="wrong-file",
+                    related_file_paths=["src/ok.py"],
+                    metadata={"rating": "good"},
+                )
+            ])
+            result = runner.invoke(cli, ["export-interactions", "--redacted"])
+            self.assertEqual(result.exit_code, 0)
+            row = json.loads(result.output.strip())
+            self.assertEqual(row["summary"], "[redacted]")
+            self.assertIsNone(row["correction_reason"])
+            self.assertEqual(row["related_file_paths"], [])
+            self.assertEqual(row["metadata"], {})
 
 
 if __name__ == "__main__":

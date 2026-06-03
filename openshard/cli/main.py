@@ -2644,6 +2644,8 @@ def export_interactions(output: str | None, redacted: bool) -> None:
         d = _event_to_dict(evt)
         if redacted:
             d["summary"] = "[redacted]"
+            d["correction_reason"] = None
+            d["related_file_paths"] = []
             d["metadata"] = {}
         rows.append(d)
     lines = "\n".join(json.dumps(r) for r in rows)
