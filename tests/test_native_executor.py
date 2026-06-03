@@ -245,6 +245,32 @@ class TestNativeAgentExecutor(unittest.TestCase):
         self.assertIn("[native plan]", kwargs["skills_context"])
         self.assertIn("hint", kwargs["skills_context"])
 
+    def test_generate_scrubs_secret_before_model_context(self):
+        # A secret-like value present in the candidate context must be redacted
+        # before it is handed to the inner generator (i.e. before model use).
+        executor, fake_gen = self._make_executor()
+        raw_secret = "AKIA1234567890ABCDEF"
+        executor.generate("task", skills_context=f"config AWS={raw_secret} end")
+        _, kwargs = fake_gen.generate.call_args
+        injected = kwargs["skills_context"]
+        # Raw secret never reaches the model context...
+        self.assertNotIn(raw_secret, injected)
+        # ...but a redacted marker remains so context stays readable.
+        self.assertIn("AKIA...CDEF", injected)
+        # And the finding is recorded safely on native_meta.
+        self.assertIsNotNone(executor.native_meta.pre_context_secret_scan)
+        findings = executor.native_meta.pre_context_secret_scan.findings
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].kind, "aws_access_key_id")
+        self.assertEqual(findings[0].path, "<model-context>")
+
+    def test_generate_leaves_clean_context_untouched(self):
+        executor, fake_gen = self._make_executor()
+        executor.generate("task", skills_context="nothing secret here")
+        _, kwargs = fake_gen.generate.call_args
+        self.assertIn("nothing secret here", kwargs["skills_context"])
+        self.assertIsNone(executor.native_meta.pre_context_secret_scan)
+
     def test_generate_updates_selected_skills(self):
         executor, _ = self._make_executor()
         fake_skill = NativeSkill(

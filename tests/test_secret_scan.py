@@ -4,12 +4,15 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from dataclasses import asdict
+
 from openshard.security.secret_scan import (
     SecretScanResult,
     _fingerprint,
     _is_noisy_path,
     _redact,
     scan_paths_for_secrets,
+    scrub_text_for_secrets,
 )
 
 
@@ -415,3 +418,127 @@ class TestReceiptIntegration(unittest.TestCase):
         self.assertNotIn("blocked", compact.lower())
         self.assertNotIn("prevented", compact.lower())
         self.assertIn("see full receipt", compact.lower())
+
+
+# ---------------------------------------------------------------------------
+# Pre-context scrubbing (scrub_text_for_secrets)
+# ---------------------------------------------------------------------------
+
+class TestScrubTextForSecrets(unittest.TestCase):
+
+    def test_empty_text_unchanged_no_findings(self):
+        scrubbed, result = scrub_text_for_secrets("")
+        self.assertEqual(scrubbed, "")
+        self.assertEqual(result.findings, [])
+        self.assertFalse(result.omitted)
+
+    def test_none_text_does_not_crash(self):
+        scrubbed, result = scrub_text_for_secrets(None)  # type: ignore[arg-type]
+        self.assertIsNone(scrubbed)
+        self.assertEqual(result.findings, [])
+
+    def test_aws_key_scrubbed_out_of_text(self):
+        raw = "AKIA1234567890ABCDEF"
+        text = f"here is a key {raw} in context"
+        scrubbed, result = scrub_text_for_secrets(text, source_label="<model-context>")
+        self.assertNotIn(raw, scrubbed)
+        self.assertIn(_redact(raw), scrubbed)
+        self.assertEqual(len(result.findings), 1)
+        self.assertEqual(result.findings[0].kind, "aws_access_key_id")
+        self.assertEqual(result.findings[0].path, "<model-context>")
+        # No filesystem path leaks into evidence
+        self.assertNotIn("/", result.findings[0].path or "")
+        self.assertNotIn("\\", result.findings[0].path or "")
+
+    def test_placeholder_not_scrubbed(self):
+        text = 'api_key = "${MY_SECRET_TOKEN}"\npassword = "changeme"\nkey = var.my_token'
+        scrubbed, result = scrub_text_for_secrets(text)
+        self.assertEqual(result.findings, [])
+        self.assertEqual(scrubbed.splitlines(), text.splitlines())
+
+    def test_generic_assignment_keeps_key_text(self):
+        raw = "realvalue1234567890"
+        text = f'api_key = "{raw}"'
+        scrubbed, result = scrub_text_for_secrets(text)
+        self.assertNotIn(raw, scrubbed)
+        self.assertIn("api_key", scrubbed)  # key text retained
+        self.assertIn(_redact(raw), scrubbed)
+        self.assertEqual(len(result.findings), 1)
+
+    def test_duplicate_secret_single_finding(self):
+        raw = "AKIA1234567890ABCDEF"
+        text = f"{raw}\nand again {raw}"
+        scrubbed, result = scrub_text_for_secrets(text)
+        # Deduped to one finding by fingerprint...
+        self.assertEqual(len(result.findings), 1)
+        # ...but every occurrence is still scrubbed.
+        self.assertNotIn(raw, scrubbed)
+
+    def test_multiple_secrets_on_single_line(self):
+        aws = "AKIA1234567890ABCDEF"
+        gh = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcd"
+        text = f"export AWS={aws} GH={gh} done"
+        scrubbed, result = scrub_text_for_secrets(text)
+        # Both raw values absent
+        self.assertNotIn(aws, scrubbed)
+        self.assertNotIn(gh, scrubbed)
+        # Both redacted forms present
+        self.assertIn(_redact(aws), scrubbed)
+        self.assertIn(_redact(gh), scrubbed)
+        # Line stays readable / structurally intact
+        self.assertTrue(scrubbed.startswith("export AWS="))
+        self.assertIn(" GH=", scrubbed)
+        self.assertTrue(scrubbed.endswith(" done"))
+        self.assertEqual(len(result.findings), 2)
+        # Serialized result leaks no raw secret
+        blob = repr(asdict(result))
+        self.assertNotIn(aws, blob)
+        self.assertNotIn(gh, blob)
+
+    def test_oversized_text_is_omitted_not_returned_raw(self):
+        raw = "AKIA1234567890ABCDEF"
+        text = raw + ("x" * 50)
+        scrubbed, result = scrub_text_for_secrets(text, max_chars=10)
+        # The raw oversized text is never returned/injected.
+        self.assertNotIn(text, scrubbed)
+        self.assertNotIn(raw, scrubbed)
+        self.assertTrue(result.omitted)
+        self.assertEqual(result.findings, [])
+        # Summary carries none of the raw context.
+        self.assertNotIn(raw, result.summary)
+
+    def test_serialized_result_has_no_raw_secret(self):
+        raw = "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef"
+        _, result = scrub_text_for_secrets(f"ANTHROPIC_API_KEY={raw}")
+        self.assertNotIn(raw, repr(asdict(result)))
+
+
+# ---------------------------------------------------------------------------
+# Pre-context findings flow into the receipt evidence (merge in pipeline shape)
+# ---------------------------------------------------------------------------
+
+class TestPreContextEvidenceIntegration(unittest.TestCase):
+
+    def test_pre_context_finding_becomes_evidence_capsule(self):
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_full_shard_receipt,
+        )
+        raw = "AKIA1234567890ABCDEF"
+        _, result = scrub_text_for_secrets(
+            f"key={raw}", source_label="<model-context>"
+        )
+        # Mirrors what run/pipeline.py serialises into the entry.
+        entry = {
+            "task": "do work",
+            "timestamp": "2026-04-13T06:24:08.695472Z",
+            "execution_model": "anthropic/claude-sonnet-4-6",
+            "summary": "Done.",
+            "secret_scan_result": asdict(result),
+        }
+        receipt = build_shard_receipt(entry)
+        secret_caps = [c for c in receipt.evidence_capsules if c.kind == "secret_scan"]
+        self.assertEqual(len(secret_caps), 1)
+        self.assertEqual(secret_caps[0].path, "<model-context>")
+        # Rendered receipt never contains the raw secret.
+        self.assertNotIn(raw, render_full_shard_receipt(receipt))

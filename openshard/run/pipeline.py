@@ -2278,19 +2278,50 @@ class RunPipeline:
         # NOTE: runs post-run (after model use). Records findings for receipt visibility.
         # Does not prevent secrets from reaching the model in v1.
         try:
-            from openshard.security.secret_scan import scan_paths_for_secrets as _scan_secrets
+            from openshard.security.secret_scan import (
+                SecretScanResult,
+                scan_paths_for_secrets as _scan_secrets,
+            )
             from dataclasses import asdict as _scan_asdict
             _scan_file_paths: list[Path] = []
             if _native_meta is not None and _native_meta.file_context is not None:
                 _scan_file_paths = [
                     Path(p) for p in (_native_meta.file_context.paths or []) if p
                 ]
+            # Post-run path scan (existing behaviour).
+            _post_findings: list = []
+            _post_scanned = 0
             if _scan_file_paths:
                 _scan_result = _scan_secrets(_scan_file_paths, root=Path.cwd())
-                if _scan_result.findings:
-                    if _extra_metadata is None:
-                        _extra_metadata = {}
-                    _extra_metadata["secret_scan_result"] = _scan_asdict(_scan_result)
+                _post_findings = list(_scan_result.findings)
+                _post_scanned = _scan_result.scanned_files_count
+            # Merge pre-context scrub findings (secrets caught before model injection).
+            _pre_scan = getattr(_native_meta, "pre_context_secret_scan", None)
+            _pre_findings = list(_pre_scan.findings) if _pre_scan is not None else []
+            # Union by fingerprint — a secret found both in-file and in-context collapses to one.
+            _merged_findings: list = []
+            _seen_fp: set[str] = set()
+            for _f in _post_findings + _pre_findings:
+                _fp = getattr(_f, "fingerprint", None)
+                if _fp and _fp in _seen_fp:
+                    continue
+                if _fp:
+                    _seen_fp.add(_fp)
+                _merged_findings.append(_f)
+            if _merged_findings:
+                _count = len(_merged_findings)
+                _merged = SecretScanResult(
+                    scanned_files_count=_post_scanned,
+                    findings=_merged_findings,
+                    blocked=False,
+                    summary=(
+                        f"{_count} potential secret{'s' if _count != 1 else ''} "
+                        f"detected (pre-context scrub + post-run scan)"
+                    ),
+                )
+                if _extra_metadata is None:
+                    _extra_metadata = {}
+                _extra_metadata["secret_scan_result"] = _scan_asdict(_merged)
         except Exception as _scan_exc:
             # Never break the run. Record class only — no message that could contain file content.
             if _extra_metadata is None:

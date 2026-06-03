@@ -90,6 +90,10 @@ class SecretScanResult:
     findings: list[SecretFinding] = field(default_factory=list)
     blocked: bool = False
     summary: str = ""
+    # True when a scan was deliberately skipped (e.g. oversized context) and the
+    # candidate text was omitted rather than scanned. Defaults False for
+    # backward compatibility with previously serialised results.
+    omitted: bool = False
 
 
 def _is_noisy_path(path_str: str) -> bool:
@@ -148,6 +152,115 @@ def _scan_line(
                 severity=severity,
                 fingerprint=fp,
             ))
+
+
+def _scrub_line(
+    line: str,
+    lineno: int,
+    source_label: str | None,
+    seen_fingerprints: set[str],
+    findings: list[SecretFinding],
+) -> str:
+    """Redact every secret-like value in *line* in place; record findings.
+
+    Findings are deduplicated by fingerprint, but *every* occurrence is
+    redacted (a repeated secret must never survive). Replacements are applied
+    right-to-left so earlier edits do not shift the spans of later matches.
+    """
+    # Collect (start, end, replacement) for every non-placeholder match.
+    edits: list[tuple[int, int, str]] = []
+    for kind, pattern, value_group in _PATTERNS:
+        for m in pattern.finditer(line):
+            raw_value = m.group(value_group) if value_group else m.group(0)
+            if _is_placeholder(raw_value):
+                continue
+            start, end = m.span(value_group) if value_group else m.span(0)
+            edits.append((start, end, _redact(raw_value)))
+            fp = _fingerprint(raw_value)
+            if fp in seen_fingerprints:
+                continue
+            seen_fingerprints.add(fp)
+            severity = "Critical" if kind in ("aws_access_key_id",) else "High"
+            findings.append(SecretFinding(
+                kind=kind,
+                path=source_label,
+                line=lineno,
+                redacted=_redact(raw_value),
+                severity=severity,
+                fingerprint=fp,
+            ))
+
+    if not edits:
+        return line
+
+    # Apply right-to-left so earlier replacements do not shift later spans.
+    edits.sort(key=lambda e: e[0], reverse=True)
+    scrubbed = line
+    for start, end, replacement in edits:
+        scrubbed = scrubbed[:start] + replacement + scrubbed[end:]
+    return scrubbed
+
+
+_OVERSIZED_PLACEHOLDER = (
+    "[OpenShard omitted oversized context because it exceeded the "
+    "pre-context secret scan limit.]"
+)
+
+
+def scrub_text_for_secrets(
+    text: str,
+    source_label: str | None = None,
+    max_chars: int = 1_000_000,
+) -> tuple[str, SecretScanResult]:
+    """Scan candidate context *text* and return ``(scrubbed_text, result)``.
+
+    Secret-like values are replaced in place with their redacted form so raw
+    secrets never reach model context. Never raises.
+
+    - Empty/None text -> unchanged text + empty result.
+    - Oversized text (> *max_chars*) -> a safe placeholder string (the raw
+      text is omitted, never returned or injected) + a result with
+      ``omitted=True``. The summary contains none of the raw context.
+    - *source_label* is recorded as the finding ``path``; pass a fixed
+      non-filesystem token (e.g. ``"<model-context>"``) so no absolute path
+      leaks into evidence.
+    """
+    if not text:
+        return text, SecretScanResult(
+            scanned_files_count=0,
+            findings=[],
+            summary="No context text",
+        )
+
+    if len(text) > max_chars:
+        return _OVERSIZED_PLACEHOLDER, SecretScanResult(
+            scanned_files_count=0,
+            findings=[],
+            summary="Context omitted: exceeded pre-context scan size limit",
+            omitted=True,
+        )
+
+    seen_fingerprints: set[str] = set()
+    findings: list[SecretFinding] = []
+    scrubbed_lines = [
+        _scrub_line(line, lineno, source_label, seen_fingerprints, findings)
+        for lineno, line in enumerate(text.splitlines(), start=1)
+    ]
+    scrubbed_text = "\n".join(scrubbed_lines)
+
+    findings.sort(key=lambda f: (f.path or "", f.line or 0, f.kind))
+    count = len(findings)
+    summary = (
+        f"{count} potential secret{'s' if count != 1 else ''} detected and redacted from context"
+        if count
+        else "No secrets detected in context"
+    )
+    return scrubbed_text, SecretScanResult(
+        scanned_files_count=0,
+        findings=findings,
+        blocked=False,
+        summary=summary,
+    )
 
 
 def scan_paths_for_secrets(

@@ -8,6 +8,7 @@ from typing import Any
 
 from openshard.analysis.repo import RepoFacts
 from openshard.execution.generator import ExecutionGenerator, ExecutionResult
+from openshard.security.secret_scan import SecretScanResult, scrub_text_for_secrets
 from openshard.native.context import (
     CompactRunState,
     NativeClarificationRequest,
@@ -166,6 +167,7 @@ class NativeRunMeta:
     plan_ledger: NativePlanLedger | None = None
     edit_loop_summary: NativeEditLoopSummary | None = None
     candidate_summary: NativeCandidateSummary | None = None
+    pre_context_secret_scan: SecretScanResult | None = None
 
 
 _SEARCH_STOP_WORDS: frozenset[str] = frozenset({
@@ -1581,6 +1583,21 @@ class NativeAgentExecutor:
             _injected_sources.add("skills_context")
 
         combined_context = "\n\n".join(context_parts) if context_parts else skills_context
+
+        # Pre-context secret scan — scrub secret-like values out of the candidate
+        # context before it is injected into model context. Never blocks, never
+        # crashes the run; a failed scan degrades to original behaviour.
+        try:
+            _scrubbed, _pre_scan = scrub_text_for_secrets(
+                combined_context, source_label="<model-context>"
+            )
+            if _pre_scan.findings or _pre_scan.omitted:
+                combined_context = _scrubbed
+                self.native_meta.pre_context_secret_scan = _pre_scan
+        except Exception as _pre_scan_exc:  # noqa: BLE001 — never break the run
+            self.native_meta.context_warnings.append(
+                f"pre_context_secret_scan_skipped:{type(_pre_scan_exc).__name__}"
+            )
 
         if context_parts and self.native_meta.context_budget is not None:
             self.native_meta.context_budget.estimated_tokens_used += (
