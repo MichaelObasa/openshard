@@ -3154,6 +3154,172 @@ def eval_stats(suite: str | None, model: str | None, task: str | None, by_catego
     click.echo(f"\n  total: {total_runs} runs  pass: {total_pass}  fail: {total_fail}  pass rate: {overall_rate:.0%}")
 
 
+# Default location for locally-generated eval cases (sibling of eval-runs.jsonl).
+_GENERATED_EVALS_DIR = Path(".openshard") / "evals" / "generated"
+
+
+def _resolve_eval_output_path(
+    eval_id: str, output: str | None
+) -> tuple[Path, list[str]]:
+    """Resolve the write target for an eval case, falling back when unsafe.
+
+    Returns (path, warnings). A custom ``--output`` is honoured only when it is a
+    safe relative path (no absolute/drive prefix, no ``..`` traversal); otherwise
+    we fall back to the default generated location and record a warning. The
+    eval id is already sanitised by the caller, so the default path never embeds
+    unsanitised shard/task data.
+    """
+    default_path = Path.cwd() / _GENERATED_EVALS_DIR / f"{eval_id}.json"
+    if not output:
+        return default_path, []
+
+    candidate = Path(output)
+    normalized = output.replace("\\", "/")
+    is_absolute = (
+        candidate.is_absolute()
+        or normalized.startswith("/")  # POSIX-absolute, even when run on Windows
+        or (len(normalized) > 1 and normalized[1] == ":")  # drive-letter prefix
+    )
+    has_traversal = ".." in candidate.parts
+    if is_absolute or has_traversal:
+        return (
+            default_path,
+            ["Ignored unsafe --output path; wrote to default location instead."],
+        )
+    return Path.cwd() / candidate, []
+
+
+def _write_eval_case(path: Path, case: dict, force: bool) -> None:
+    """Write the eval case JSON to ``path``. Raises on collision unless ``force``."""
+    if path.exists() and not force:
+        raise FileExistsError(str(path))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(case, indent=2) + "\n", encoding="utf-8")
+
+
+@eval.command("create-from-last")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Machine-readable output (valid JSON only).")
+@click.option("--output", "output", default=None,
+              help="Write the eval case to this relative path instead of the default.")
+@click.option("--force", is_flag=True, default=False,
+              help="Overwrite the output file if it already exists.")
+def eval_create_from_last(as_json: bool, output: str | None, force: bool) -> None:
+    """Convert the latest failed/rejected/partial Shard into a safe eval case.
+
+    Local, deterministic, receipt-based. Reads the most recent run from history,
+    classifies it with the failure taxonomy, and — only when it carries a
+    failure/correction signal — writes a redacted, versioned eval-case JSON file
+    under .openshard/evals/generated/. No network, no model calls; no secrets,
+    raw file contents, diffs, transcripts, error messages, or absolute paths leak.
+    """
+    from openshard.history.shard_contract import build_shard_receipt
+    from openshard.history.failures import classify_failure
+    from openshard.evals.case_builder import build_eval_case, is_eligible
+
+    command = "eval create-from-last"
+    log_path = Path.cwd() / _LOG_PATH
+    entries = _load_run_entries(log_path)
+
+    if not entries:
+        if as_json:
+            payload = _machine_envelope(
+                command, "not_eligible",
+                eval_id=None, source_shard_id=None, failure_category=None,
+                output_path_display=None,
+                warnings=["No run history found."],
+            )
+            click.echo(json.dumps(payload, indent=2))
+        else:
+            click.echo("No eval case created because there is no run history.")
+        return
+
+    entry = entries[-1]
+    receipt = build_shard_receipt(entry, index=len(entries) - 1)
+    classification = classify_failure(entry, receipt)
+
+    if not is_eligible(classification):
+        message = (
+            "No eval case created because the latest Shard has no "
+            "failure/correction signal."
+        )
+        if as_json:
+            payload = _machine_envelope(
+                command, "not_eligible",
+                shard_id=receipt.shard_id,
+                eval_id=None,
+                source_shard_id=receipt.shard_id,
+                failure_category=classification.category,
+                output_path_display=None,
+            )
+            click.echo(json.dumps(payload, indent=2))
+        else:
+            click.echo(message)
+        return
+
+    created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    case = build_eval_case(receipt, classification, created_at)
+    eval_id = case["eval_id"]
+    target, warnings = _resolve_eval_output_path(eval_id, output)
+
+    try:
+        _write_eval_case(target, case, force)
+    except FileExistsError:
+        display = _safe_output_display(str(target))
+        if as_json:
+            payload = _machine_envelope(
+                command, "error",
+                shard_id=receipt.shard_id,
+                eval_id=eval_id,
+                source_shard_id=receipt.shard_id,
+                failure_category=classification.category,
+                output_path_display=display,
+                warnings=warnings + [f"File already exists: {display}. Use --force to overwrite."],
+            )
+            click.echo(json.dumps(payload, indent=2))
+        else:
+            click.echo(f"Eval case not written: {display} already exists. Use --force to overwrite.")
+        raise SystemExit(1)
+    except OSError as exc:
+        display = _safe_output_display(str(target))
+        if as_json:
+            payload = _machine_envelope(
+                command, "error",
+                shard_id=receipt.shard_id,
+                eval_id=eval_id,
+                source_shard_id=receipt.shard_id,
+                failure_category=classification.category,
+                output_path_display=display,
+                warnings=warnings + [f"Could not write eval case to {display}: {type(exc).__name__}."],
+            )
+            click.echo(json.dumps(payload, indent=2))
+        else:
+            click.echo(f"Eval case not written: could not write to {display} ({type(exc).__name__}).")
+        raise SystemExit(1)
+
+    display = _safe_output_display(str(target))
+    if as_json:
+        payload = _machine_envelope(
+            command, "created",
+            shard_id=receipt.shard_id,
+            eval_id=eval_id,
+            source_shard_id=receipt.shard_id,
+            failure_category=classification.category,
+            output_path_display=display,
+            warnings=warnings,
+        )
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    click.echo("Created eval case from the latest failed Shard.")
+    click.echo(f"  eval id:          {eval_id}")
+    click.echo(f"  source shard id:  {receipt.shard_id}")
+    click.echo(f"  failure category: {classification.category}")
+    click.echo(f"  output:           {display}")
+    for warning in warnings:
+        click.echo(f"  warning:          {warning}")
+
+
 @cli.group("packs", invoke_without_command=True)
 @click.pass_context
 def packs(ctx: click.Context):
