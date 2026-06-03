@@ -1328,7 +1328,8 @@ def last(more: bool, full: bool, as_json: bool):
         entry = entries[-1]
         receipt = build_shard_receipt(entry, index=len(entries) - 1)
         payload = _machine_envelope(
-            "last", "ok", shard_id=receipt.shard_id, run=_export_run_entry(entry)
+            "last", "ok", shard_id=receipt.shard_id,
+            run=_export_run_entry(entry, include_timeline=True)
         )
         click.echo(json.dumps(payload, indent=2))
         return
@@ -2471,7 +2472,7 @@ def _baseline_export_fields(
     }
 
 
-def _export_run_entry(entry: dict, include_notes: bool = False) -> dict:
+def _export_run_entry(entry: dict, include_notes: bool = False, include_timeline: bool = False) -> dict:
     stage_runs = entry.get("stage_runs") or []
     is_ro = entry.get("routing_rationale") == "read-only analysis"
 
@@ -2529,6 +2530,9 @@ def _export_run_entry(entry: dict, include_notes: bool = False) -> dict:
     }
     if include_notes:
         row["notes"] = entry.get("notes") or []
+    if include_timeline:
+        from openshard.run.timeline import project_timeline_for_export
+        row["timeline"] = project_timeline_for_export(entry.get("run_timeline") or [])
     return row
 
 

@@ -80,6 +80,55 @@ class TestLastJson(_Base):
         with self.assertRaises(json.JSONDecodeError):
             json.loads(result.output)
 
+    def test_timeline_included_when_present(self):
+        with self.runner.isolated_filesystem():
+            _write_runs([_make_entry(run_timeline=[
+                {"event": "repo_scanned", "label": "Scanned repo",
+                 "kind": "scan", "status": "completed"},
+                {"event": "receipt_saved", "label": "Saved Shard receipt",
+                 "kind": "receipt", "status": "completed"},
+            ])])
+            result = self.runner.invoke(cli, ["last", "--json"])
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        data = json.loads(result.output)
+        timeline = data["run"]["timeline"]
+        self.assertIsInstance(timeline, list)
+        events = {e["event"] for e in timeline}
+        self.assertIn("repo_scanned", events)
+        self.assertIn("receipt_saved", events)
+        for e in timeline:
+            self.assertIn("label", e)
+            self.assertIn("kind", e)
+            self.assertIn("status", e)
+        _assert_no_unsafe(self, result.output)
+
+    def test_timeline_empty_for_old_receipt(self):
+        with self.runner.isolated_filesystem():
+            _write_runs([_make_entry()])  # no run_timeline key
+            result = self.runner.invoke(cli, ["last", "--json"])
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        data = json.loads(result.output)
+        self.assertEqual(data["run"]["timeline"], [])
+
+    def test_timeline_strips_unsafe_values(self):
+        with self.runner.isolated_filesystem():
+            _write_runs([_make_entry(run_timeline=[
+                {"event": "x", "label": "did work",
+                 "kind": "run", "status": "completed",
+                 "target": r"C:\Users\alice\.env",
+                 "detail": "token=supersecretleak1234",
+                 "metadata": {"k": "sk-ABCDEFGHIJKLMNOP1234"}},
+            ])])
+            result = self.runner.invoke(cli, ["last", "--json"])
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        # Absolute path + secret-like tokens must not appear anywhere.
+        _assert_no_unsafe(self, result.output)
+        self.assertNotIn("token=supersecretleak", result.output)
+        data = json.loads(result.output)
+        row = data["run"]["timeline"][0]
+        self.assertNotIn("target", row)
+        self.assertNotIn("detail", row)
+
 
 class TestReflectLastJson(_Base):
     def test_success_emits_valid_envelope(self):
