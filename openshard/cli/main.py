@@ -1593,6 +1593,97 @@ def ci_check(as_json: bool, strict: bool, github_output: bool) -> None:
     sys.exit(result.exit_code)
 
 
+@cli.group("stats", invoke_without_command=True)
+@click.pass_context
+def stats_group(ctx: click.Context) -> None:
+    """Receipt-quality stats over recent OpenShard run receipts."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@stats_group.command("completeness")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Machine-readable output (valid JSON only).")
+@click.option("--limit", default=20, type=click.IntRange(min=1),
+              help="Evaluate only the most recent N receipts (default 20).")
+def stats_completeness(as_json: bool, limit: int) -> None:
+    """Score recent Shard receipts for completeness.
+
+    Local, deterministic, receipt-based: reports a completeness heuristic plus
+    the fields that are consistently present (strong) or missing (weak) across
+    recent runs. No network, no model calls; no secrets or absolute paths leak.
+    """
+    from openshard.history.shard_contract import build_shard_receipt
+    from openshard.history.completeness import evaluate_completeness
+
+    log_path = Path.cwd() / _LOG_PATH
+    entries = _load_run_entries(log_path)
+
+    if not entries:
+        if as_json:
+            payload = _machine_envelope(
+                "stats completeness", "not_found",
+                runs_checked=0,
+                average_score_percent=0,
+                field_presence={},
+                strong_fields=[],
+                weak_fields=[],
+                recommendations=[],
+                receipts=[],
+            )
+            click.echo(json.dumps(payload, indent=2))
+        else:
+            click.echo("No run history found. Run 'openshard run' to get started.")
+        return
+
+    recent = entries[-limit:]
+    receipts = [
+        build_shard_receipt(entry, index=len(entries) - len(recent) + offset)
+        for offset, entry in enumerate(recent)
+    ]
+    report = evaluate_completeness(receipts)
+
+    if as_json:
+        payload = _machine_envelope(
+            "stats completeness", "ok",
+            runs_checked=report.runs_checked,
+            average_score_percent=report.average_score_percent,
+            field_presence=report.field_presence,
+            strong_fields=report.strong_fields,
+            weak_fields=report.weak_fields,
+            recommendations=report.recommendations,
+            receipts=[
+                {
+                    "shard_id": rc.shard_id,
+                    "score_percent": rc.score_percent,
+                    "present_fields": rc.present_fields,
+                    "missing_fields": rc.missing_fields,
+                }
+                for rc in report.receipts
+            ],
+        )
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    click.echo("\nShard receipt completeness")
+    click.echo(f"  runs checked:         {report.runs_checked}")
+    click.echo(f"  average completeness: {report.average_score_percent}%")
+
+    if report.strong_fields:
+        click.echo(f"\n  strong fields:  {', '.join(report.strong_fields)}")
+    if report.weak_fields:
+        weak_display = ", ".join(
+            f"{name} ({report.field_presence[name]['presence_percent']}%)"
+            for name in report.weak_fields
+        )
+        click.echo(f"  weak fields:    {weak_display}")
+
+    if report.recommendations:
+        click.echo("\n  recommendations:")
+        for rec in report.recommendations:
+            click.echo(f"    - {rec}")
+
+
 @cli.command("apply-last")
 @click.option("--dry-run", is_flag=True, default=False, help="Show what would be applied without copying files.")
 @click.option("--file", "include_files", multiple=True, help="Only apply this relative file path. Can be used multiple times.")
