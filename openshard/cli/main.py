@@ -1335,6 +1335,7 @@ def last(more: bool, full: bool, as_json: bool):
             return
         entry = entries[-1]
         receipt = build_shard_receipt(entry, index=len(entries) - 1)
+        from openshard.history.proof_contract import build_shard_proof_contract
         from openshard.history.trust_score import evaluate_trust_score
 
         _ts = evaluate_trust_score(
@@ -1352,6 +1353,7 @@ def last(more: bool, full: bool, as_json: bool):
                     for p in _ts.penalties
                 ],
             },
+            proof_contract=build_shard_proof_contract(entry),
         )
         click.echo(json.dumps(payload, indent=2))
         return
