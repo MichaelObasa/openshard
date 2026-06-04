@@ -17,11 +17,24 @@ from openshard.cli.main import _render_log_entry
 from openshard.security.paths import UnsafePathError, resolve_safe_repo_path
 
 
+def configure_test_git_identity(repo_path: Path) -> None:
+    """Set a Git identity local to the temp repo so commits never depend on
+    global config. Scoped to repo_path only; never touches the user's real
+    Git config."""
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=str(repo_path), capture_output=True, check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "OpenShard Test"],
+        cwd=str(repo_path), capture_output=True, check=True,
+    )
+
+
 def _init_git_repo(path: Path) -> None:
     """Create a git repo with an initial commit so worktrees can be created."""
     subprocess.run(["git", "init"], cwd=str(path), capture_output=True, check=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=str(path), capture_output=True)
-    subprocess.run(["git", "config", "user.name", "Test"], cwd=str(path), capture_output=True)
+    configure_test_git_identity(path)
     (path / "README.md").write_text("init")
     subprocess.run(["git", "add", "."], cwd=str(path), capture_output=True)
     subprocess.run(["git", "commit", "-m", "initial commit"], cwd=str(path), capture_output=True, check=True)
