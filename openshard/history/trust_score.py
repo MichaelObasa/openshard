@@ -18,9 +18,8 @@ Signal reuse (single source of truth):
   manual_review_required / secret_scan_findings / feedback_outcome / a sanitised
   error_class. We read those rather than re-import private CI helpers.
 * ``score_receipt(receipt)`` (public) yields the completeness percent.
-* Two tiny receipt predicates (``_changes_made`` / ``_manual_fix_required``) are
-  duplicated locally instead of importing private helpers, to avoid fragile
-  cross-module private coupling.
+* Two receipt predicates (``_changes_made`` / ``_manual_fix_required``) are
+  imported from ``shard_schema`` as the canonical single source of truth.
 
 Double-counting guard: penalties are computed from the *discrete underlying
 signals*, never from the failure category (the category is itself a reduction of
@@ -42,6 +41,10 @@ from typing import TYPE_CHECKING
 
 from openshard.history.completeness import score_receipt
 from openshard.history.failures import classify_failure
+from openshard.history.shard_schema import (
+    shard_changes_made as _changes_made,
+    shard_manual_fix_required as _manual_fix_required,
+)
 
 if TYPE_CHECKING:
     from openshard.history.shard_contract import ShardReceipt
@@ -130,19 +133,6 @@ class RunTrustScore:
     penalties: list[TrustPenalty] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
-
-def _changes_made(receipt: "ShardReceipt") -> bool:
-    """True when the run recorded file changes. (Local copy of the failures.py predicate.)"""
-    try:
-        return bool(receipt.files_detail) or (receipt.files_changed or 0) > 0
-    except Exception:
-        return False
-
-
-def _manual_fix_required(receipt: "ShardReceipt") -> bool:
-    """True when developer feedback flagged a required manual fix. (Local copy.)"""
-    df = getattr(receipt, "developer_feedback", None)
-    return bool(df.get("manual_fix_required")) if isinstance(df, dict) else False
 
 
 def _band_for(score: int) -> str:

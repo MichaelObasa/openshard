@@ -6,10 +6,10 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from openshard.run.timeline import (
-    _is_absolute_path,
-    _sanitize_metadata,
-    _sanitize_text,
+from openshard.safety.sanitize import (
+    is_absolute_path as _is_absolute_path,
+    sanitize_metadata as _sanitize_metadata,
+    sanitize_text as _sanitize_text,
 )
 
 _INTERACTIONS_PATH = Path(".openshard") / "interactions.jsonl"
