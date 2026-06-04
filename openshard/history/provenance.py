@@ -1,7 +1,8 @@
-"""Evidence Provenance v0 — safe, derived provenance records for Shard proof claims.
+"""Provenance v1 — safe, derived provenance records for Shard proof claims.
 
 Provenance records are derived at read-time from existing stored fields
-(evidence_capsules, review_checks).  They are never persisted to JSONL.
+(evidence_capsules, review_checks, run_timeline, policy_decisions).
+They are never persisted to JSONL.
 Old records without those fields produce an empty list safely.
 """
 
@@ -255,8 +256,137 @@ def build_provenance_from_review_checks(
     return records
 
 
+def build_provenance_from_timeline_events(
+    timeline: list[Any],
+    run_ref: str = "unknown-run",
+) -> list[ProvenanceRecord]:
+    """Derive provenance records from run_timeline event dicts.
+
+    Each event must have an ``event`` machine key (used as source_name and
+    related_event_id).  ``label`` is optional; claim falls back to the event
+    key when label is absent.  Returns [] for non-list input.  Never raises.
+    """
+    if not isinstance(timeline, list):
+        return []
+    _status_map = {
+        "completed": "passed",
+        "failed": "failed",
+        "skipped": "skipped",
+        "warning": "warning",
+    }
+    records: list[ProvenanceRecord] = []
+    for i, event in enumerate(timeline):
+        if not isinstance(event, dict):
+            continue
+        try:
+            event_key = event.get("event")
+            if not event_key or not isinstance(event_key, str):
+                continue
+
+            label = event.get("label")
+            claim = label if isinstance(label, str) and label else event_key
+
+            raw_status = event.get("status") or ""
+            status = _status_map.get(raw_status, "unknown")
+
+            kind = event.get("kind")
+            detail = event.get("detail")
+            target = event.get("target")
+            count = event.get("count")
+
+            metadata: dict = {}
+            if target is not None:
+                metadata["target"] = target
+            if count is not None:
+                metadata["count"] = count
+
+            records.append(make_provenance_record(
+                source_type="timeline",
+                source_name=event_key,
+                claim=claim,
+                status=status,
+                run_ref=run_ref,
+                index=i,
+                related_stage=str(kind) if kind else None,
+                related_event_id=event_key,
+                safe_summary=detail if isinstance(detail, str) else None,
+                metadata=metadata or None,
+            ))
+        except Exception:
+            continue
+    return records
+
+
+def build_provenance_from_policy_decisions(
+    decisions: list[Any],
+    run_ref: str = "unknown-run",
+) -> list[ProvenanceRecord]:
+    """Derive provenance records from policy_decisions dicts.
+
+    Requires ``action`` and ``decision`` fields.  ``decision_id`` is optional;
+    when absent related_event_id is None but the record is still produced.
+    ``resource`` is intentionally never read (may be a file path).
+    Returns [] for non-list input.  Never raises.
+    """
+    if not isinstance(decisions, list):
+        return []
+    _status_map = {
+        "allow": "passed",
+        "deny": "failed",
+        "ask": "warning",
+        "not_applicable": "skipped",
+    }
+    records: list[ProvenanceRecord] = []
+    for i, decision in enumerate(decisions):
+        if not isinstance(decision, dict):
+            continue
+        try:
+            action = decision.get("action")
+            decision_val = decision.get("decision")
+            if not action or not isinstance(action, str):
+                continue
+            if not decision_val or not isinstance(decision_val, str):
+                continue
+
+            decision_id = decision.get("decision_id")
+            # decision_id is a UUID (36-char alphanumeric+hyphen); it matches
+            # the 32+ char opaque-blob pattern in sanitize_text and will be
+            # sanitized to None.  That is intentional — opaque long strings
+            # should not survive the secret filter.
+            related_event_id = decision_id if isinstance(decision_id, str) and decision_id else None
+
+            status = _status_map.get(decision_val, "unknown")
+            claim = f"{action} {decision_val}"
+
+            reason = decision.get("reason")
+            source = decision.get("source")
+            severity = decision.get("severity")
+            # "resource" deliberately not accessed — may be a file path
+
+            metadata: dict = {}
+            if source is not None:
+                metadata["source"] = source
+            if severity is not None:
+                metadata["severity"] = severity
+
+            records.append(make_provenance_record(
+                source_type="policy",
+                source_name=action,
+                claim=claim,
+                status=status,
+                run_ref=run_ref,
+                index=i,
+                related_event_id=related_event_id,
+                safe_summary=reason if isinstance(reason, str) else None,
+                metadata=metadata or None,
+            ))
+        except Exception:
+            continue
+    return records
+
+
 def build_provenance_from_entry(entry: object) -> list[ProvenanceRecord]:
-    """Top-level builder: derive all v0 provenance from a run entry dict.
+    """Top-level builder: derive all provenance from a run entry dict.
 
     Returns [] for non-dict input, missing fields, or any error.
     Never raises.
@@ -283,6 +413,16 @@ def build_provenance_from_entry(entry: object) -> list[ProvenanceRecord]:
         raw_checks = entry.get("review_checks")
         if isinstance(raw_checks, list):
             records.extend(build_provenance_from_review_checks(raw_checks, run_ref=run_ref))
+
+        # Timeline events
+        raw_timeline = entry.get("run_timeline")
+        if isinstance(raw_timeline, list):
+            records.extend(build_provenance_from_timeline_events(raw_timeline, run_ref=run_ref))
+
+        # Policy decisions
+        raw_decisions = entry.get("policy_decisions")
+        if isinstance(raw_decisions, list):
+            records.extend(build_provenance_from_policy_decisions(raw_decisions, run_ref=run_ref))
 
         return records
     except Exception:

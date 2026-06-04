@@ -19,7 +19,9 @@ from openshard.history.provenance import (
     _stable_provenance_id,
     build_provenance_from_entry,
     build_provenance_from_evidence_capsules,
+    build_provenance_from_policy_decisions,
     build_provenance_from_review_checks,
+    build_provenance_from_timeline_events,
     make_provenance_record,
 )
 
@@ -71,6 +73,46 @@ def _capsule(
 
 def _check(name: str = "terraform_fmt", status: str = "passed", summary: str = "formatting ok"):
     return {"name": name, "status": status, "summary": summary}
+
+
+def _timeline_event(
+    event: str = "repo_scanned",
+    label: str | None = "Repository scanned",
+    kind: str = "scan",
+    status: str = "completed",
+    detail: str | None = None,
+    target: str | None = None,
+    count: int | None = None,
+) -> dict:
+    ev: dict = {"event": event, "kind": kind, "status": status}
+    if label is not None:
+        ev["label"] = label
+    if detail is not None:
+        ev["detail"] = detail
+    if target is not None:
+        ev["target"] = target
+    if count is not None:
+        ev["count"] = count
+    return ev
+
+
+def _policy_decision(
+    decision_id: str | None = "550e8400-e29b-41d4-a716-446655440000",
+    action: str = "write",
+    decision: str = "allow",
+    reason: str = "Approved by path policy",
+    source: str = "path_policy",
+    severity: str | None = None,
+    resource: str | None = None,
+) -> dict:
+    d: dict = {"action": action, "decision": decision, "reason": reason, "source": source}
+    if decision_id is not None:
+        d["decision_id"] = decision_id
+    if severity is not None:
+        d["severity"] = severity
+    if resource is not None:
+        d["resource"] = resource
+    return d
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +517,307 @@ class TestBuildProvenanceFromEntry(unittest.TestCase):
         full_json = json.dumps([asdict(r) for r in records])
         _assert_no_unsafe(full_json)
 
+    def test_entry_with_run_timeline_produces_timeline_records(self):
+        entry = {
+            "shard_id": "shard-20260601-0001",
+            "run_timeline": [_timeline_event("repo_scanned", "Repository scanned")],
+        }
+        records = build_provenance_from_entry(entry)
+        self.assertTrue(any(r.source_type == "timeline" for r in records))
+
+    def test_entry_with_policy_decisions_produces_policy_records(self):
+        entry = {
+            "shard_id": "shard-20260601-0001",
+            "policy_decisions": [_policy_decision()],
+        }
+        records = build_provenance_from_entry(entry)
+        self.assertTrue(any(r.source_type == "policy" for r in records))
+
+    def test_entry_with_all_four_sources_produces_all_types(self):
+        entry = {
+            "shard_id": "shard-20260601-0001",
+            "evidence_capsules": [
+                {"capsule_id": "c1", "kind": "secret_scan",
+                 "summary": "redacted", "source": "scanner", "severity": None},
+            ],
+            "review_checks": [_check()],
+            "run_timeline": [_timeline_event()],
+            "policy_decisions": [_policy_decision()],
+        }
+        records = build_provenance_from_entry(entry)
+        types = {r.source_type for r in records}
+        self.assertEqual(types, {"evidence", "verification", "timeline", "policy"})
+
+    def test_never_raises_with_garbage_timeline_and_decisions(self):
+        bad_entries = [
+            {"run_timeline": "not-a-list"},
+            {"policy_decisions": 99},
+            {"run_timeline": [None, None]},
+            {"policy_decisions": [None, "bad"]},
+        ]
+        for entry in bad_entries:
+            with self.subTest(entry=entry):
+                result = build_provenance_from_entry(entry)
+                self.assertIsInstance(result, list)
+
+
+# ---------------------------------------------------------------------------
+# TestBuildProvenanceFromTimelineEvents
+# ---------------------------------------------------------------------------
+
+class TestBuildProvenanceFromTimelineEvents(unittest.TestCase):
+    def test_empty_list_returns_empty(self):
+        self.assertEqual(build_provenance_from_timeline_events([]), [])
+
+    def test_non_list_returns_empty(self):
+        for bad in (None, {}, "string", 42):
+            with self.subTest(bad=bad):
+                self.assertEqual(build_provenance_from_timeline_events(bad), [])
+
+    def test_completed_maps_to_passed(self):
+        records = build_provenance_from_timeline_events([_timeline_event(status="completed")])
+        self.assertEqual(records[0].status, "passed")
+
+    def test_failed_maps_to_failed(self):
+        records = build_provenance_from_timeline_events([_timeline_event(status="failed")])
+        self.assertEqual(records[0].status, "failed")
+
+    def test_skipped_maps_to_skipped(self):
+        records = build_provenance_from_timeline_events([_timeline_event(status="skipped")])
+        self.assertEqual(records[0].status, "skipped")
+
+    def test_warning_maps_to_warning(self):
+        records = build_provenance_from_timeline_events([_timeline_event(status="warning")])
+        self.assertEqual(records[0].status, "warning")
+
+    def test_started_maps_to_unknown(self):
+        records = build_provenance_from_timeline_events([_timeline_event(status="started")])
+        self.assertEqual(records[0].status, "unknown")
+
+    def test_source_type_is_timeline(self):
+        records = build_provenance_from_timeline_events([_timeline_event()])
+        self.assertEqual(records[0].source_type, "timeline")
+
+    def test_source_name_is_event_key(self):
+        records = build_provenance_from_timeline_events([_timeline_event(event="repo_scanned")])
+        self.assertEqual(records[0].source_name, "repo_scanned")
+
+    def test_claim_is_label_when_present(self):
+        records = build_provenance_from_timeline_events(
+            [_timeline_event(label="Repository scanned")]
+        )
+        self.assertEqual(records[0].claim, "Repository scanned")
+
+    def test_claim_falls_back_to_event_key_when_label_absent(self):
+        ev = {"event": "repo_scanned", "kind": "scan", "status": "completed"}
+        records = build_provenance_from_timeline_events([ev])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].claim, "repo_scanned")
+
+    def test_related_stage_is_kind(self):
+        records = build_provenance_from_timeline_events([_timeline_event(kind="scan")])
+        self.assertEqual(records[0].related_stage, "scan")
+
+    def test_related_event_id_is_event_key(self):
+        records = build_provenance_from_timeline_events([_timeline_event(event="repo_scanned")])
+        self.assertEqual(records[0].related_event_id, "repo_scanned")
+
+    def test_detail_becomes_safe_summary(self):
+        records = build_provenance_from_timeline_events(
+            [_timeline_event(detail="12 files found")]
+        )
+        self.assertEqual(records[0].safe_summary, "12 files found")
+
+    def test_no_detail_safe_summary_is_none(self):
+        records = build_provenance_from_timeline_events([_timeline_event()])
+        self.assertIsNone(records[0].safe_summary)
+
+    def test_metadata_includes_target_when_present(self):
+        records = build_provenance_from_timeline_events(
+            [_timeline_event(target="src/main.py")]
+        )
+        self.assertIn("target", records[0].metadata)
+        self.assertEqual(records[0].metadata["target"], "src/main.py")
+
+    def test_metadata_includes_count_when_present(self):
+        records = build_provenance_from_timeline_events([_timeline_event(count=5)])
+        self.assertEqual(records[0].metadata["count"], 5)
+
+    def test_metadata_excludes_absent_target_and_count(self):
+        records = build_provenance_from_timeline_events([_timeline_event()])
+        self.assertNotIn("target", records[0].metadata)
+        self.assertNotIn("count", records[0].metadata)
+
+    def test_missing_event_key_skips_item(self):
+        ev = {"label": "Repository scanned", "kind": "scan", "status": "completed"}
+        self.assertEqual(build_provenance_from_timeline_events([ev]), [])
+
+    def test_non_dict_item_skipped_gracefully(self):
+        items = [None, 42, "bad", _timeline_event()]
+        records = build_provenance_from_timeline_events(items)
+        self.assertEqual(len(records), 1)
+
+    def test_deterministic_ids_same_run_ref(self):
+        events = [_timeline_event()]
+        ids1 = [r.provenance_id for r in build_provenance_from_timeline_events(events, run_ref="shard-x")]
+        ids2 = [r.provenance_id for r in build_provenance_from_timeline_events(events, run_ref="shard-x")]
+        self.assertEqual(ids1, ids2)
+
+    def test_different_run_ref_produces_different_id(self):
+        ev = [_timeline_event()]
+        id1 = build_provenance_from_timeline_events(ev, run_ref="shard-a")[0].provenance_id
+        id2 = build_provenance_from_timeline_events(ev, run_ref="shard-b")[0].provenance_id
+        self.assertNotEqual(id1, id2)
+
+    def test_id_format(self):
+        records = build_provenance_from_timeline_events([_timeline_event()])
+        self.assertRegex(records[0].provenance_id, _PROV_ID_RE)
+
+    def test_raw_content_stored_is_false(self):
+        records = build_provenance_from_timeline_events([_timeline_event()])
+        self.assertFalse(records[0].raw_content_stored)
+
+    def test_absolute_path_target_dropped_from_metadata(self):
+        records = build_provenance_from_timeline_events(
+            [_timeline_event(target="C:\\Users\\admin\\secret.py")]
+        )
+        self.assertNotIn("target", records[0].metadata)
+
+    def test_multiple_events_produce_multiple_records(self):
+        events = [
+            _timeline_event("repo_scanned", "Repository scanned"),
+            _timeline_event("model_called", "Model called", kind="model"),
+        ]
+        self.assertEqual(len(build_provenance_from_timeline_events(events)), 2)
+
+
+# ---------------------------------------------------------------------------
+# TestBuildProvenanceFromPolicyDecisions
+# ---------------------------------------------------------------------------
+
+class TestBuildProvenanceFromPolicyDecisions(unittest.TestCase):
+    def test_empty_list_returns_empty(self):
+        self.assertEqual(build_provenance_from_policy_decisions([]), [])
+
+    def test_non_list_returns_empty(self):
+        for bad in (None, {}, "string", 42):
+            with self.subTest(bad=bad):
+                self.assertEqual(build_provenance_from_policy_decisions(bad), [])
+
+    def test_allow_maps_to_passed(self):
+        records = build_provenance_from_policy_decisions([_policy_decision(decision="allow")])
+        self.assertEqual(records[0].status, "passed")
+
+    def test_deny_maps_to_failed(self):
+        records = build_provenance_from_policy_decisions([_policy_decision(decision="deny")])
+        self.assertEqual(records[0].status, "failed")
+
+    def test_ask_maps_to_warning(self):
+        records = build_provenance_from_policy_decisions([_policy_decision(decision="ask")])
+        self.assertEqual(records[0].status, "warning")
+
+    def test_not_applicable_maps_to_skipped(self):
+        records = build_provenance_from_policy_decisions([_policy_decision(decision="not_applicable")])
+        self.assertEqual(records[0].status, "skipped")
+
+    def test_unknown_decision_maps_to_unknown(self):
+        records = build_provenance_from_policy_decisions([_policy_decision(decision="pending")])
+        self.assertEqual(records[0].status, "unknown")
+
+    def test_source_type_is_policy(self):
+        records = build_provenance_from_policy_decisions([_policy_decision()])
+        self.assertEqual(records[0].source_type, "policy")
+
+    def test_source_name_is_action(self):
+        records = build_provenance_from_policy_decisions([_policy_decision(action="write")])
+        self.assertEqual(records[0].source_name, "write")
+
+    def test_claim_is_action_space_decision(self):
+        records = build_provenance_from_policy_decisions(
+            [_policy_decision(action="write", decision="allow")]
+        )
+        self.assertEqual(records[0].claim, "write allow")
+
+    def test_related_event_id_is_none_after_sanitization(self):
+        # UUIDs are 36-char alphanumeric+hyphen strings; they match the
+        # 32+ char opaque-blob secret pattern and are dropped by sanitize_text.
+        records = build_provenance_from_policy_decisions(
+            [_policy_decision(decision_id="550e8400-e29b-41d4-a716-446655440000")]
+        )
+        self.assertIsNone(records[0].related_event_id)
+
+    def test_related_event_id_is_none_when_decision_id_absent(self):
+        records = build_provenance_from_policy_decisions([_policy_decision(decision_id=None)])
+        self.assertEqual(len(records), 1)
+        self.assertIsNone(records[0].related_event_id)
+
+    def test_reason_becomes_safe_summary(self):
+        records = build_provenance_from_policy_decisions(
+            [_policy_decision(reason="Approved by path policy")]
+        )
+        self.assertEqual(records[0].safe_summary, "Approved by path policy")
+
+    def test_resource_not_in_metadata(self):
+        records = build_provenance_from_policy_decisions(
+            [_policy_decision(resource="/home/user/secret.tf")]
+        )
+        self.assertNotIn("resource", records[0].metadata)
+
+    def test_metadata_keys_only_source_and_severity(self):
+        records = build_provenance_from_policy_decisions(
+            [_policy_decision(source="path_policy", severity="high", resource="C:\\secret.py")]
+        )
+        self.assertLessEqual(set(records[0].metadata.keys()), {"source", "severity"})
+
+    def test_metadata_has_source_when_present(self):
+        records = build_provenance_from_policy_decisions([_policy_decision(source="path_policy")])
+        self.assertEqual(records[0].metadata["source"], "path_policy")
+
+    def test_metadata_has_severity_when_present(self):
+        records = build_provenance_from_policy_decisions([_policy_decision(severity="high")])
+        self.assertEqual(records[0].metadata["severity"], "high")
+
+    def test_metadata_excludes_none_severity(self):
+        records = build_provenance_from_policy_decisions([_policy_decision(severity=None)])
+        self.assertNotIn("severity", records[0].metadata)
+
+    def test_missing_action_skips_item(self):
+        d = {"decision_id": "abc-123", "decision": "allow"}
+        self.assertEqual(build_provenance_from_policy_decisions([d]), [])
+
+    def test_missing_decision_skips_item(self):
+        d = {"decision_id": "abc-123", "action": "write"}
+        self.assertEqual(build_provenance_from_policy_decisions([d]), [])
+
+    def test_non_dict_item_skipped_gracefully(self):
+        items = [None, "bad", _policy_decision()]
+        records = build_provenance_from_policy_decisions(items)
+        self.assertEqual(len(records), 1)
+
+    def test_deterministic_ids_same_run_ref(self):
+        decisions = [_policy_decision()]
+        ids1 = [r.provenance_id for r in build_provenance_from_policy_decisions(decisions, run_ref="shard-x")]
+        ids2 = [r.provenance_id for r in build_provenance_from_policy_decisions(decisions, run_ref="shard-x")]
+        self.assertEqual(ids1, ids2)
+
+    def test_different_run_ref_produces_different_id(self):
+        d = [_policy_decision()]
+        id1 = build_provenance_from_policy_decisions(d, run_ref="shard-a")[0].provenance_id
+        id2 = build_provenance_from_policy_decisions(d, run_ref="shard-b")[0].provenance_id
+        self.assertNotEqual(id1, id2)
+
+    def test_id_format(self):
+        records = build_provenance_from_policy_decisions([_policy_decision()])
+        self.assertRegex(records[0].provenance_id, _PROV_ID_RE)
+
+    def test_raw_content_stored_is_false(self):
+        records = build_provenance_from_policy_decisions([_policy_decision()])
+        self.assertFalse(records[0].raw_content_stored)
+
+    def test_no_unsafe_in_provenance_output(self):
+        records = build_provenance_from_policy_decisions([_policy_decision(source="path_policy")])
+        _assert_no_unsafe(json.dumps([asdict(r) for r in records]))
+
 
 # ---------------------------------------------------------------------------
 # TestProvenanceWiredIntoShardReceipt
@@ -635,3 +978,17 @@ class TestProvenanceInLastJson(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         # must not raise
         json.loads(result.output)
+
+    def test_provenance_includes_timeline_and_policy_for_rich_entry(self):
+        entry = {
+            **_BASE_ENTRY,
+            "shard_id": "shard-20260601-0002",
+            "run_timeline": [_timeline_event("repo_scanned", "Repository scanned")],
+            "policy_decisions": [_policy_decision()],
+        }
+        result = _invoke_last_json([entry])
+        self.assertEqual(result.exit_code, 0)
+        data = json.loads(result.output)
+        types = {r["source_type"] for r in data["run"]["provenance"]}
+        self.assertIn("timeline", types)
+        self.assertIn("policy", types)
