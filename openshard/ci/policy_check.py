@@ -23,6 +23,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from openshard.history.proof_signals import (
+    secret_scan_finding_count,
+    verification_status_from_receipt,
+)
+
 if TYPE_CHECKING:
     from openshard.history.shard_contract import ShardReceipt
 
@@ -39,21 +44,10 @@ class CICheckResult:
     checks: dict = field(default_factory=dict)
 
 
-def _verification_status(receipt: "ShardReceipt") -> str:
-    """Map the receipt's status into a CI verification enum.
-
-    Returns one of: ``passed`` | ``failed`` | ``not_run`` | ``unknown``.
-    """
-    status = (receipt.status or "").strip()
-    if status.startswith("Checks:"):
-        # Review-style checks: failed if any sub-check failed, else passed.
-        return "failed" if "failed" in (receipt.checks_display or "").lower() else "passed"
-    return {
-        "Passed": "passed",
-        "Failed": "failed",
-        "No checks run": "not_run",
-        "Not recorded": "unknown",
-    }.get(status, "unknown")
+# Thin backward-compatible aliases over the shared, public proof signals in
+# ``openshard.history.proof_signals`` (the single source of truth). Kept so
+# existing imports of these private names continue to work.
+_verification_status = verification_status_from_receipt
 
 
 def _manual_review_required(entry: dict, receipt: "ShardReceipt") -> bool:
@@ -87,11 +81,7 @@ def _manual_review_required(entry: dict, receipt: "ShardReceipt") -> bool:
     return False
 
 
-def _secret_scan_findings(receipt: "ShardReceipt") -> int:
-    """Count redacted secret-scan evidence capsules on the receipt."""
-    return sum(
-        1 for ec in receipt.evidence_capsules if getattr(ec, "kind", None) == "secret_scan"
-    )
+_secret_scan_findings = secret_scan_finding_count
 
 
 def evaluate_ci_check(
