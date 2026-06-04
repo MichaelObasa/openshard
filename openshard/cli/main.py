@@ -1422,6 +1422,219 @@ def trust_last(as_json: bool) -> None:
         click.echo(line)
 
 
+# Recommendation phrases keyed by the contract overall_status. Kept as a small
+# local map rather than re-deriving advice from section counts, so completeness
+# logic is never duplicated here.
+_PROOF_RECOMMENDATIONS: dict[str, str] = {
+    "strong": "This Shard is strong evidence; required and recommended proof are present.",
+    "usable": (
+        "Use this Shard as evidence, but improve recommended gaps before relying "
+        "on it for stricter review."
+    ),
+    "partial": (
+        "Some required proof is missing. Fill the missing required proof before "
+        "relying on this Shard."
+    ),
+    "weak": (
+        "Most required proof is missing. This Shard is not yet usable as evidence."
+    ),
+    "unsafe": (
+        "This Shard has unsafe findings. Do not use it as evidence until they are "
+        "resolved."
+    ),
+    "unknown": (
+        "The proof record could not be evaluated. Re-run the task to produce a "
+        "usable Shard."
+    ),
+}
+
+
+def _proof_recommendation(overall_status: str) -> str:
+    """Map a contract overall_status to a one-line, human recommendation."""
+    return _PROOF_RECOMMENDATIONS.get(
+        overall_status, _PROOF_RECOMMENDATIONS["unknown"]
+    )
+
+
+# Plain-English labels for proof sections in human output. Raw technical section
+# names (e.g. "timeline", "provenance") stay in JSON only; the human view reads
+# in plain language. Unmapped names fall back to a title-cased form.
+_PROOF_SECTION_LABELS: dict[str, str] = {
+    "task": "Task",
+    "executor": "Executor",
+    "model": "Model",
+    "actions": "Actions",
+    "verification": "Verification",
+    "result": "Result",
+    "repo_state": "Repo state",
+    "strategy": "Execution strategy",
+    "files": "Files changed",
+    "checks": "Checks",
+    "timeline": "Step-by-step run events",
+    "provenance": "Proof sources for claims",
+    "cost": "Cost and duration",
+}
+
+
+def _proof_section_label(name: object) -> str:
+    """Return a plain-English label for a proof section name."""
+    if not isinstance(name, str):
+        return str(name)
+    return _PROOF_SECTION_LABELS.get(name, name.replace("_", " ").capitalize())
+
+
+def _proof_human_lines(contract: dict, errors: list[str], shard_id: str | None) -> list[str]:
+    """Render the compact human view of a proof contract.
+
+    Shows the heading, status, summary, the required sections, the recommended
+    gaps, and unsafe findings. It does not print all 17 sections; full detail
+    belongs in --json.
+    """
+    overall = contract.get("overall_status", "unknown")
+    lines = ["Proof for last run"]
+    if shard_id:
+        lines.append(f"Shard: {shard_id}")
+    lines.append(f"Status: {overall}")
+    lines.append(f"Summary: {contract.get('summary', '')}")
+    lines.append(
+        f"Contract: Shard Proof Contract v{contract.get('contract_version', '')}"
+    )
+
+    required = [
+        s for s in contract.get("sections", [])
+        if isinstance(s, dict) and s.get("level") == "required"
+    ]
+    lines.append("")
+    lines.append("Required proof:")
+    if required:
+        for s in required:
+            lines.append(f"- {_proof_section_label(s.get('name'))}: {s.get('status')}")
+    else:
+        lines.append("- none recorded")
+
+    lines.append("")
+    lines.append("Missing recommended proof:")
+    gaps = contract.get("weak_recommended_sections", [])
+    if gaps:
+        for name in gaps:
+            lines.append(f"- {_proof_section_label(name)}")
+    else:
+        lines.append("- none")
+
+    lines.append("")
+    lines.append("Unsafe findings:")
+    findings = contract.get("unsafe_findings", [])
+    if findings:
+        for finding in findings:
+            lines.append(f"- {finding}")
+    else:
+        lines.append("- none")
+
+    if errors:
+        lines.append("")
+        lines.append("Validation errors:")
+        for err in errors:
+            lines.append(f"- {err}")
+
+    lines.append("")
+    lines.append("Next action:")
+    lines.append(f"- {_proof_recommendation(overall)}")
+    return lines
+
+
+def _proof_verify_last(as_json: bool) -> None:
+    """Shared implementation for `proof last` and `shard verify last`.
+
+    Inspects the latest run's Shard Proof Contract and reports whether the proof
+    record is complete, safe, and usable as evidence. This is an inspection
+    surface, not a CI gate.
+    """
+    from openshard.history.shard_contract import build_shard_receipt
+    from openshard.history.proof_contract import (
+        build_shard_proof_contract,
+        validate_shard_proof_contract,
+    )
+
+    log_path = Path.cwd() / _LOG_PATH
+    entries = _load_run_entries(log_path)
+    if not entries:
+        if as_json:
+            payload = _machine_envelope(
+                "proof last", "error",
+                proof_contract=None,
+                validation_errors=[],
+                recommendation="No run history found. Run a task first with 'openshard run'.",
+            )
+            click.echo(json.dumps(payload, indent=2))
+        else:
+            click.echo("No run history found. Run a task first with 'openshard run'.")
+        sys.exit(1)
+
+    entry = entries[-1]
+    receipt = build_shard_receipt(entry, index=len(entries) - 1)
+    contract = build_shard_proof_contract(entry)
+    errors = validate_shard_proof_contract(contract)
+    overall = contract.get("overall_status", "unknown")
+
+    if errors:
+        envelope_status = "invalid"
+    elif overall == "unsafe":
+        envelope_status = "unsafe"
+    else:
+        envelope_status = "ok"
+
+    exit_code = 1 if (errors or overall == "unsafe") else 0
+
+    if as_json:
+        payload = _machine_envelope(
+            "proof last", envelope_status, shard_id=receipt.shard_id,
+            proof_contract=contract,
+            validation_errors=errors,
+            recommendation=_proof_recommendation(overall),
+        )
+        click.echo(json.dumps(payload, indent=2))
+    else:
+        for line in _proof_human_lines(contract, errors, receipt.shard_id):
+            click.echo(line)
+
+    if exit_code:
+        sys.exit(exit_code)
+
+
+@cli.group("proof")
+def proof_group() -> None:
+    """Show the proof for an AI coding run."""
+
+
+@proof_group.command("last")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Machine-readable output (valid JSON only).")
+def proof_last(as_json: bool) -> None:
+    """Show the proof for the most recent run: is it complete, safe, and usable?"""
+    _proof_verify_last(as_json)
+
+
+@cli.group("shard")
+def shard_group() -> None:
+    """Inspect Shard proof records."""
+
+
+@shard_group.group("verify")
+def shard_verify_group() -> None:
+    """Verify a Shard proof record against the Shard Proof Contract."""
+
+
+@shard_verify_group.command("last")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Machine-readable output (valid JSON only).")
+def shard_verify_last(as_json: bool) -> None:
+    """Check whether the latest Shard proof record is complete, safe, and usable.
+
+    Lower-level alias for 'openshard proof last'; identical output and exit code.
+    """
+    _proof_verify_last(as_json)
+
+
 @cli.group("reflect")
 def reflect_group() -> None:
     """Post-run reflection and advisory review."""
