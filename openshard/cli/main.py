@@ -1327,9 +1327,23 @@ def last(more: bool, full: bool, as_json: bool):
             return
         entry = entries[-1]
         receipt = build_shard_receipt(entry, index=len(entries) - 1)
+        from openshard.history.trust_score import evaluate_trust_score
+
+        _ts = evaluate_trust_score(
+            entry, receipt,
+            interaction_event_types=_interaction_event_types(entry.get("timestamp", "")),
+        )
         payload = _machine_envelope(
             "last", "ok", shard_id=receipt.shard_id,
-            run=_export_run_entry(entry, include_timeline=True)
+            run=_export_run_entry(entry, include_timeline=True),
+            trust={
+                "score": _ts.score,
+                "band": _ts.band,
+                "penalties": [
+                    {"code": p.code, "points": p.points, "reason": p.reason}
+                    for p in _ts.penalties
+                ],
+            },
         )
         click.echo(json.dumps(payload, indent=2))
         return
@@ -1351,6 +1365,51 @@ def last(more: bool, full: bool, as_json: bool):
         click.echo("No runs recorded yet.")
         return
     _render_log_entry(entries[-1], detail, index=len(entries) - 1)
+
+
+@cli.group("trust")
+def trust_group() -> None:
+    """Run Trust Score — a heuristic over recorded proof signals."""
+
+
+@trust_group.command("last")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output.")
+def trust_last(as_json: bool) -> None:
+    """Show the trust score for the most recent run.
+
+    This is a deterministic trust heuristic over recorded proof signals, not a
+    safety guarantee or certification.
+    """
+    from openshard.history.shard_contract import build_shard_receipt
+    from openshard.history.trust_score import evaluate_trust_score, format_human, to_payload
+
+    log_path = Path.cwd() / _LOG_PATH
+    entries = _load_run_entries(log_path)
+    if not entries:
+        if as_json:
+            click.echo(json.dumps(
+                _machine_envelope("trust last", "not_found", score=None, signals={}, penalties=[]),
+                indent=2,
+            ))
+        else:
+            click.echo("No run history found. Run a task first with 'openshard run'.")
+        return
+
+    entry = entries[-1]
+    receipt = build_shard_receipt(entry, index=len(entries) - 1)
+    ts = evaluate_trust_score(
+        entry, receipt,
+        interaction_event_types=_interaction_event_types(entry.get("timestamp", "")),
+    )
+    if as_json:
+        payload = _machine_envelope(
+            "trust last", ts.status, shard_id=ts.shard_id, warnings=list(ts.warnings),
+            **to_payload(ts),
+        )
+        click.echo(json.dumps(payload, indent=2))
+        return
+    for line in format_human(ts):
+        click.echo(line)
 
 
 @cli.group("reflect")
@@ -2158,6 +2217,22 @@ def _load_run_entries(log_path: Path) -> list[dict]:
         except json.JSONDecodeError:
             continue
     return entries
+
+
+def _interaction_event_types(run_id: str) -> list[str]:
+    """Load sanitised developer-interaction event *types* for a run. Never raises.
+
+    Returns types only (e.g. ``"unsafe_command"``) — never raw summaries — so the
+    trust evaluator stays leak-free. Missing/corrupt interaction files yield ``[]``.
+    """
+    if not run_id:
+        return []
+    try:
+        from openshard.history.interactions import interaction_events_for_run
+
+        return [e.event_type for e in interaction_events_for_run(run_id)]
+    except Exception:
+        return []
 
 
 # Schema version for the machine-readable (--json) output contract. Bump only on
