@@ -31,6 +31,10 @@ from openshard.ci.policy_check import (
     _secret_scan_findings,
     _verification_status,
 )
+from openshard.history.shard_schema import (
+    shard_changes_made as _changes_made,
+    shard_manual_fix_required as _manual_fix_required,
+)
 
 if TYPE_CHECKING:
     from openshard.history.shard_contract import ShardReceipt
@@ -135,16 +139,6 @@ def _feedback_outcome(receipt: "ShardReceipt") -> str | None:
     outcome = df.get("outcome")
     return outcome if isinstance(outcome, str) and outcome else None
 
-
-def _manual_fix_required(receipt: "ShardReceipt") -> bool:
-    """True when developer feedback flagged that a manual fix was required."""
-    df = receipt.developer_feedback
-    return bool(df.get("manual_fix_required")) if isinstance(df, dict) else False
-
-
-def _changes_made(receipt: "ShardReceipt") -> bool:
-    """True when the run recorded file changes."""
-    return bool(receipt.files_detail) or (receipt.files_changed or 0) > 0
 
 
 @dataclass

@@ -69,6 +69,7 @@ from openshard.history.run_checkpoints import (
     log_run_checkpoint_event as _log_run_checkpoint,
 )
 from openshard.history.metrics import load_runs
+from openshard.history.shard_schema import SHARD_SCHEMA_VERSION, coerce_shard_entry
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
 from openshard.providers.manager import ProviderManager
 from openshard.providers.openrouter import MODEL_PRICING, compute_cost
@@ -2634,7 +2635,7 @@ def _log_run(
     run_index: int | None = None,
 ) -> None:
     entry: dict = {
-        "schema_version": "1.1",
+        "schema_version": SHARD_SCHEMA_VERSION,
         "timestamp": run_id if run_id else datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
         "task": task,
         "execution_model": model or generator.model,
@@ -2769,6 +2770,8 @@ def _log_run(
 
     from openshard.history.shard_contract import _make_shard_id as _msi
     entry["shard_id"] = _msi(entry["timestamp"], run_index)
+
+    entry = coerce_shard_entry(entry)
 
     log_path = Path.cwd() / _LOG_PATH
     log_path.parent.mkdir(parents=True, exist_ok=True)

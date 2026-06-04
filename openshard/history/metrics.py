@@ -4,6 +4,8 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
+from openshard.history.shard_schema import coerce_shard_entry
+
 _LOG_PATH = Path(".openshard") / "runs.jsonl"
 
 ALL_PROFILES = ("native_light", "native_deep", "native_swarm")
@@ -19,7 +21,7 @@ def load_runs() -> list[dict]:
         if not line:
             continue
         try:
-            runs.append(json.loads(line))
+            runs.append(coerce_shard_entry(json.loads(line)))
         except json.JSONDecodeError:
             continue
     return runs

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import re
 import sys
 from dataclasses import dataclass, field
+
+from openshard.safety.sanitize import sanitize_metadata, sanitize_text
 
 # Versioned timeline schema (additive; old receipts without it still render).
 TIMELINE_SCHEMA_VERSION = "1"
@@ -12,8 +13,6 @@ _MAX_TIMELINE_EVENTS = 40
 _MAX_LABEL_CHARS = 80
 _MAX_DETAIL_CHARS = 120
 _MAX_TARGET_CHARS = 80
-_MAX_METADATA_VALUE_CHARS = 80
-_MAX_METADATA_KEYS = 10
 
 # Allowed enums. Anything else falls back to a safe default.
 _ALLOWED_STATUSES = frozenset({"started", "completed", "skipped", "failed", "warning"})
@@ -21,78 +20,6 @@ _ALLOWED_KINDS = frozenset(
     {"run", "workflow", "scan", "route", "model", "review", "receipt",
      "check", "tool", "plan", "summary"}
 )
-
-# Secret-like token patterns. A match means the whole string is dropped, never
-# emitted, so partial secrets cannot leak.
-_SECRET_PATTERNS = (
-    re.compile(r"sk-[A-Za-z0-9_\-]{8,}"),                    # OpenAI-style keys
-    re.compile(r"AKIA[0-9A-Z]{8,}"),                         # AWS access key id
-    re.compile(r"(?i)\b(?:api[_-]?key|token|secret|password)\s*[=:]\s*\S+"),
-    re.compile(r"(?i)\bbearer\s+\S+"),                       # bearer tokens
-    re.compile(r"[A-Za-z0-9_\-+/]{32,}"),                    # long opaque key-like run
-)
-
-
-def _is_absolute_path(p: str) -> bool:
-    """Return True if p looks like an absolute local path. Never emit absolute paths."""
-    if not p:
-        return False
-    if p.startswith("/") or p.startswith("\\"):
-        return True
-    # Windows drive letter: C:\ or C:/
-    if len(p) >= 3 and p[1] == ":" and p[2] in ("/", "\\"):
-        return True
-    return False
-
-
-def _looks_like_secret(s: str) -> bool:
-    return any(pat.search(s) for pat in _SECRET_PATTERNS)
-
-
-def _sanitize_text(s, limit: int) -> "str | None":
-    """Sanitise an untrusted timeline string for safe export.
-
-    - Coerces to str; returns None for non-str/empty input.
-    - Strips CR/LF and other control characters.
-    - Drops the value entirely (returns None) if it looks like an absolute local
-      path or contains a secret-like token, so partial values never leak.
-    - Caps length to ``limit``.
-    """
-    if not isinstance(s, str):
-        return None
-    # Remove control chars (incl. CR/LF/tab) before any pattern checks.
-    cleaned = "".join(ch for ch in s if ch == " " or ch.isprintable()).strip()
-    if not cleaned:
-        return None
-    if _is_absolute_path(cleaned) or ".codegraph" in cleaned:
-        return None
-    if _looks_like_secret(cleaned):
-        return None
-    return cleaned[:limit]
-
-
-def _sanitize_metadata(metadata) -> dict:
-    """Keep only small, safe scalar metadata values.
-
-    Drops nested dicts/lists/blobs. String values pass through ``_sanitize_text``
-    (path + secret redaction, capped); values that drop to None are omitted.
-    """
-    if not isinstance(metadata, dict):
-        return {}
-    safe: dict = {}
-    for key, val in metadata.items():
-        if len(safe) >= _MAX_METADATA_KEYS:
-            break
-        if not isinstance(key, str):
-            continue
-        if isinstance(val, bool) or isinstance(val, (int, float)):
-            safe[key] = val
-        elif isinstance(val, str):
-            clean = _sanitize_text(val, _MAX_METADATA_VALUE_CHARS)
-            if clean is not None:
-                safe[key] = clean
-        # else: drop non-scalar (dict/list/None/blob)
-    return safe
 
 
 def _stdout_supports_unicode() -> bool:
@@ -214,14 +141,14 @@ def make_timeline_event(
     _kind = kind if kind in _ALLOWED_KINDS else "run"
     _status = status if status in _ALLOWED_STATUSES else "completed"
 
-    _label = _sanitize_text(label, _MAX_LABEL_CHARS)
+    _label = sanitize_text(label, _MAX_LABEL_CHARS)
     if not _label:
         # label is required; fall back to a safe generic derived from the event
         # key (never the raw, possibly-unsafe value).
         _label = (_event.replace("_", " ").strip() or "event")[:_MAX_LABEL_CHARS]
 
-    _detail = _sanitize_text(detail, _MAX_DETAIL_CHARS) if detail is not None else None
-    _target = _sanitize_text(target, _MAX_TARGET_CHARS) if target is not None else None
+    _detail = sanitize_text(detail, _MAX_DETAIL_CHARS) if detail is not None else None
+    _target = sanitize_text(target, _MAX_TARGET_CHARS) if target is not None else None
 
     _count: "int | None" = None
     if isinstance(count, bool):
@@ -237,7 +164,7 @@ def make_timeline_event(
         detail=_detail,
         target=_target,
         count=_count,
-        metadata=_sanitize_metadata(metadata),
+        metadata=sanitize_metadata(metadata),
     )
 
 
