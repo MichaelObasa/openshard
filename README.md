@@ -496,7 +496,7 @@ OpenShard is still early, but it is not just a prototype.
 
 Current validation includes:
 
-- 5,500+ passing tests
+- 6,500+ passing tests
 - Green CI
 - Ruff-clean Python codebase
 - Local CLI/TUI workflow
