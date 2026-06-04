@@ -7,8 +7,8 @@ name = "openshard"
 version = "0.1.2"
 description = "The control layer for AI coding agents."
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [
     {name = "Michael Obasa", email = "michaelobasa2@gmail.com"},
 ]
