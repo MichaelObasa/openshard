@@ -452,6 +452,8 @@ class ShardReceipt:
     execution_spans: list[ExecutionSpan] = field(default_factory=list)
     # Evidence capsules — structured, no raw content
     evidence_capsules: list[EvidenceCapsule] = field(default_factory=list)
+    # Provenance records — derived at read-time from evidence_capsules and review_checks; not persisted
+    provenance: list = field(default_factory=list)
     # Policy decisions — structured gate/policy outcomes; empty until populated branches
     policy_decisions: list[dict] = field(default_factory=list)
     # Adapter execution metadata — optional; only set for explicit external adapter runs
@@ -884,6 +886,12 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
                 summary=str(_s["summary"])[:200] if _s.get("summary") else None,
             ))
 
+    from openshard.history.provenance import build_provenance_from_entry as _build_prov
+    try:
+        _provenance = _build_prov(entry)
+    except Exception:
+        _provenance = []
+
     return ShardReceipt(
         shard_id=entry.get("shard_id") or _make_shard_id(timestamp, index),
         created_at=timestamp,
@@ -940,6 +948,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         context_utilisation_ratio=_ctx_ratio,
         execution_spans=_execution_spans,
         evidence_capsules=_evidence_capsules,
+        provenance=_provenance,
         policy_decisions=_policy_decisions,
         adapter=entry.get("adapter") or None,
         adapter_available=entry.get("adapter_available") if isinstance(entry.get("adapter_available"), bool) else None,
