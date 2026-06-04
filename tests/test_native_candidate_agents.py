@@ -568,9 +568,9 @@ def test_render_dict_full_shows_per_candidate_lines():
 # CLI — --candidates option validation
 # ---------------------------------------------------------------------------
 
-def test_cli_candidates_help_shows_option():
+def test_cli_candidates_hidden_from_help():
     result = CliRunner().invoke(cli, ["run", "--help"])
-    assert "--candidates" in result.output
+    assert "--candidates" not in result.output
 
 
 def test_cli_candidates_above_three_rejected():

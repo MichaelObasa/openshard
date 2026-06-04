@@ -111,7 +111,7 @@ def plan(task: str):
 @click.option("--dry-run", is_flag=True, default=False, help="Preview files without writing.")
 @click.option("--more", is_flag=True, default=False, help="Show file list, retry info, model names, and token breakdown.")
 @click.option("--full", is_flag=True, default=False, help="Show all details: workspace, verification command, retry prompt, raw output.")
-@click.option("--no-shrink", is_flag=True, default=False, help="Disable output shrinking for long results.")
+@click.option("--no-shrink", is_flag=True, default=False, hidden=True, help="Disable output shrinking for long results.")
 @click.option(
     "--workflow",
     type=click.Choice(
@@ -121,20 +121,22 @@ def plan(task: str):
     default=None,
     help=(
         "Execution workflow: auto (default, policy-driven), direct (single-pass API call), "
-        "staged (planning then implementation), native (native agent - not yet available), "
-        "opencode (OpenCode CLI), claude-code (not yet available), codex (not yet available)."
+        "staged (planning then implementation), native (native agent), "
+        "opencode (OpenCode CLI)."
     ),
 )
 @click.option(
     "--profile",
     type=click.Choice(["native_light", "native_deep", "native_swarm"], case_sensitive=False),
     default=None,
+    hidden=True,
     help="Execution profile: native_light (fast/simple), native_deep (thorough/complex), native_swarm (experimental, never auto-selected).",
 )
 @click.option(
     "--executor",
     type=click.Choice(["direct", "opencode"], case_sensitive=False),
     default=None,
+    hidden=True,
     help="[DEPRECATED] Use --workflow instead. Execution backend: direct or opencode.",
 )
 @click.option(
@@ -142,6 +144,7 @@ def plan(task: str):
     "native_backend",
     type=click.Choice(["builtin", "deepagents"], case_sensitive=False),
     default=None,
+    hidden=True,
     help="Native workflow backend (default: builtin). deepagents is experimental/stub only. Ignored for non-native workflows.",
 )
 @click.option(
@@ -149,6 +152,7 @@ def plan(task: str):
     "experimental_deepagents_run",
     is_flag=True,
     default=False,
+    hidden=True,
     help="Invoke a minimal read-only DeepAgents agent as a proof step. Requires --native-backend deepagents. No write or shell tools are provided.",
 )
 @click.option(
@@ -156,6 +160,7 @@ def plan(task: str):
     "experimental_tier_dispatch",
     is_flag=True,
     default=False,
+    hidden=True,
     help="[Experimental] Resolve routing tier names to model IDs and use them during execution. Recorded in run log; shown at --more/--full.",
 )
 @click.option(
@@ -163,6 +168,7 @@ def plan(task: str):
     "native_loop",
     type=click.Choice(["experimental"], case_sensitive=False),
     default=None,
+    hidden=True,
     help="Enable experimental bounded native loop. Requires --workflow native. Runs additional deterministic read-only tool steps before generation.",
 )
 @click.option("--plan", "plan_flag", is_flag=True, default=False, help="Show execution plan and prompt for approval before running.")
@@ -178,20 +184,22 @@ def plan(task: str):
     default=None,
     help="API provider: openrouter (default), anthropic (requires ANTHROPIC_API_KEY), or openai (requires OPENAI_API_KEY).",
 )
-@click.option("--history-scoring", "history_scoring", is_flag=True, default=False, help="Apply run-history bonuses/penalties to model scoring (opt-in).")
-@click.option("--eval-scoring", "eval_scoring", is_flag=True, default=False, help="Apply eval-run bonuses/penalties to model scoring (opt-in).")
-@click.option("--feedback-scoring", "feedback_scoring", is_flag=True, default=False, help="Apply developer-feedback bonuses/penalties to model scoring (opt-in).")
+@click.option("--history-scoring", "history_scoring", is_flag=True, default=False, hidden=True, help="Apply run-history bonuses/penalties to model scoring (opt-in).")
+@click.option("--eval-scoring", "eval_scoring", is_flag=True, default=False, hidden=True, help="Apply eval-run bonuses/penalties to model scoring (opt-in).")
+@click.option("--feedback-scoring", "feedback_scoring", is_flag=True, default=False, hidden=True, help="Apply developer-feedback bonuses/penalties to model scoring (opt-in).")
 @click.option(
     "--model-policy",
     "model_policy",
     type=click.Choice(["auto", "cheapest-safe", "frontier-heavy", "open-source-only", "local-only", "custom"], case_sensitive=False),
     default=None,
+    hidden=True,
     help="Model selection policy mode (metadata-only v1): auto, cheapest-safe, frontier-heavy, open-source-only, local-only, custom.",
 )
 @click.option(
     "--candidates",
     default=1,
     type=click.IntRange(1, 3),
+    hidden=True,
     help="Run multiple native candidate agents and select the best verified result (1–3, native --write only).",
 )
 def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: bool, no_shrink: bool, workflow: str | None, profile: str | None, executor: str | None, native_backend: str | None, experimental_deepagents_run: bool, experimental_tier_dispatch: bool, native_loop: str | None, plan_flag: bool, approval: str | None, provider: str | None, history_scoring: bool, eval_scoring: bool, feedback_scoring: bool, model_policy: str | None, candidates: int):
