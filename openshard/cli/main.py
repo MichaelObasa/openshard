@@ -1335,7 +1335,7 @@ def last(more: bool, full: bool, as_json: bool):
         )
         payload = _machine_envelope(
             "last", "ok", shard_id=receipt.shard_id,
-            run=_export_run_entry(entry, include_timeline=True),
+            run=_export_run_entry(entry, include_timeline=True, receipt=receipt),
             trust={
                 "score": _ts.score,
                 "band": _ts.band,
@@ -2547,7 +2547,7 @@ def _baseline_export_fields(
     }
 
 
-def _export_run_entry(entry: dict, include_notes: bool = False, include_timeline: bool = False) -> dict:
+def _export_run_entry(entry: dict, include_notes: bool = False, include_timeline: bool = False, receipt=None) -> dict:  # receipt: ShardReceipt | None
     stage_runs = entry.get("stage_runs") or []
     is_ro = entry.get("routing_rationale") == "read-only analysis"
 
@@ -2608,6 +2608,11 @@ def _export_run_entry(entry: dict, include_notes: bool = False, include_timeline
     if include_timeline:
         from openshard.run.timeline import project_timeline_for_export
         row["timeline"] = project_timeline_for_export(entry.get("run_timeline") or [])
+    if receipt is not None:
+        from dataclasses import asdict as _asdict
+        row["provenance"] = [_asdict(p) for p in receipt.provenance]
+    else:
+        row["provenance"] = []
     return row
 
 
