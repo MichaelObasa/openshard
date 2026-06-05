@@ -147,6 +147,19 @@ class TestProofLastJson(unittest.TestCase):
         self.assertEqual(len(data["proof_contract"]["sections"]), 17)
         _assert_no_unsafe(self, result.output)
 
+    def test_strong_entry_overall_status_and_sections(self):
+        result = _invoke(["proof", "last", "--json"], runs=[_STRONG_ENTRY])
+        data = json.loads(result.output)
+        contract = data["proof_contract"]
+        # A fully populated record grades as "strong" with no required gaps.
+        self.assertEqual(contract["overall_status"], "strong")
+        self.assertEqual(contract["missing_required_sections"], [])
+        # The verification section is recorded as present, not partial/missing.
+        verification = next(
+            s for s in contract["sections"] if s["name"] == "verification"
+        )
+        self.assertEqual(verification["status"], "present")
+
 
 class TestProofLastContentHash(unittest.TestCase):
     def test_missing_hash_for_legacy_record(self):

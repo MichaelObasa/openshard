@@ -101,6 +101,15 @@ class TestTrustLast(unittest.TestCase):
         self.assertIsInstance(data["warnings"], list)
         _assert_no_unsafe(self, result.output)
 
+    def test_good_run_signals_contract(self):
+        result = _invoke(["trust", "last", "--json"], runs=[_GOOD_ENTRY])
+        data = json.loads(result.output)
+        # The stable safety signals for a clean run.
+        self.assertEqual(data["signals"]["verification"], "passed")
+        self.assertIs(data["signals"]["manual_review_required"], False)
+        self.assertIs(data["signals"]["policy_denied"], False)
+        self.assertEqual(data["signals"]["secret_scan_findings"], 0)
+
     def test_failed_run_lowers_score(self):
         result = _invoke(["trust", "last", "--json"], runs=[_FAILED_ENTRY])
         data = json.loads(result.output)

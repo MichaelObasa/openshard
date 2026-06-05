@@ -152,11 +152,13 @@ class TestNoRegression(unittest.TestCase):
     def test_trust_last_still_runs(self):
         result = _invoke(["trust", "last"], runs=[_STRONG_ENTRY])
         self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("OpenShard Trust Score:", result.output)
 
     def test_ci_check_still_runs(self):
+        # _STRONG_ENTRY verified and was approved, so the verdict is a clean pass.
         result = _invoke(["ci", "check"], runs=[_STRONG_ENTRY])
-        self.assertIn(result.exit_code, (0, 1), msg=result.output)
-        self.assertIn("OpenShard CI Check", result.output)
+        self.assertEqual(result.exit_code, 0, msg=result.output)
+        self.assertIn("OpenShard CI Check: pass", result.output)
 
 
 if __name__ == "__main__":
