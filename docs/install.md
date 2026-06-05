@@ -4,6 +4,18 @@
 
 pipx installs OpenShard in an isolated environment, so its dependencies don't conflict with other Python tools.
 
+If you don't have pipx yet:
+
+```sh
+# macOS
+brew install pipx
+
+# Linux / Windows (via pip)
+pip install pipx
+```
+
+Then install OpenShard:
+
 ```sh
 pipx install git+https://github.com/MichaelObasa/openshard.git
 ```

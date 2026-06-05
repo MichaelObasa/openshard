@@ -101,6 +101,7 @@ Record whether the result was accepted, partial, rejected, or needs more work.
 **Recommended: `pipx`**
 
 ```bash
+# Install pipx first if you don't have it: brew install pipx  or  pip install pipx
 pipx install openshard
 openshard tui
 ```
