@@ -8,7 +8,42 @@ from dataclasses import dataclass, field
 # cost_class and latency_class are stable proxies for routing budget decisions.
 # Exact token pricing lives in openshard/providers/openrouter.py (labelled
 # snapshot). Do not hardcode volatile prices here.
+#
+# Metadata v2 adds provenance and forward-looking routing fields (source,
+# risk_level, recommended_for, avoid_for) plus a StaticPricing placeholder.
+# These are additive with safe defaults. Pricing stays deferred: the pricing
+# fields remain empty/unknown in v2 and MODEL_PRICING in
+# openshard/providers/openrouter.py is still the authoritative price source.
 # ---------------------------------------------------------------------------
+
+# Metadata schema version carried by every ModelEntry.
+METADATA_VERSION = "2"
+
+# Valid values for the provenance/risk/pricing enum-style fields. Tests use
+# these as the single source of truth for accepted tokens.
+SOURCE_VALUES = frozenset({"curated_static_registry", "unknown"})
+RISK_LEVELS = frozenset({"low", "medium", "high", "unknown"})
+PRICING_SOURCES = frozenset(
+    {"openrouter_static_snapshot", "provider_static_snapshot", "unknown"}
+)
+
+
+@dataclass(frozen=True)
+class StaticPricing:
+    """Static, snapshot pricing placeholder for a model.
+
+    Values stay None/"unknown" in metadata v2. Authoritative runtime pricing
+    remains MODEL_PRICING in openshard/providers/openrouter.py. These fields are
+    schema scaffolding for a future branch that does live pricing research. Do
+    not populate them from guesses.
+    """
+
+    input_cost_per_mtok: float | None = None
+    output_cost_per_mtok: float | None = None
+    # openrouter_static_snapshot | provider_static_snapshot | unknown
+    pricing_source: str = "unknown"
+    # ISO date string (e.g. "2026-04-01") when last verified, else None.
+    last_verified_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +74,20 @@ class ModelEntry:
     cost_class: str = "unknown"
 
     notes: str = ""
+
+    # ---- Metadata v2 (additive, safe defaults) ----------------------------
+    # Schema version of this entry's metadata.
+    metadata_version: str = METADATA_VERSION
+    # Provenance of this entry: curated_static_registry | unknown
+    source: str = "curated_static_registry"
+    # Maturity/trust of the model for routing gates: low | medium | high |
+    # unknown. Left unknown until live research; do not invent claims.
+    risk_level: str = "unknown"
+    # Forward-looking routing hints. Empty until populated by a later branch.
+    recommended_for: tuple[str, ...] = field(default_factory=tuple)
+    avoid_for: tuple[str, ...] = field(default_factory=tuple)
+    # Static pricing placeholder. Stays empty/unknown in v2; see StaticPricing.
+    pricing: StaticPricing = field(default_factory=StaticPricing)
 
 
 # ---------------------------------------------------------------------------
