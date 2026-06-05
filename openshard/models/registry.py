@@ -280,6 +280,84 @@ _REGISTRY: list[ModelEntry] = [
         latency_class="fast",
         cost_class="cheap",
     ),
+
+    # ------------------------------------------------------------------
+    # Curated roster update v1 - non-experimental.
+    # Factual fields from OpenRouter metadata. Pricing stays deferred;
+    # risk_level stays unknown until live research.
+    #
+    # input_modalities is intentionally limited to ("text", "image") for
+    # consistency with the rest of the registry. OpenRouter reports
+    # additional input types not captured here yet: Opus 4.8 and Opus 4.8
+    # Fast also accept file input, and MiniMax M3 also accepts video input.
+    # The modality field does not fully capture every OpenRouter input type;
+    # file/video tokens are deferred to a future modality-schema cleanup
+    # branch. supports_multimodal=True still records the broad capability.
+    # ------------------------------------------------------------------
+    ModelEntry(
+        id="anthropic/claude-opus-4.8",
+        display_name="Anthropic: Claude Opus 4.8",
+        provider="Anthropic",
+        tier="frontier",
+        roles=("planner", "reviewer", "escalation", "frontier_alternative"),
+        experimental=False,
+        context_length=1_000_000,
+        input_modalities=("text", "image"),
+        supports_tools=True,
+        supports_structured_outputs=True,
+        supports_reasoning=True,
+        supports_multimodal=True,
+        latency_class="slow",
+        cost_class="expensive",
+    ),
+    ModelEntry(
+        id="anthropic/claude-opus-4.8-fast",
+        display_name="Anthropic: Claude Opus 4.8 Fast",
+        provider="Anthropic",
+        tier="frontier",
+        roles=("planner", "reviewer", "escalation", "frontier_alternative", "claude_family_fast"),
+        experimental=False,
+        context_length=1_000_000,
+        input_modalities=("text", "image"),
+        supports_tools=True,
+        supports_structured_outputs=True,
+        supports_reasoning=True,
+        supports_multimodal=True,
+        latency_class="normal",
+        cost_class="expensive",
+    ),
+    ModelEntry(
+        id="minimax/minimax-m3",
+        display_name="MiniMax: M3",
+        provider="MiniMax",
+        tier="strong",
+        roles=("routine_engineering", "coding", "long_context", "value_worker", "multimodal"),
+        experimental=False,
+        context_length=1_048_576,
+        input_modalities=("text", "image"),
+        supports_tools=True,
+        supports_structured_outputs=True,
+        supports_reasoning=True,
+        supports_multimodal=True,
+        latency_class="normal",
+        cost_class="cheap",
+    ),
+    ModelEntry(
+        id="qwen/qwen3.7-plus",
+        display_name="Qwen: Qwen3.7 Plus",
+        provider="Qwen",
+        tier="mid",
+        roles=("routine_engineering", "planner", "coding", "value_worker"),
+        experimental=False,
+        context_length=1_000_000,
+        input_modalities=("text", "image"),
+        supports_tools=True,
+        supports_structured_outputs=True,
+        supports_reasoning=True,
+        supports_multimodal=True,
+        latency_class="normal",
+        cost_class="cheap",
+    ),
     ModelEntry(
         id="x-ai/grok-build-0.1",
         display_name="xAI: Grok Build 0.1",
