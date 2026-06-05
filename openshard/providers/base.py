@@ -3,6 +3,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from openshard.security.secret_scan import SecretScanResult, scrub_text_for_secrets
+
 
 # ---------------------------------------------------------------------------
 # Provider-neutral exceptions
@@ -18,6 +20,14 @@ class ProviderAuthError(ProviderError):
 
 class ProviderRateLimitError(ProviderError):
     """Raised when the API rate limit is exceeded."""
+
+
+class PreSendSecretScanError(ProviderError):
+    """Raised when model-bound text cannot be safely scanned before sending.
+
+    Fail-closed signal: the provider call is aborted and no prompt content is
+    sent. Messages never contain prompt content.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +58,58 @@ class ChatResponse:
     content: str
     model: str
     usage: UsageStats
+    # Result of the pre-send secret scan applied to the outgoing prompt. None
+    # when no secret-like values were found (clean path is byte-identical).
+    presend_secret_scan: SecretScanResult | None = None
+
+
+# ---------------------------------------------------------------------------
+# Pre-send secret guard
+# ---------------------------------------------------------------------------
+
+# Far beyond any model context window, so realistic prompts always scan in
+# full. Exceeding it is pathological and fails closed (see below). The cap only
+# bounds worst-case regex CPU; it never truncates or sends an unscanned tail.
+_PRESEND_MAX_CHARS = 5_000_000
+
+
+def guard_prompt_before_send(
+    prompt: str,
+    *,
+    source_label: str = "<model-prompt>",
+    max_chars: int = _PRESEND_MAX_CHARS,
+) -> tuple[str, SecretScanResult | None]:
+    """Scan and redact a model-bound *prompt* before a provider call.
+
+    Fails closed: if the prompt cannot be scanned in full, the call must be
+    aborted rather than sending unscanned content.
+
+    - Clean text -> ``(prompt, None)`` (byte-identical; no metadata side effects).
+    - Secret-like values found -> ``(scrubbed_prompt, result)`` with raw values
+      replaced in place.
+    - Oversized (``result.omitted``) -> raise :class:`PreSendSecretScanError`
+      (never send the omission placeholder to the model).
+    - Underlying scrub raises (defensive; the primitive normally never raises)
+      -> raise :class:`PreSendSecretScanError`.
+
+    Exception messages never contain prompt content.
+    """
+    try:
+        scrubbed, result = scrub_text_for_secrets(
+            prompt, source_label=source_label, max_chars=max_chars
+        )
+    except Exception as exc:  # noqa: BLE001 — fail closed on any scan failure
+        raise PreSendSecretScanError(
+            "pre-send secret scan failed; provider call aborted"
+        ) from exc
+    if result.omitted:
+        raise PreSendSecretScanError(
+            "model-bound prompt exceeds the safe secret-scan limit; "
+            "provider call aborted"
+        )
+    if not result.findings:
+        return prompt, None
+    return scrubbed, result
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +128,13 @@ class BaseProvider(ABC):
         self, model: str, prompt: str, system: str | None = None,
         max_tokens: int | None = None,
     ) -> ChatResponse:
-        """Send *prompt* to *model* and return a structured response."""
+        """Send *prompt* to *model* and return a structured response.
+
+        Implementations MUST call :func:`guard_prompt_before_send` on *prompt*
+        before building the request payload, so secret-like values are redacted
+        (and the call fails closed if scanning cannot complete). Attach the
+        returned scan result to ``ChatResponse.presend_secret_scan``.
+        """
 
     @abstractmethod
     def get_model_info(self, model_id: str) -> ModelInfo | None:

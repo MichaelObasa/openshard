@@ -7,6 +7,7 @@ from openshard.providers.base import (
     ProviderAuthError,
     ProviderError,
     ProviderRateLimitError,
+    guard_prompt_before_send,
 )
 
 # Re-export shared data types so existing imports from this module keep working.
@@ -192,6 +193,11 @@ class OpenRouterClient(BaseProvider):
         *system* is an optional system-role message prepended to the conversation.
         *max_tokens* caps the completion length sent to the API.
         """
+        # Pre-send secret scan: redact secret-like values (fail closed) before
+        # any request payload is built. This is the single send point for the
+        # OpenRouter client (``execute`` delegates here), so guarding here
+        # covers every caller.
+        prompt, _presend_scan = guard_prompt_before_send(prompt)
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -224,7 +230,10 @@ class OpenRouterClient(BaseProvider):
             usage.estimated_cost = compute_cost(
                 resolved_model, usage.prompt_tokens, usage.completion_tokens
             )
-        return ChatResponse(content=content, model=resolved_model, usage=usage)
+        return ChatResponse(
+            content=content, model=resolved_model, usage=usage,
+            presend_secret_scan=_presend_scan,
+        )
 
     def close(self) -> None:
         self._client.close()

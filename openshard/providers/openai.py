@@ -8,6 +8,7 @@ from openshard.providers.base import (
     ProviderError,
     ProviderRateLimitError,
     UsageStats,
+    guard_prompt_before_send,
 )
 from openshard.providers.openrouter import compute_cost
 
@@ -78,6 +79,9 @@ class OpenAIProvider(BaseProvider):
         max_tokens: int | None = None,
     ) -> ChatResponse:
         """Send *prompt* to *model* via the OpenAI chat completions API."""
+        # Pre-send secret scan: redact secret-like values (fail closed) before
+        # any request payload is built.
+        prompt, _presend_scan = guard_prompt_before_send(prompt)
         native_model = _normalize_model_id(model)
         messages: list[dict] = []
         if system:
@@ -108,7 +112,10 @@ class OpenAIProvider(BaseProvider):
         usage.estimated_cost = compute_cost(
             or_model, usage.prompt_tokens, usage.completion_tokens
         )
-        return ChatResponse(content=content, model=resolved_model, usage=usage)
+        return ChatResponse(
+            content=content, model=resolved_model, usage=usage,
+            presend_secret_scan=_presend_scan,
+        )
 
     def get_model_info(self, model_id: str) -> ModelInfo | None:
         """Return info for *model_id*, or None if not found."""
