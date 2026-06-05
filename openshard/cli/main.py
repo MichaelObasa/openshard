@@ -685,6 +685,24 @@ def skills(ctx: click.Context):
         click.echo(ctx.get_help())
 
 
+@skills.command("list")
+def skills_list():
+    """List all skills discovered in the current repository."""
+    from openshard.skills.discovery import discover_skills
+
+    skills_ = discover_skills(Path.cwd())
+    if not skills_:
+        click.echo("No skills found. Add skill definitions to .openshard/skills/*/SKILL.md")
+        return
+
+    col_slug = 28
+    col_name = 36
+    for s in skills_:
+        slug = s.slug if len(s.slug) <= col_slug else s.slug[: col_slug - 1] + "..."
+        name = s.name if len(s.name) <= col_name else s.name[: col_name - 1] + "..."
+        click.echo(f"  {slug:<{col_slug}}  {name:<{col_name}}  {s.category}")
+
+
 @skills.command("stats")
 def skills_stats():
     """Show per-skill performance stats from run history."""
