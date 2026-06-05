@@ -1382,6 +1382,7 @@ def last(more: bool, full: bool, as_json: bool):
             },
             proof_contract=build_shard_proof_contract(entry),
             shard_quality=build_shard_quality_summary(entry, receipt),
+            **_content_hash_fields(entry),
         )
         click.echo(json.dumps(payload, indent=2))
         return
@@ -1619,6 +1620,7 @@ def _proof_verify_last(as_json: bool) -> None:
             proof_contract=contract,
             validation_errors=errors,
             recommendation=_proof_recommendation(overall),
+            **_content_hash_fields(entry),
         )
         click.echo(json.dumps(payload, indent=2))
     else:
@@ -2468,6 +2470,26 @@ def _load_run_entries(log_path: Path) -> list[dict]:
         except json.JSONDecodeError:
             continue
     return entries
+
+
+def _content_hash_fields(entry: dict) -> dict:
+    """Compact content-hash verification block for --json envelopes.
+
+    Returns ``content_hash`` (stored value or None) and ``content_hash_status``
+    ("valid" | "mismatch" | "missing"). ``computed_content_hash`` is included
+    only when the stored hash is absent or doesn't match, so the common valid
+    case stays compact and free of redundant duplicate hashes.
+    """
+    from openshard.history.shard_hash import verify_shard_hash
+
+    result = verify_shard_hash(entry)
+    fields: dict = {
+        "content_hash": result["stored_hash"],
+        "content_hash_status": result["status"],
+    }
+    if result["status"] != "valid":
+        fields["computed_content_hash"] = result["computed_hash"]
+    return fields
 
 
 def _interaction_event_types(run_id: str) -> list[str]:
