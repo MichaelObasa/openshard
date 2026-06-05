@@ -27,6 +27,38 @@ PRICING_SOURCES = frozenset(
     {"openrouter_static_snapshot", "provider_static_snapshot", "unknown"}
 )
 
+# ---------------------------------------------------------------------------
+# Lifecycle tags v1 (additive metadata).
+# ---------------------------------------------------------------------------
+# Lifecycle separates catalog presence from default routing eligibility. The
+# registry knowing a model exists is independent of how trusted/useful it is
+# and whether it should be considered for default routing later. Routing is NOT
+# wired to these values in this branch; see is_routing_default_eligible().
+#
+#   active_default     safe for default routing
+#   active_specialist  production-grade, specialist tasks only
+#   fallback           fallback / alias only
+#   open_weight        open-weight / local candidate
+#   experimental       experimental / not yet trusted
+#   watchlist          tracked, not yet evaluated
+#   deprecated         kept for old Shards / history only
+LIFECYCLE_VALUES = frozenset(
+    {
+        "active_default",
+        "active_specialist",
+        "fallback",
+        "open_weight",
+        "experimental",
+        "watchlist",
+        "deprecated",
+    }
+)
+
+# Lifecycles that may be considered for DEFAULT routing later. Single source of
+# truth for is_routing_default_eligible(). routing/engine.py is unchanged: it
+# still hardcodes its model-ID constants and does not read the registry.
+ROUTING_DEFAULT_ELIGIBLE_LIFECYCLES = frozenset({"active_default"})
+
 
 @dataclass(frozen=True)
 class StaticPricing:
@@ -89,6 +121,13 @@ class ModelEntry:
     # Static pricing placeholder. Stays empty/unknown in v2; see StaticPricing.
     pricing: StaticPricing = field(default_factory=StaticPricing)
 
+    # ---- Lifecycle tags v1 (additive) -------------------------------------
+    # Lifecycle/trust stage. Distinguishes catalog presence from default
+    # routing eligibility. Routing is NOT wired to this yet; default
+    # eligibility is derived via is_routing_default_eligible(). Must be one of
+    # LIFECYCLE_VALUES. Set explicitly per entry so each value is auditable.
+    lifecycle: str = "active_default"
+
 
 # ---------------------------------------------------------------------------
 # Registry — all known models in a single list.
@@ -105,6 +144,7 @@ _REGISTRY: list[ModelEntry] = [
     # ------------------------------------------------------------------
     ModelEntry(
         id="deepseek/deepseek-v4-flash",
+        lifecycle="active_default",
         display_name="DeepSeek: V4 Flash",
         provider="DeepSeek",
         tier="cheap",
@@ -118,6 +158,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="z-ai/glm-5.1",
+        lifecycle="active_default",
         display_name="Z-AI: GLM 5.1",
         provider="Z-AI",
         tier="mid",
@@ -131,6 +172,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="anthropic/claude-sonnet-4.6",
+        lifecycle="active_default",
         display_name="Anthropic: Claude Sonnet 4.6",
         provider="Anthropic",
         tier="strong",
@@ -147,6 +189,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="anthropic/claude-opus-4.7",
+        lifecycle="active_specialist",
         display_name="Anthropic: Claude Opus 4.7",
         provider="Anthropic",
         tier="frontier",
@@ -163,6 +206,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="anthropic/claude-haiku-4.5",
+        lifecycle="active_default",
         display_name="Anthropic: Claude Haiku 4.5",
         provider="Anthropic",
         tier="cheap",
@@ -179,6 +223,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="moonshotai/kimi-k2.5",
+        lifecycle="active_specialist",
         display_name="Moonshot AI: Kimi K2.5",
         provider="Moonshot AI",
         tier="mid",
@@ -194,6 +239,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="minimax/m2.7",
+        lifecycle="active_specialist",
         display_name="MiniMax: M2.7",
         provider="MiniMax",
         tier="mid",
@@ -211,6 +257,7 @@ _REGISTRY: list[ModelEntry] = [
     # ------------------------------------------------------------------
     ModelEntry(
         id="google/gemini-3.1-flash-lite",
+        lifecycle="active_default",
         display_name="Google: Gemini 3.1 Flash Lite",
         provider="Google",
         tier="cheap",
@@ -225,6 +272,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="google/gemini-3.5-flash",
+        lifecycle="active_default",
         display_name="Google: Gemini 3.5 Flash",
         provider="Google",
         tier="mid",
@@ -240,6 +288,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="qwen/qwen3.7-max",
+        lifecycle="active_default",
         display_name="Qwen: Qwen3.7 Max",
         provider="Qwen",
         tier="strong",
@@ -253,6 +302,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="x-ai/grok-4.3",
+        lifecycle="active_default",
         display_name="xAI: Grok 4.3",
         provider="xAI",
         tier="strong",
@@ -267,6 +317,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="~anthropic/claude-haiku-latest",
+        lifecycle="fallback",
         display_name="Anthropic Claude Haiku Latest",
         provider="Anthropic",
         tier="cheap",
@@ -296,6 +347,7 @@ _REGISTRY: list[ModelEntry] = [
     # ------------------------------------------------------------------
     ModelEntry(
         id="anthropic/claude-opus-4.8",
+        lifecycle="active_specialist",
         display_name="Anthropic: Claude Opus 4.8",
         provider="Anthropic",
         tier="frontier",
@@ -312,6 +364,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="anthropic/claude-opus-4.8-fast",
+        lifecycle="active_specialist",
         display_name="Anthropic: Claude Opus 4.8 Fast",
         provider="Anthropic",
         tier="frontier",
@@ -328,6 +381,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="minimax/minimax-m3",
+        lifecycle="active_default",
         display_name="MiniMax: M3",
         provider="MiniMax",
         tier="strong",
@@ -344,6 +398,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="qwen/qwen3.7-plus",
+        lifecycle="active_default",
         display_name="Qwen: Qwen3.7 Plus",
         provider="Qwen",
         tier="mid",
@@ -360,6 +415,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="x-ai/grok-build-0.1",
+        lifecycle="experimental",
         display_name="xAI: Grok Build 0.1",
         provider="xAI",
         tier="experimental",
@@ -377,6 +433,7 @@ _REGISTRY: list[ModelEntry] = [
     # ------------------------------------------------------------------
     ModelEntry(
         id="qwen/qwen3.6-flash",
+        lifecycle="experimental",
         display_name="Qwen: Qwen3.6 Flash",
         provider="Qwen",
         tier="cheap",
@@ -390,6 +447,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="qwen/qwen3-coder-30b-a3b-instruct",
+        lifecycle="experimental",
         display_name="Qwen: Qwen3 Coder 30B A3B Instruct",
         provider="Qwen",
         tier="small_coder",
@@ -403,6 +461,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="mistralai/codestral-2508",
+        lifecycle="active_specialist",
         display_name="Mistral: Codestral 2508",
         provider="Mistral",
         tier="code_specialist",
@@ -416,6 +475,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="google/gemma-4-26b-a4b-it",
+        lifecycle="open_weight",
         display_name="Google: Gemma 4 26B A4B",
         provider="Google",
         tier="small",
@@ -429,6 +489,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="google/gemma-4-31b-it",
+        lifecycle="open_weight",
         display_name="Google: Gemma 4 31B",
         provider="Google",
         tier="small",
@@ -442,6 +503,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="ibm-granite/granite-4.1-8b",
+        lifecycle="watchlist",
         display_name="IBM: Granite 4.1 8B",
         provider="IBM",
         tier="tiny",
@@ -455,6 +517,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="stepfun/step-3.5-flash",
+        lifecycle="experimental",
         display_name="StepFun: Step 3.5 Flash",
         provider="StepFun",
         tier="experimental",
@@ -469,6 +532,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="poolside/laguna-xs.2:free",
+        lifecycle="experimental",
         display_name="Poolside: Laguna XS.2 (free)",
         provider="Poolside",
         tier="free_experimental",
@@ -482,6 +546,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="poolside/laguna-m.1:free",
+        lifecycle="experimental",
         display_name="Poolside: Laguna M.1 (free)",
         provider="Poolside",
         tier="free_experimental",
@@ -499,6 +564,7 @@ _REGISTRY: list[ModelEntry] = [
     # ------------------------------------------------------------------
     ModelEntry(
         id="openai/gpt-5.5",
+        lifecycle="active_specialist",
         display_name="OpenAI: GPT-5.5",
         provider="OpenAI",
         tier="frontier",
@@ -516,6 +582,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="openai/gpt-5.5-pro",
+        lifecycle="active_specialist",
         display_name="OpenAI: GPT-5.5 Pro",
         provider="OpenAI",
         tier="frontier",
@@ -533,6 +600,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="openai/gpt-5.4",
+        lifecycle="active_specialist",
         display_name="OpenAI: GPT-5.4",
         provider="OpenAI",
         tier="strong",
@@ -550,6 +618,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="openai/gpt-5.4-pro",
+        lifecycle="active_specialist",
         display_name="OpenAI: GPT-5.4 Pro",
         provider="OpenAI",
         tier="frontier",
@@ -571,6 +640,7 @@ _REGISTRY: list[ModelEntry] = [
     # ------------------------------------------------------------------
     ModelEntry(
         id="openai/gpt-5.4-mini",
+        lifecycle="active_default",
         display_name="OpenAI: GPT-5.4 Mini",
         provider="OpenAI",
         tier="mid",
@@ -588,6 +658,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="openai/gpt-5.4-nano",
+        lifecycle="active_default",
         display_name="OpenAI: GPT-5.4 Nano",
         provider="OpenAI",
         tier="small",
@@ -605,6 +676,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="openai/gpt-5-mini",
+        lifecycle="active_default",
         display_name="OpenAI: GPT-5 Mini",
         provider="OpenAI",
         tier="small",
@@ -622,6 +694,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="openai/gpt-5-nano",
+        lifecycle="active_default",
         display_name="OpenAI: GPT-5 Nano",
         provider="OpenAI",
         tier="tiny",
@@ -643,6 +716,7 @@ _REGISTRY: list[ModelEntry] = [
     # ------------------------------------------------------------------
     ModelEntry(
         id="moonshotai/kimi-k2.6",
+        lifecycle="active_specialist",
         display_name="MoonshotAI: Kimi K2.6",
         provider="MoonshotAI",
         tier="long_horizon",
@@ -660,6 +734,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="deepseek/deepseek-v4-pro",
+        lifecycle="active_default",
         display_name="DeepSeek: DeepSeek V4 Pro",
         provider="DeepSeek",
         tier="value_worker",
@@ -680,6 +755,7 @@ _REGISTRY: list[ModelEntry] = [
     # ------------------------------------------------------------------
     ModelEntry(
         id="openai/gpt-oss-20b",
+        lifecycle="open_weight",
         display_name="OpenAI: GPT-OSS 20B",
         provider="OpenAI",
         tier="small",
@@ -696,6 +772,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="openai/gpt-oss-120b",
+        lifecycle="open_weight",
         display_name="OpenAI: GPT-OSS 120B",
         provider="OpenAI",
         tier="open_weight",
@@ -716,6 +793,7 @@ _REGISTRY: list[ModelEntry] = [
     # ------------------------------------------------------------------
     ModelEntry(
         id="inclusionai/ring-2.6-1t",
+        lifecycle="watchlist",
         display_name="inclusionAI: Ring-2.6 1T",
         provider="inclusionAI",
         tier="strong",
@@ -732,6 +810,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="minimax/minimax-m2.7",
+        lifecycle="watchlist",
         display_name="MiniMax: MiniMax M2.7",
         provider="MiniMax",
         tier="value_worker",
@@ -748,6 +827,7 @@ _REGISTRY: list[ModelEntry] = [
     ),
     ModelEntry(
         id="inception/mercury-2",
+        lifecycle="active_specialist",
         display_name="Inception: Mercury 2",
         provider="Inception",
         tier="fast_reasoning",
@@ -858,6 +938,31 @@ def is_experimental(model_id: str) -> bool:
     """Return True if *model_id* is registered and marked experimental."""
     entry = _INDEX.get(model_id)
     return entry.experimental if entry is not None else False
+
+
+def lifecycle_for(model_id: str) -> str | None:
+    """Return the lifecycle stage for *model_id*, or None if not registered."""
+    entry = _INDEX.get(model_id)
+    return entry.lifecycle if entry is not None else None
+
+
+def is_routing_default_eligible(model_id: str) -> bool:
+    """Return True if *model_id* is eligible for default routing later.
+
+    Eligibility is DERIVED from lifecycle: a model qualifies only when its
+    lifecycle is in ROUTING_DEFAULT_ELIGIBLE_LIFECYCLES. This branch does not
+    wire routing to this value; routing/engine.py is unchanged. Returns False
+    for unknown model IDs.
+    """
+    entry = _INDEX.get(model_id)
+    if entry is None:
+        return False
+    return entry.lifecycle in ROUTING_DEFAULT_ELIGIBLE_LIFECYCLES
+
+
+def models_by_lifecycle(lifecycle: str) -> list[ModelEntry]:
+    """Return all registered models whose lifecycle equals *lifecycle*."""
+    return [e for e in _REGISTRY if e.lifecycle == lifecycle]
 
 
 def supports(model_id: str, capability: str) -> bool:
