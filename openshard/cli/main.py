@@ -1031,6 +1031,15 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
                 reason = _RATIONALE_SHORT.get(routing_rationale, "")
                 suffix = f" ({reason})" if reason else ""
                 click.echo(f"\nModel: {lbl}{suffix}")
+        # Always-visible routing truth: state plainly that per-role planner/
+        # executor/validator selection was advisory, so the default view can
+        # never imply three models ran when one did.
+        from openshard.history.routing_truth import (
+            build_routing_truth as _brt,
+            render_routing_truth_lines as _rrtl,
+        )
+        for _rt_line in _rrtl(_brt(entry), "default"):
+            click.echo(_rt_line)
         _df_compact = entry.get("developer_feedback")
         if _df_compact:
             click.echo(f"Feedback: {_df_compact.get('outcome', '')}")
@@ -1047,6 +1056,15 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
         click.echo(render_compact_shard_receipt(_shard))
         click.echo("")
         click.echo(render_full_shard_receipt(_shard, detail=detail))
+        from openshard.history.routing_truth import (
+            build_routing_truth as _brt,
+            render_routing_truth_lines as _rrtl,
+        )
+        _rt_lines = _rrtl(_brt(entry), detail)
+        if _rt_lines:
+            click.echo("")
+            for _rt_line in _rt_lines:
+                click.echo(_rt_line)
 
     # Proof summary (--more only) - compact OSN proof presence check
     if detail == "more":
@@ -2804,6 +2822,19 @@ def _export_verification_block(receipt) -> dict:  # receipt: ShardReceipt | None
     }
 
 
+def _routing_truth_export(entry: dict) -> dict:
+    """Honest routing-truth block for JSON export. Recomputed so old records
+    (written before routing_truth was persisted) also get it. Never raises."""
+    try:
+        from openshard.history.routing_truth import (
+            build_routing_truth,
+            routing_truth_to_dict,
+        )
+        return routing_truth_to_dict(build_routing_truth(entry))
+    except Exception:
+        return {}
+
+
 def _export_run_entry(entry: dict, include_notes: bool = False, include_timeline: bool = False, receipt=None) -> dict:  # receipt: ShardReceipt | None
     stage_runs = entry.get("stage_runs") or []
     is_ro = entry.get("routing_rationale") == "read-only analysis"
@@ -2854,6 +2885,7 @@ def _export_run_entry(entry: dict, include_notes: bool = False, include_timeline
         "tier_dispatch_enabled":     tdr.get("enabled"),
         "tier_dispatch_applied":     tdr.get("applied"),
         "tier_dispatch_work_model":  tdr.get("executor_model"),
+        "routing_truth":             _routing_truth_export(entry),
         "summary":                   entry.get("summary"),
         **_baseline_export_fields(
             entry.get("prompt_tokens") or 0,
