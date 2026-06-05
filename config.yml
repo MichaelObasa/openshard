@@ -14,7 +14,7 @@ model_tiers:
     max_tokens: 4096
 
   - name: powerful
-    model: anthropic/claude-opus-4.6
+    model: anthropic/claude-opus-4.7
     max_tokens: 8192
 
 planning_model: anthropic/claude-sonnet-4.6
