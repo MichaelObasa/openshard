@@ -2775,6 +2775,18 @@ def _log_run(
     from openshard.history.shard_contract import _make_shard_id as _msi
     entry["shard_id"] = _msi(entry["timestamp"], run_index)
 
+    # Stamp an honest routing-truth block for forward records. Read surfaces
+    # recompute this from the same fields, so it is belt-and-suspenders, not
+    # load-bearing. Runs after extra_metadata merge so it sees tier dispatch.
+    try:
+        from openshard.history.routing_truth import (
+            build_routing_truth as _brt,
+            routing_truth_to_dict as _rttd,
+        )
+        entry["routing_truth"] = _rttd(_brt(entry))
+    except Exception:
+        pass
+
     entry = coerce_shard_entry(entry)
 
     log_path = Path.cwd() / _LOG_PATH

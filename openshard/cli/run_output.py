@@ -1387,6 +1387,8 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
             )
             if _msd_warnings_compact:
                 _msd_compact += f", warnings={len(_msd_warnings_compact)}"
+            if _role_selection_mode(native_meta) != "dispatched":
+                _msd_compact += " (advisory only - not dispatched)"
             lines.append(_msd_compact)
             has_content = True
             if detail == "full":
@@ -1394,7 +1396,11 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
                 _msd_risk = getattr(msd, "risk_level", "unknown")
                 _msd_fallback = getattr(msd, "fallback_reason", "")
                 _msd_warnings = getattr(msd, "warnings", []) or []
+                _msd_role_mode = _role_selection_mode(native_meta)
                 lines.append("  [model selection]")
+                lines.append(f"  role_selection: {_msd_role_mode}")
+                if _msd_role_mode != "dispatched":
+                    lines.append("  dispatch: not_dispatched")
                 lines.append(f"  strategy: {_msd_strategy}")
                 lines.append(f"  task_type: {_msd_task}")
                 lines.append(f"  risk_level: {_msd_risk}")
@@ -1429,7 +1435,10 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
             _mcs_selected = _mcs_selected_raw if isinstance(_mcs_selected_raw, dict) else (vars(_mcs_selected_raw) if hasattr(_mcs_selected_raw, "__dict__") else {})
             _mcs_candidates = getattr(mcs, "candidates", []) or []
             _mcs_warnings = getattr(mcs, "warnings", []) or []
+            _mcs_role_mode = _role_selection_mode(native_meta)
             lines.append("  [model candidates]")
+            if _mcs_role_mode != "dispatched":
+                lines.append("  dispatch: advisory_only")
             lines.append(f"  strategy: {getattr(mcs, 'strategy', 'cost-balanced')}")
             lines.append(f"  confidence: {getattr(mcs, 'confidence', 'medium')}")
             if _mcs_selected:
@@ -1621,6 +1630,25 @@ def _meta_get(obj: Any, key: str, default: Any = None) -> Any:
     if isinstance(obj, dict):
         return obj.get(key, default)
     return getattr(obj, key, default)
+
+
+def _role_selection_mode(native_meta: Any) -> str:
+    """Return 'dispatched' only when real per-role dispatch ran, else 'advisory_only'.
+
+    Used to honestly tag the advisory model-selection / candidate blocks so a
+    reader never mistakes scoring metadata for what was actually dispatched.
+    """
+    tdr = _meta_get(native_meta, "tier_dispatch_receipt", None)
+    if tdr is None:
+        return "advisory_only"
+    if not (_meta_get(tdr, "enabled", False) and _meta_get(tdr, "applied", False)):
+        return "advisory_only"
+    any_actual = any(
+        _meta_get(tdr, k) for k in (
+            "planner_model_actual", "executor_model_actual", "validator_model_actual"
+        )
+    ) or _meta_get(tdr, "validator_dispatch_status") == "applied"
+    return "dispatched" if any_actual else "advisory_only"
 
 
 def _render_proof_summary_lines(native_meta: Any) -> list[str]:

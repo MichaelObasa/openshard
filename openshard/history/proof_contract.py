@@ -327,9 +327,19 @@ def _eval_strategy(receipt: ShardReceipt, entry: dict) -> tuple[str, str]:
 
 def _eval_model(receipt: ShardReceipt, entry: dict) -> tuple[str, str]:
     model = (receipt.model_display or "").strip()
-    if model and model != "Not recorded":
-        return PRESENT, _token(model, "recorded")
-    return MISSING, "not_recorded"
+    if not model or model == "Not recorded":
+        return MISSING, "not_recorded"
+    # Carry routing truth in the detail so the proof cannot imply per-role
+    # dispatch when one model ran. Role honesty token comes first so it survives
+    # the downstream detail-length cap. Plain ASCII separators only.
+    from openshard.history.routing_truth import build_routing_truth
+    rt = build_routing_truth(entry)
+    # Sanitize the model token on its own first so a path/secret-shaped model
+    # value collapses to the fallback before it is embedded in the larger detail
+    # string (embedding would otherwise defeat the per-value path/secret guard).
+    model_token = _token(model, "recorded")
+    detail = f"{rt.role_selection_mode} | mode={rt.routing_mode} | {model_token}"
+    return PRESENT, detail
 
 
 def _eval_context(receipt: ShardReceipt, entry: dict) -> tuple[str, str]:
