@@ -362,5 +362,61 @@ class TestExpansionModels(unittest.TestCase):
         self.assertFalse(duplicates, f"Duplicate model IDs: {duplicates}")
 
 
+# ---------------------------------------------------------------------------
+# Curated roster update v1
+# ---------------------------------------------------------------------------
+
+
+class TestCuratedRosterV1(unittest.TestCase):
+    _NEW_IDS = [
+        "anthropic/claude-opus-4.8",
+        "anthropic/claude-opus-4.8-fast",
+        "minimax/minimax-m3",
+        "qwen/qwen3.7-plus",
+    ]
+    _VALID_COST = {"free", "tiny", "cheap", "mid", "expensive", "unknown"}
+    _VALID_LATENCY = {"fast", "normal", "slow", "unknown"}
+
+    def test_curated_models_present_with_required_fields(self) -> None:
+        for model_id in self._NEW_IDS:
+            with self.subTest(model_id=model_id):
+                entry = get_model(model_id)
+                self.assertIsNotNone(entry, f"Not found: {model_id}")
+                assert entry is not None
+                self.assertTrue(entry.display_name)
+                self.assertTrue(entry.provider)
+                self.assertTrue(entry.tier)
+                self.assertTrue(entry.roles)
+                self.assertIn(entry.cost_class, self._VALID_COST)
+                self.assertIn(entry.latency_class, self._VALID_LATENCY)
+                self.assertIsInstance(entry.context_length, int)
+                self.assertFalse(entry.experimental)
+
+    def test_curated_key_metadata(self) -> None:
+        opus = get_model("anthropic/claude-opus-4.8")
+        assert opus is not None
+        self.assertEqual(opus.tier, "frontier")
+        self.assertEqual(opus.context_length, 1_000_000)
+        self.assertTrue(opus.supports_reasoning)
+        self.assertTrue(supports("minimax/minimax-m3", "tools"))
+        self.assertTrue(supports("qwen/qwen3.7-plus", "structured_outputs"))
+
+    def test_curated_models_not_duplicated(self) -> None:
+        ids = [e.id for e in _REGISTRY]
+        for model_id in self._NEW_IDS:
+            self.assertEqual(ids.count(model_id), 1, f"Dup/missing: {model_id}")
+
+    def test_curated_modalities_limited_to_text_and_image(self) -> None:
+        # input_modalities for this batch is deliberately limited to
+        # text/image for registry consistency. OpenRouter reports file
+        # input for the Opus 4.8 entries and video input for MiniMax M3;
+        # those tokens are deferred to a future modality-schema cleanup
+        # branch. This test documents the deferral as intentional.
+        for model_id in self._NEW_IDS:
+            entry = get_model(model_id)
+            assert entry is not None
+            self.assertEqual(entry.input_modalities, ("text", "image"))
+
+
 if __name__ == "__main__":
     unittest.main()
