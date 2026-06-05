@@ -1222,6 +1222,7 @@ class RunPipeline:
                 files=[],
                 notes=exec_result.notes,
                 usage=exec_result.usage,
+                presend_secret_scan=exec_result.presend_secret_scan,
             )
 
         final_files = exec_result.files
@@ -2303,10 +2304,16 @@ class RunPipeline:
             # Merge pre-context scrub findings (secrets caught before model injection).
             _pre_scan = getattr(_native_meta, "pre_context_secret_scan", None)
             _pre_findings = list(_pre_scan.findings) if _pre_scan is not None else []
-            # Union by fingerprint — a secret found both in-file and in-context collapses to one.
+            # Merge pre-send guard findings (secrets redacted at the provider
+            # boundary — covers task/repo_facts and the direct execution path).
+            _presend_scan = getattr(exec_result, "presend_secret_scan", None)
+            _presend_findings = (
+                list(_presend_scan.findings) if _presend_scan is not None else []
+            )
+            # Union by fingerprint — a secret found in more than one place collapses to one.
             _merged_findings: list = []
             _seen_fp: set[str] = set()
-            for _f in _post_findings + _pre_findings:
+            for _f in _post_findings + _pre_findings + _presend_findings:
                 _fp = getattr(_f, "fingerprint", None)
                 if _fp and _fp in _seen_fp:
                     continue
@@ -2321,7 +2328,7 @@ class RunPipeline:
                     blocked=False,
                     summary=(
                         f"{_count} potential secret{'s' if _count != 1 else ''} "
-                        f"detected (pre-context scrub + post-run scan)"
+                        f"detected (pre-send guard + pre-context scrub + post-run scan)"
                     ),
                 )
                 if _extra_metadata is None:

@@ -12,6 +12,7 @@ from openshard.providers.openrouter import OpenRouterClient
 
 if TYPE_CHECKING:
     from openshard.analysis.repo import RepoFacts
+    from openshard.security.secret_scan import SecretScanResult
 
 # ---------------------------------------------------------------------------
 # System prompt
@@ -133,6 +134,10 @@ class ExecutionResult:
     notes: list[str]
     usage: UsageStats | None = None
     adapter_meta: dict | None = None
+    # Result of the pre-send secret scan applied to the outgoing prompt for this
+    # generation. None when no secret-like values were found. Carries only
+    # redacted previews and fingerprints — never raw secret values.
+    presend_secret_scan: SecretScanResult | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +244,7 @@ class ExecutionGenerator:
             else:
                 raise
         result.usage = response.usage
+        result.presend_secret_scan = getattr(response, "presend_secret_scan", None)
         return result
 
     # ------------------------------------------------------------------
