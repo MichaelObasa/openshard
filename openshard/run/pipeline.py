@@ -1547,9 +1547,11 @@ class RunPipeline:
                 _loop_meta.attempted = True
                 if hasattr(generator, "record_loop_step"):
                     generator.record_loop_step("verification")
+                _loop_t0 = time.monotonic()
                 _loop_code, _loop_output = _run_verification_plan(
                     _verification_plan, workspace, capture=True
                 )
+                _loop_meta.duration_seconds = round(time.monotonic() - _loop_t0, 2)
                 _loop_meta.exit_code = _loop_code
                 _loop_meta.output_chars = len(_loop_output)
                 _loop_meta.truncated = len(_loop_output) > 1200
@@ -1633,9 +1635,11 @@ class RunPipeline:
                             },
                         )
                     # Second verification run
+                    _loop_t1 = time.monotonic()
                     _loop_code2, _loop_output2 = _run_verification_plan(
                         _verification_plan, workspace, capture=True
                     )
+                    _loop_meta.duration_seconds = round(time.monotonic() - _loop_t1, 2)
                     _loop_meta.exit_code = _loop_code2
                     _loop_meta.output_chars = len(_loop_output2)
                     _loop_meta.truncated = len(_loop_output2) > 1200

@@ -733,5 +733,117 @@ class TestVerificationLoopWiringIntegration(unittest.TestCase):
         self.assertTrue(contract.manual_review_required)
 
 
+# ---------------------------------------------------------------------------
+# 54-62: Execution metadata (returncode, duration, raw_output_stored, summary)
+# ---------------------------------------------------------------------------
+
+class TestExecutionMetadata(unittest.TestCase):
+    def _loop(self, **kwargs: Any) -> Any:
+        from openshard.native.context import NativeVerificationLoop
+        loop = NativeVerificationLoop()
+        for key, val in kwargs.items():
+            setattr(loop, key, val)
+        return loop
+
+    def test_54_new_fields_default_safely(self) -> None:
+        from openshard.native.verification_contract import OSNVerificationContract
+        c = OSNVerificationContract()
+        self.assertIsNone(c.returncode)
+        self.assertIsNone(c.duration_seconds)
+        self.assertFalse(c.raw_output_stored)
+
+    def test_55_new_fields_serialize_to_json(self) -> None:
+        from openshard.native.verification_contract import OSNVerificationContract
+        c = OSNVerificationContract(
+            enabled=True, status="passed", returncode=0, duration_seconds=1.23
+        )
+        loaded = json.loads(json.dumps(asdict(c)))
+        self.assertEqual(loaded["returncode"], 0)
+        self.assertEqual(loaded["duration_seconds"], 1.23)
+        self.assertFalse(loaded["raw_output_stored"])
+
+    def test_56_returncode_and_duration_flow_from_loop(self) -> None:
+        from openshard.native.verification_contract import build_osn_verification_contract
+        loop = self._loop(
+            check_attempted=["pytest"], check_passed=["pytest"],
+            exit_code=0, duration_seconds=2.5,
+        )
+        summary = _make_loop_summary(verification_attempted=True, verification_passed=True)
+        c = build_osn_verification_contract(
+            osn_observation=None, osn_loop_summary=summary, verification_loop=loop
+        )
+        self.assertEqual(c.returncode, 0)
+        self.assertEqual(c.duration_seconds, 2.5)
+        self.assertFalse(c.raw_output_stored)
+
+    def test_57_passed_summary_is_safe_per_check(self) -> None:
+        from openshard.native.verification_contract import build_osn_verification_contract
+        loop = self._loop(check_attempted=["pytest"], check_passed=["pytest"], exit_code=0)
+        summary = _make_loop_summary(verification_attempted=True, verification_passed=True)
+        c = build_osn_verification_contract(
+            osn_observation=None, osn_loop_summary=summary, verification_loop=loop
+        )
+        self.assertEqual(c.summary, "pytest passed")
+
+    def test_58_failed_summary_includes_exit_code_no_raw_output(self) -> None:
+        from openshard.native.verification_contract import build_osn_verification_contract
+        loop = self._loop(check_attempted=["pytest"], check_failed=["pytest"], exit_code=1)
+        summary = _make_loop_summary(verification_attempted=True, verification_passed=False)
+        c = build_osn_verification_contract(
+            osn_observation=None, osn_loop_summary=summary, verification_loop=loop
+        )
+        self.assertEqual(c.summary, "pytest failed (exit 1)")
+
+    def test_59_skipped_summary_carries_reason(self) -> None:
+        from openshard.native.verification_contract import build_osn_verification_contract
+        loop = self._loop(
+            check_skipped=["make test"],
+            check_skipped_reasons=["needs_approval: medium-risk command"],
+        )
+        summary = _make_loop_summary(verification_attempted=False)
+        c = build_osn_verification_contract(
+            osn_observation=None, osn_loop_summary=summary, verification_loop=loop
+        )
+        self.assertTrue(c.summary.startswith("make test skipped:"))
+
+    def test_60_raw_output_stored_is_always_false(self) -> None:
+        from openshard.native.verification_contract import build_osn_verification_contract
+        loop = self._loop(check_attempted=["pytest"], check_failed=["pytest"], exit_code=2)
+        summary = _make_loop_summary(verification_attempted=True, verification_passed=False)
+        c = build_osn_verification_contract(
+            osn_observation=None, osn_loop_summary=summary, verification_loop=loop
+        )
+        self.assertFalse(c.raw_output_stored)
+
+    def test_61_old_loop_without_new_fields_is_backward_compatible(self) -> None:
+        from openshard.native.verification_contract import build_osn_verification_contract
+        # A loop-like object lacking exit_code / duration_seconds attributes.
+        legacy_loop = SimpleNamespace(
+            check_attempted=["pytest"], check_passed=["pytest"],
+            check_failed=[], check_skipped=[], check_skipped_reasons=[],
+        )
+        summary = _make_loop_summary(verification_attempted=True, verification_passed=True)
+        c = build_osn_verification_contract(
+            osn_observation=None, osn_loop_summary=summary, verification_loop=legacy_loop
+        )
+        self.assertEqual(c.status, "passed")
+        self.assertIsNone(c.returncode)
+        self.assertIsNone(c.duration_seconds)
+
+    def test_62_full_receipt_shows_exit_code_and_duration(self) -> None:
+        from openshard.native.verification_contract import (
+            OSNVerificationContract, render_osn_verification_receipt,
+        )
+        c = OSNVerificationContract(
+            enabled=True, status="passed", returncode=0,
+            duration_seconds=1.5, summary="pytest passed",
+        )
+        lines = render_osn_verification_receipt(c, detail="full")
+        text = "\n".join(lines)
+        self.assertIn("Exit code", text)
+        self.assertIn("Duration", text)
+        self.assertNotIn("—", text)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -254,6 +254,37 @@ class TestSectionStatuses(unittest.TestCase):
         # partial required does not count as missing required.
         self.assertNotIn("verification", contract["missing_required_sections"])
 
+    def test_verification_skipped_is_partial(self) -> None:
+        entry = _strong_entry()
+        entry.pop("review_checks", None)
+        entry["verification_attempted"] = False
+        entry["verification_passed"] = None
+        entry["osn_verification_contract"] = {
+            "enabled": True,
+            "status": "skipped",
+            "skipped_reason": "needs_approval: medium-risk command",
+        }
+        contract = build_shard_proof_contract(entry)
+        verif = _section(contract, "verification")
+        self.assertEqual(verif["status"], "partial")
+        self.assertEqual(verif["detail"], "skipped")
+        self.assertNotIn("verification", contract["missing_required_sections"])
+
+    def test_verification_manual_review_is_partial_not_unknown(self) -> None:
+        entry = _strong_entry()
+        entry.pop("review_checks", None)
+        entry["verification_attempted"] = False
+        entry["verification_passed"] = None
+        entry["osn_verification_contract"] = {
+            "enabled": True,
+            "status": "manual_review",
+            "manual_review_required": True,
+        }
+        contract = build_shard_proof_contract(entry)
+        verif = _section(contract, "verification")
+        self.assertEqual(verif["status"], "partial")
+        self.assertEqual(verif["detail"], "manual_review")
+
     def test_cost_partial_when_only_duration(self) -> None:
         entry = _strong_entry()
         entry.pop("estimated_cost")

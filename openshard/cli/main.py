@@ -2770,6 +2770,31 @@ def _baseline_export_fields(
     }
 
 
+def _export_verification_block(receipt) -> dict:  # receipt: ShardReceipt | None
+    """Compact, safe verification block for machine output.
+
+    Uses the canonical verification signal from the receipt. Contains only
+    bounded scalars and a safe summary reason, never raw command output.
+    """
+    from openshard.history.proof_signals import verification_status_from_receipt
+
+    if receipt is None:
+        return {
+            "status": None,
+            "reason": "",
+            "returncode": None,
+            "duration_seconds": None,
+            "raw_output_stored": False,
+        }
+    return {
+        "status": verification_status_from_receipt(receipt),
+        "reason": getattr(receipt, "verification_reason", "") or "",
+        "returncode": getattr(receipt, "verification_returncode", None),
+        "duration_seconds": getattr(receipt, "verification_duration_seconds", None),
+        "raw_output_stored": bool(getattr(receipt, "verification_raw_output_stored", False)),
+    }
+
+
 def _export_run_entry(entry: dict, include_notes: bool = False, include_timeline: bool = False, receipt=None) -> dict:  # receipt: ShardReceipt | None
     stage_runs = entry.get("stage_runs") or []
     is_ro = entry.get("routing_rationale") == "read-only analysis"
@@ -2804,6 +2829,7 @@ def _export_run_entry(entry: dict, include_notes: bool = False, include_timeline
         "execution_mode_label":      _profile_display_label(entry.get("execution_profile"), is_readonly=is_ro),
         "verification_attempted":    entry.get("verification_attempted"),
         "verification_passed":       entry.get("verification_passed"),
+        "verification":              _export_verification_block(receipt),
         "duration_seconds":          entry.get("duration_seconds"),
         "total_cost_usd":            entry.get("estimated_cost"),
         "prompt_tokens":             entry.get("prompt_tokens"),

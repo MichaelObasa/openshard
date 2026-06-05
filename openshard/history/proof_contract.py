@@ -391,9 +391,10 @@ def _eval_verification(receipt: ShardReceipt, entry: dict) -> tuple[str, str]:
     status = verification_status_from_receipt(receipt)
     if status in ("passed", "failed"):
         return PRESENT, status
-    if status == "not_run":
-        # A recorded "not run" is weak proof, not absent proof.
-        return PARTIAL, "not_run"
+    if status in ("not_run", "skipped", "manual_review"):
+        # A recorded not_run / skipped / manual_review is weak proof, not absent
+        # proof: the run states what happened, just not a clean pass or fail.
+        return PARTIAL, status
     return UNKNOWN, "unknown"
 
 
