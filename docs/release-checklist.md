@@ -38,8 +38,8 @@ twine upload dist/*
 ## GitHub release
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 Then create a GitHub Release at https://github.com/MichaelObasa/openshard/releases/new
