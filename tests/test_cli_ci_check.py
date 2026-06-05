@@ -160,6 +160,37 @@ def test_json_pass_includes_shard_id():
     assert payload["shard_id"]  # non-empty
 
 
+def test_json_clean_checks_block():
+    result = _invoke(["--json"], entries=[_PASS])
+    payload = json.loads(result.output)
+    assert payload["checks"]["verification"] == "passed"
+    assert payload["checks"]["manual_review_required"] is False
+    assert payload["checks"]["secret_scan_findings"] == 0
+
+
+def test_json_fail_reasons_name_the_blocker():
+    result = _invoke(["--json"], entries=[_FAIL])
+    payload = json.loads(result.output)
+    assert payload["status"] == "fail"
+    assert "Verification failed." in payload["reasons"]
+
+
+def test_json_approval_denied_sets_manual_review():
+    result = _invoke(["--json"], entries=[_APPROVAL_DENIED])
+    payload = json.loads(result.output)
+    assert payload["status"] == "fail"
+    assert payload["checks"]["manual_review_required"] is True
+    assert "Manual review required." in payload["reasons"]
+
+
+def test_json_secret_findings_count_and_warning():
+    result = _invoke(["--json"], entries=[_SECRET])
+    payload = json.loads(result.output)
+    assert payload["status"] == "warn"
+    assert payload["checks"]["secret_scan_findings"] == 1
+    assert any("secret-scan finding" in w for w in payload["warnings"])
+
+
 # --- github output ----------------------------------------------------------
 
 def test_github_output_written_when_env_set():
