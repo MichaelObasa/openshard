@@ -1,15 +1,19 @@
 # OpenShard
 
 <p align="center">
-  <strong>The control layer for AI coding agents.</strong>
+  <strong>Receipts for AI coding agents.</strong>
 </p>
 
 <p align="center">
-  AI coding agents can write code, but engineering teams still need to understand what ran, what changed, what context was used, whether checks passed, what it cost and a way of proving it. OpenShard wraps AI coding agent runs with routing, review boundaries, checks, evidence, cost tracking, evals, feedback, and durable Shard receipts.
+  AI coding agents can write code, but developers still need a clear record of what happened: what ran, what changed, what checks passed or failed, what it cost, and whether the saved record still matches its fingerprint.
 </p>
 
 <p align="center">
-  <strong>Agents write code. OpenShard controls the run and proves what happened.</strong>
+  OpenShard gives AI coding work a local receipt. It starts with receipts and grows into the control layer for AI coding workflows.
+</p>
+
+<p align="center">
+  <strong>Agents write code. OpenShard keeps the receipt.</strong>
 </p>
 
 <p align="center">
@@ -22,42 +26,49 @@
 ---
 
 ## Why OpenShard exists
+
 AI coding agents are becoming good enough to work on real repos, infrastructure, and production-shaped systems.
 
 That creates a new problem. Not “can the model write code?” but:
-- Which model or workflow handled the task?
-- What files did it inspect?
-- What did it change?
-- Did checks pass, fail, skip, or not run?
-- What did the run cost?
-- Was anything risky gated or reviewed?
-- Is there a durable receipt of what happened?
 
-OpenShard is built for the work around the agent: routing, verification, policy, evidence, cost awareness, and auditability.
-The valuable unit is not a single model call. It is a completed engineering task with evidence, checks, cost, and a receipt.
+* Which model or workflow handled the task?
+* What files did it inspect or touch?
+* What did it change?
+* Did checks pass, fail, skip, or not run?
+* What did the run cost?
+* Was anything risky blocked or reviewed?
+* Is there a durable receipt of what happened?
+
+OpenShard is built for the work around the agent: routing, checks, risk gates, cost awareness, feedback, local history, and Shard receipts.
+
+The valuable unit is not a single model call. It is a completed engineering task with a record you can inspect later.
 
 ---
 
 ## What OpenShard does
-OpenShard is a CLI tool for controlling and recording AI coding agent runs.
+
+OpenShard is a CLI tool for controlling and recording AI coding work.
 
 It can:
-- Run real repo tasks through a controlled execution path
-- Route work across models and workflows where available
-- Classify task risk
-- Gate risky writes and commands
-- Record model used, risk, checks, changed files, evidence, cost, and result
-- Produce durable Shard receipts for every run
-- Support read-only review flows that preserve `Changed 0 files`
-- Provide workflow packs for repeatable engineering reviews
-- Compare models and workflows through local evals
-- Track feedback and session signals around runs
+
+* Run real repo tasks through a controlled execution path
+* Route work across models and workflows where available
+* Classify task risk
+* Gate risky writes and commands
+* Record model used, risk, checks, changed files, cost, and result
+* Produce durable Shard receipts for runs
+* Show proof, trust, and quality signals for the latest run
+* Check whether a saved Shard still matches its fingerprint
+* Support read-only review flows that preserve `Changed 0 files`
+* Provide workflow packs for repeatable engineering reviews
+* Compare models and workflows through local evals
+* Track feedback and session signals around runs
 
 OpenShard is not trying to replace Claude Code, Codex, Cursor, OpenCode, or other coding agents.
 
 Those tools do the coding work.
 
-OpenShard sits around them as the control and audit layer.
+OpenShard sits around them as the receipt and control layer.
 
 ---
 
@@ -68,20 +79,19 @@ The current local developer loop is:
 ```text
 Ask -> Plan -> Run -> Inspect -> Feedback
 ```
-
-**Ask**  
+**Ask**
 Ask OpenShard product, model, command, and policy questions.
 
-**Plan**  
-Generate a local execution plan. Plan Mode v1 is deterministic and local: it does not scan the repo, call a provider, or write files.
+**Plan**
+Generate a local execution plan. Plan Mode v1 is deterministic and conservative. It does not write files, and it does not make provider calls.
 
-**Run**  
+**Run**
 Send a real repo task through OpenShard’s controlled execution path.
 
-**Inspect**  
-Review the result, actions taken, evidence, checks, changed files, cost estimate, model choice, and Shard receipt.
+**Inspect**
+Review the result, actions taken, checks, changed files, cost estimate, model choice, trust signals, and Shard receipt.
 
-**Feedback**  
+**Feedback**
 Record whether the result was accepted, partial, rejected, or needs more work.
 
 ---
@@ -204,29 +214,41 @@ This is the core OpenShard use case: let AI help with serious engineering work, 
 ---
 
 ## Shard receipts
-A Shard is the durable receipt for an AI engineering run.
+
+A Shard is the saved record of an AI coding run.
 
 New here? Read [What is a Shard?](docs/what-is-a-shard.md).
 
+Think of it like a receipt for AI coding work.
+
 It can show:
-- Task and agent
-- Model used
-- Strategy
-- Risk level
-- Context provenance
-- Inspected files
-- Changed and touched files
-- Checks and their outcomes
-- Findings, when structured findings exist
-- Cost
-- Actions timeline
-- Result
+
+* Task and agent
+* Model used
+* Strategy
+* Risk level
+* Context used, when recorded
+* Inspected files
+* Changed and touched files
+* Checks and their outcomes
+* Findings, when structured findings exist
+* Cost
+* Actions timeline
+* Result
+* Trust score
+* Content hash status
+
+A Shard does not prove the code is perfect. Nothing can.
+
+What it proves is more practical: what OpenShard recorded during the run, what changed, what checks passed or failed, whether anything risky was blocked, and whether the saved record changed later.
 
 OpenShard can also record feedback and infer session signals around a run.
 
 ```bash
 openshard last --more    # expanded receipt for the latest run
 openshard last --full    # full stored details
+openshard proof last     # inspect the latest run's proof
+openshard trust last     # inspect the latest run's trust score
 ```
 
 Every Shard receipt can power two local follow-up commands:
@@ -246,17 +268,19 @@ Raw developer content is not stored by default.
 ## One run, end to end
 
 A normal OpenShard run can capture:
+
 1. **Task** - the user request or workflow pack prompt.
 2. **Routing** - which model or workflow was selected.
 3. **Risk** - whether the task is low, medium, high, or requires stronger review.
-4. **Execution** - what the agent did during the run.
+4. **Execution** - what happened during the run.
 5. **Checks** - verification results, including passed, failed, skipped, or not run.
-6. **Evidence** - files inspected, findings, and relevant source references.
+6. **Recorded context** - files inspected, findings, and relevant source references when available.
 7. **Changes** - files changed, touched, or left untouched.
 8. **Cost** - estimated spend for the run.
 9. **Receipt** - a durable Shard record that can be inspected later.
+10. **Fingerprint** - a content hash that helps detect whether the saved record changed later.
 
-The point is simple: every AI coding run should leave behind enough evidence for a developer or team to understand what happened.
+The point is simple: every AI coding run should leave behind a receipt that a developer or team can inspect.
 
 ---
 
@@ -387,131 +411,91 @@ After a run completes, the TUI shows command hints for `openshard reflect last` 
 ---
 
 ## What works today
+
 OpenShard is still alpha, but the core local loop is working.
 
 Current features include:
-- Local CLI and TUI (`openshard tui`)
-- Ask Mode for local product/model/command Q&A
-- Plan Mode v1 for deterministic local plans
-- Controlled run path for real repo tasks
-- OpenShard Native execution harness
-- Task classification and risk handling
-- Model registry and model policy inspection
-- Routing across models/workflows where available
-- Shard receipts with model, risk, files, checks, cost, evidence, and result
-- `/last`, `/last more`, and `/last --full`
-- Read-only review handling that preserves `Changed 0 files`
-- Intent-specific review handling for Terraform/IaC, CI/CD, auth/security, tests, and docs/onboarding
-- Workflow packs for repeatable engineering reviews
-- Feedback signals
-- Session signal inference
-- Local run history
-- Local eval harness
-- Eval comparison by pass rate and cost-per-pass
-- Cost comparison in `/last more`
-- OSN proof pipeline with PROOF SUMMARY in `openshard last --more` (Observation, Progress, Verification, Loop, Retry)
-- `openshard reflect last` for local advisory run reflection (deterministic, no model calls)
-- `openshard pr comment` for local GitHub PR comment generation
-- TUI post-run command hints for reflect and pr comment
-- Production-shaped Terraform demo
-- 5,500+ passing tests and green CI
+
+* Local CLI and TUI (`openshard tui`)
+* Ask Mode for local product/model/command Q&A
+* Plan Mode v1 for deterministic local plans
+* Controlled run path for real repo tasks
+* OpenShard Native execution harness
+* Task classification and risk handling
+* Model registry and model policy inspection
+* Routing across models/workflows where available
+* Shard receipts with model, risk, files, checks, cost, result, and trust signals
+* `/last`, `/last more`, and `/last --full`
+* `openshard proof last` for latest-run proof inspection
+* `openshard trust last` for latest-run trust scoring
+* Shard quality summary in `last --json`
+* Compact `Proof: <status>` line in `openshard last`
+* Content hash verification for Shards
+* Best-effort pre-send secret scanning before provider calls
+* Safer JSONL history writes with write locking
+* CI check mode for pass / warn / fail / skip decisions
+* GitHub Actions PR receipt output surfaces
+* Read-only review handling that preserves `Changed 0 files`
+* Intent-specific review handling for Terraform/IaC, CI/CD, auth/security, tests, and docs/onboarding
+* Workflow packs for repeatable engineering reviews
+* Feedback signals
+* Session signal inference
+* Local run history
+* Local eval harness
+* Eval comparison by pass rate and cost-per-pass
+* Cost comparison in `/last more`
+* OSN proof pipeline with PROOF SUMMARY in `openshard last --more` when metadata is present
+* `openshard reflect last` for local advisory run reflection
+* `openshard pr comment` for local GitHub PR comment generation
+* TUI post-run command hints for reflect and pr comment
+* Production-shaped Terraform demo
+* 6,800+ passing tests and green CI
 
 ---
 
 ## What is not built yet
+
 OpenShard is early and intentionally local-first.
 
 Not built yet:
-- No hosted team platform yet
-- No cloud sync yet
-- No hosted dashboard for teams yet
-- No IDE integration yet
-- No Homebrew, winget, or one-line shell installer yet
-- Plan Mode is not repo-aware yet
-- Ask Mode and Plan Mode are local deterministic v1 flows
-- Feedback advisory does not automatically change routing yet
-- External harness adapters are experimental and not guaranteed
-- Not a full Claude Code, Codex, or Cursor replacement
 
----
-
-## Local data and privacy
-
-All run receipts, history, and proof metadata are stored locally in `~/.openshard/`.
-
-No run data, file contents, or task metadata is sent to OpenShard servers. There are none.
-
-Model calls go directly to the provider you configure (Anthropic, OpenRouter, etc.) under your own API key.
-
-`openshard pr comment` generates markdown locally and outputs to stdout or a local file. Nothing is posted to GitHub automatically.
-
----
-
-## Developer setup
-
-Use this if you want to modify OpenShard locally or contribute code:
-
-```bash
-git clone https://github.com/MichaelObasa/openshard.git
-cd openshard
-pip install -e ".[dev]"
-python -m pytest -q
-python -m ruff check .
-```
-
----
-
-## Advanced: evals
-
-OpenShard includes a local eval harness for checking routing and workflow behaviour.
-
-```bash
-openshard eval list
-openshard eval validate --suite basic
-openshard eval run --suite basic
-openshard eval report
-openshard eval compare
-openshard eval stats
-```
-
-The goal is not just to ask “which model is best?”
-
-The better question is:
-> Which model or workflow succeeds most reliably for this type of task, at what cost, with what safety profile?
-
-The eval system can track:
-- Pass rate
-- Verification outcomes
-- Duration
-- Token usage where available
-- Cost where available
-- Cost per passing run
-- Unsafe file attempts
-- Model ranking across eval runs
-
-This is the foundation for smarter routing over time: routing based on actual task outcomes.
+* No hosted team platform yet
+* No cloud sync yet
+* No hosted dashboard for teams yet
+* No IDE integration yet
+* No Homebrew, winget, or one-line shell installer yet
+* Ask Mode and Plan Mode are local deterministic v1 flows
+* Feedback advisory does not automatically change routing yet
+* Model lifecycle tags do not yet drive default routing behavior
+* External Claude Code, Codex, Cursor, and OpenCode receipt capture is not fully implemented yet
+* External harness adapters are experimental and not guaranteed
+* Not a full Claude Code, Codex, Cursor, or OpenCode replacement
 
 ---
 
 ## Current validation state
+
 OpenShard is still early, but it is not just a prototype.
 
 Current validation includes:
 
-- 6,500+ passing tests
-- Green CI
-- Ruff-clean Python codebase
-- Local CLI/TUI workflow
-- Production-shaped Terraform demo
-- Workflow packs for repeatable reviews
-- Shard receipts for run history
-- Eval tooling for model and workflow comparison
-- Pre-launch usage from developers testing it on real work
+* 6,800+ passing tests
+* Green CI
+* Ruff-clean Python codebase
+* Clean `pipx install openshard` path from PyPI
+* Local CLI/TUI workflow
+* Production-shaped Terraform demo
+* Workflow packs for repeatable reviews
+* Shard receipts for run history
+* Proof, trust, quality, and hash checks for run records
+* CI check surfaces for automation
+* Eval tooling for model and workflow comparison
+* Pre-launch usage from developers testing it on real work
 
 The project is alpha, but the core loop is working:
 
 ```text
-Run the task -> inspect what happened -> verify the output -> create a receipt
+Run the task -> inspect what happened -> verify the output -> keep the receipt
 ```
 
 ---
@@ -519,18 +503,19 @@ Run the task -> inspect what happened -> verify the output -> create a receipt
 ## Roadmap
 
 Near-term roadmap:
-- Public open-source launch
-- More real-world developer testing
-- Better repo-aware planning
-- Stronger model/workflow ranking from real outcomes
-- More workflow packs
-- More repo analyzers for common stacks
-- Cleaner setup and release packaging
-- Hosted/team run history
-- Team policies and shared approval gates
-- Dashboards for cost, model usage, and verification outcomes
 
-Longer-term, OpenShard should become the control plane teams use to manage AI engineering work.
+* More real-world developer testing
+* Better external-agent receipt capture, starting with Claude Code
+* Better repo-aware planning
+* Stronger model/workflow ranking from real outcomes
+* More workflow packs
+* More repo analyzers for common stacks
+* Cleaner setup and release packaging
+* Hosted/team run history
+* Team policies and shared approval gates
+* Dashboards for cost, model usage, and verification outcomes
+
+Longer-term, OpenShard should become the control layer teams use to manage AI engineering work.
 
 ---
 
@@ -569,6 +554,4 @@ See [SECURITY.md](SECURITY.md).
 ---
 
 ## License
-
 Apache-2.0
-````
