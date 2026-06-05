@@ -71,6 +71,47 @@ class TestLastJson(_Base):
         self.assertIsNone(data["run"])
         self.assertEqual(data["warnings"], [])
 
+    def test_verification_block_present_and_valid(self):
+        with self.runner.isolated_filesystem():
+            _write_runs([_make_entry()])
+            result = self.runner.invoke(cli, ["last", "--json"])
+        data = json.loads(result.output)
+        verif = data["run"]["verification"]
+        self.assertIn("status", verif)
+        self.assertIn("returncode", verif)
+        self.assertIn("duration_seconds", verif)
+        self.assertFalse(verif["raw_output_stored"])
+
+    def test_verification_block_surfaces_skipped_with_reason(self):
+        entry = _make_entry(
+            verification_attempted=False,
+            verification_passed=None,
+            osn_verification_contract={
+                "enabled": True,
+                "status": "skipped",
+                "skipped_reason": "needs_approval: medium-risk command",
+                "returncode": None,
+                "duration_seconds": None,
+            },
+        )
+        with self.runner.isolated_filesystem():
+            _write_runs([entry])
+            result = self.runner.invoke(cli, ["last", "--json"])
+        data = json.loads(result.output)
+        verif = data["run"]["verification"]
+        self.assertEqual(verif["status"], "skipped")
+        self.assertIn("needs_approval", verif["reason"])
+        _assert_no_unsafe(self, result.output)
+
+    def test_verification_block_old_record_is_safe(self):
+        with self.runner.isolated_filesystem():
+            _write_runs([{"task": "legacy", "timestamp": "2026-01-01T00:00:00Z"}])
+            result = self.runner.invoke(cli, ["last", "--json"])
+        data = json.loads(result.output)
+        # Old record without an OSN contract: block exists and stays valid JSON.
+        self.assertIn("verification", data["run"])
+        self.assertIsInstance(data["run"]["verification"], dict)
+
     def test_human_output_unchanged(self):
         with self.runner.isolated_filesystem():
             _write_runs([_make_entry()])

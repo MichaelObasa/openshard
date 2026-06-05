@@ -467,6 +467,59 @@ class ShardReceipt:
     # Safe workspace identity — set when a sandbox was used for this run
     safe_workspace_kind: str | None = None
     safe_workspace_display_name: str | None = None
+    # Canonical verification signal, populated from the OSN verification contract
+    # when present. Empty token means "fall back to the boolean/status logic".
+    # No raw output; returncode and duration are bounded scalars.
+    verification_status: str = ""
+    verification_reason: str = ""
+    verification_returncode: int | None = None
+    verification_duration_seconds: float | None = None
+    verification_raw_output_stored: bool = False
+
+
+def _verification_from_osn_contract(
+    entry: dict,
+) -> tuple[str, str, Optional[int], Optional[float], bool]:
+    """Map a persisted OSN verification contract to canonical receipt fields.
+
+    Returns (status_token, reason, returncode, duration_seconds, raw_output_stored).
+    The status token is one of passed, failed, skipped, manual_review, not_run,
+    unknown, or empty when no OSN contract is present (callers then fall back to
+    the boolean and string logic for old or non-native records). manual_review
+    and impossible are mapped deliberately and never collapsed into unknown.
+    """
+    osn = entry.get("osn_verification_contract")
+    if not isinstance(osn, dict) or not osn.get("enabled"):
+        return "", "", None, None, False
+
+    raw_status = str(osn.get("status") or "").strip()
+    manual_review = bool(osn.get("manual_review_required"))
+
+    if raw_status == "failed":
+        token = "failed"
+    elif raw_status == "passed":
+        token = "passed"
+    elif manual_review:
+        # A run that still needs human intervention, regardless of whether the
+        # underlying status was skipped, impossible, manual_review, or unknown.
+        token = "manual_review"
+    elif raw_status in ("skipped", "impossible"):
+        # impossible means the check could not run; treat as skipped with reason.
+        token = "skipped"
+    elif raw_status == "manual_review":
+        token = "manual_review"
+    elif raw_status == "not_run":
+        token = "not_run"
+    else:
+        token = "unknown"
+
+    reason = (str(osn.get("skipped_reason") or "") or str(osn.get("summary") or ""))[:200]
+    rc = osn.get("returncode")
+    returncode = rc if isinstance(rc, int) else None
+    dur = osn.get("duration_seconds")
+    duration = float(dur) if isinstance(dur, (int, float)) else None
+    raw_stored = bool(osn.get("raw_output_stored"))
+    return token, reason, returncode, duration, raw_stored
 
 
 def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
@@ -630,6 +683,14 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     else:
         checks_display = "Not run"
         status = "No checks run"
+
+    (
+        _v_status,
+        _v_reason,
+        _v_returncode,
+        _v_duration,
+        _v_raw_stored,
+    ) = _verification_from_osn_contract(entry)
 
     check_results: list[str] = []
     _review_checks_raw = entry.get("review_checks")
@@ -959,6 +1020,11 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
         adapter_duration_ms=entry.get("adapter_duration_ms") if isinstance(entry.get("adapter_duration_ms"), int) else None,
         safe_workspace_kind=((entry.get("sandbox") or {}).get("sandbox_type") or None),
         safe_workspace_display_name=((entry.get("sandbox") or {}).get("safe_workspace_display_name") or None),
+        verification_status=_v_status,
+        verification_reason=_v_reason,
+        verification_returncode=_v_returncode,
+        verification_duration_seconds=_v_duration,
+        verification_raw_output_stored=_v_raw_stored,
     )
 
 

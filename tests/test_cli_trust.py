@@ -108,6 +108,41 @@ class TestTrustLast(unittest.TestCase):
         codes = {p["code"] for p in data["penalties"]}
         self.assertIn("verification_failed", codes)
 
+    def test_skipped_run_with_changes_lowers_score_like_not_run(self):
+        skipped = {
+            **_GOOD_ENTRY,
+            "verification_attempted": False,
+            "verification_passed": None,
+            "osn_verification_contract": {
+                "enabled": True,
+                "status": "skipped",
+                "skipped_reason": "needs_approval: medium-risk command",
+            },
+        }
+        result = _invoke(["trust", "last", "--json"], runs=[skipped])
+        data = json.loads(result.output)
+        self.assertEqual(data["signals"]["verification"], "skipped")
+        codes = {p["code"] for p in data["penalties"]}
+        self.assertIn("verification_not_run", codes)
+        self.assertLess(data["score"], 100)
+
+    def test_manual_review_run_is_weak_not_failure(self):
+        mr = {
+            **_GOOD_ENTRY,
+            "verification_attempted": False,
+            "verification_passed": None,
+            "osn_verification_contract": {
+                "enabled": True,
+                "status": "manual_review",
+                "manual_review_required": True,
+            },
+        }
+        result = _invoke(["trust", "last", "--json"], runs=[mr])
+        data = json.loads(result.output)
+        self.assertEqual(data["signals"]["verification"], "manual_review")
+        codes = {p["code"] for p in data["penalties"]}
+        self.assertNotIn("verification_failed", codes)
+
     def test_human_output_is_not_json(self):
         result = _invoke(["trust", "last"], runs=[_GOOD_ENTRY])
         self.assertEqual(result.exit_code, 0, msg=result.output)

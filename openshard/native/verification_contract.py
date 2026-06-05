@@ -32,6 +32,9 @@ class OSNVerificationContract:
     skipped_reason: str = ""
     manual_review_required: bool = False
     summary: str = ""
+    returncode: int | None = None
+    duration_seconds: float | None = None
+    raw_output_stored: bool = False
 
     def __post_init__(self) -> None:
         self.expected_checks = self.expected_checks[:_MAX_CHECKS]
@@ -46,6 +49,38 @@ class OSNVerificationContract:
             self.summary = self.summary[:_MAX_SUMMARY_CHARS]
         if self.status not in _ALLOWED_STATUSES:
             self.status = "unknown"
+
+
+def _safe_check_summary(contract: "OSNVerificationContract") -> str:
+    """Compose a safe one-line per-check summary, or empty when no label exists.
+
+    Uses only the path-free check label, the status token, and the integer
+    return code. Never includes raw command output.
+    """
+    label = ""
+    if contract.failed_checks:
+        label = contract.failed_checks[0]
+    elif contract.passed_checks:
+        label = contract.passed_checks[0]
+    elif contract.attempted_checks:
+        label = contract.attempted_checks[0]
+    elif contract.skipped_checks:
+        label = contract.skipped_checks[0]
+    if not label:
+        return ""
+    if contract.status == "passed":
+        return f"{label} passed"
+    if contract.status == "failed":
+        if isinstance(contract.returncode, int):
+            return f"{label} failed (exit {contract.returncode})"
+        return f"{label} failed"
+    if contract.status == "skipped":
+        if contract.skipped_reason:
+            return f"{label} skipped: {contract.skipped_reason}"
+        return f"{label} skipped"
+    if contract.status == "manual_review":
+        return f"{label} needs manual review"
+    return ""
 
 
 def build_osn_verification_contract(
@@ -79,6 +114,15 @@ def build_osn_verification_contract(
         contract.passed_checks = list(_cp)[:_MAX_CHECKS]
         contract.failed_checks = list(_cf)[:_MAX_CHECKS]
         contract.skipped_checks = list(_cs)[:_MAX_CHECKS]
+        # Real-execution metadata. Raw output is never stored, only the bounded
+        # return code and wall-clock duration of the command.
+        _ec = getattr(verification_loop, "exit_code", None)
+        if isinstance(_ec, int):
+            contract.returncode = _ec
+        _dur = getattr(verification_loop, "duration_seconds", None)
+        if isinstance(_dur, (int, float)):
+            contract.duration_seconds = round(float(_dur), 2)
+        contract.raw_output_stored = False
         # Seed expected_checks from execution plan when observation has none
         if not contract.expected_checks:
             contract.expected_checks = (_ca + _cs)[:_MAX_CHECKS]
@@ -140,6 +184,13 @@ def build_osn_verification_contract(
         c for c in contract.expected_checks if c not in contract.attempted_checks
     ][:_MAX_CHECKS]
 
+    # Prefer a safe per-check summary over the generic status phrase when a
+    # check label exists. Built only from a path-free label, the status token,
+    # and the integer exit code. Never includes raw command output.
+    _per_check = _safe_check_summary(contract)
+    if _per_check:
+        contract.summary = _per_check
+
     # Enforce caps and char limits via __post_init__ logic
     if len(contract.summary) > _MAX_SUMMARY_CHARS:
         contract.summary = contract.summary[:_MAX_SUMMARY_CHARS]
@@ -187,6 +238,11 @@ def render_osn_verification_receipt(
     lines.append(f"    Review       {'yes' if contract.manual_review_required else 'no'}")
     if contract.skipped_reason:
         lines.append(f"    Reason       {contract.skipped_reason}")
-    if detail == "full" and contract.summary:
-        lines.append(f"    Summary      {contract.summary}")
+    if detail == "full":
+        if contract.returncode is not None:
+            lines.append(f"    Exit code    {contract.returncode}")
+        if contract.duration_seconds is not None:
+            lines.append(f"    Duration     {contract.duration_seconds}s")
+        if contract.summary:
+            lines.append(f"    Summary      {contract.summary}")
     return lines

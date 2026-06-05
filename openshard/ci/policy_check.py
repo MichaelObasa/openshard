@@ -6,9 +6,11 @@ built ``ShardReceipt`` and reduces them to a single CI verdict
 
 Decision rules (priority order):
 
-1. ``fail`` (exit 1) when verification failed, or manual review is required.
-2. ``warn`` (exit 0) when verification was not run / is unknown, or redacted
-   secret-scan findings are present.
+1. ``fail`` (exit 1) when verification failed, or manual review is required by
+   an independent gate (denied approval, progress blockers, retry diagnosis,
+   policy deny).
+2. ``warn`` (exit 0) when verification was not run / skipped / needs manual
+   review / is unknown, or redacted secret-scan findings are present.
 3. ``pass`` (exit 0) otherwise.
 
 ``--strict`` promotes any ``warn`` to ``fail``. The ``skip`` state (no run to
@@ -50,22 +52,18 @@ class CICheckResult:
 _verification_status = verification_status_from_receipt
 
 
-def _manual_review_required(entry: dict, receipt: "ShardReceipt") -> bool:
-    """Narrow CI definition of "manual review required".
+def _independent_manual_review(entry: dict, receipt: "ShardReceipt") -> bool:
+    """Manual review required by a gate independent of verification.
 
-    Deliberately excludes the skipped-verification fallbacks used by
-    ``pr_comment._is_manual_review_required`` — a skipped/unknown verification
-    is a non-blocking ``warn`` here, not a ``fail``.
+    These always block CI: denied approval, progress blockers, retry diagnosis,
+    and policy deny. Verification-driven review (skipped or manual_review) is
+    excluded here so it warns rather than fails.
     """
     if receipt.approval_required and not receipt.approval_granted:
         return True
 
     prog = entry.get("osn_progress_memory")
     if isinstance(prog, dict) and prog.get("blockers"):
-        return True
-
-    verif = entry.get("osn_verification_contract")
-    if isinstance(verif, dict) and verif.get("manual_review_required"):
         return True
 
     retry = entry.get("osn_retry_diagnosis")
@@ -81,6 +79,23 @@ def _manual_review_required(entry: dict, receipt: "ShardReceipt") -> bool:
     return False
 
 
+def _manual_review_required(entry: dict, receipt: "ShardReceipt") -> bool:
+    """Full manual-review detection, including the verification contract signal.
+
+    Used by failure classification and trust scoring as a weak signal. CI uses
+    the narrower ``_independent_manual_review`` so a skipped or manual_review
+    verification warns rather than fails.
+    """
+    if _independent_manual_review(entry, receipt):
+        return True
+
+    verif = entry.get("osn_verification_contract")
+    if isinstance(verif, dict) and verif.get("manual_review_required"):
+        return True
+
+    return False
+
+
 _secret_scan_findings = secret_scan_finding_count
 
 
@@ -89,7 +104,7 @@ def evaluate_ci_check(
 ) -> CICheckResult:
     """Evaluate a single run entry/receipt into a CI verdict. Never raises."""
     verification = _verification_status(receipt)
-    manual_review = _manual_review_required(entry, receipt)
+    manual_review = _independent_manual_review(entry, receipt)
     secret_findings = _secret_scan_findings(receipt)
 
     reasons: list[str] = []
@@ -104,10 +119,20 @@ def evaluate_ci_check(
         reasons.append("Manual review required.")
         status = "fail"
 
-    # Non-blocking concerns (only when not already failing).
+    # Non-blocking concerns (only when not already failing). A skipped or
+    # manual_review verification is a weak signal, so it warns rather than fails.
     if status != "fail":
         if verification == "not_run":
             warnings.append("Verification was not run.")
+            status = "warn"
+        elif verification == "skipped":
+            reason = (getattr(receipt, "verification_reason", "") or "").strip()
+            warnings.append(
+                f"Verification was skipped: {reason}" if reason else "Verification was skipped."
+            )
+            status = "warn"
+        elif verification == "manual_review":
+            warnings.append("Verification needs manual review.")
             status = "warn"
         elif verification == "unknown":
             warnings.append("Verification status could not be determined from the receipt.")

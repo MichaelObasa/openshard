@@ -110,3 +110,54 @@ def test_failed_verification_takes_priority_over_secret_warn():
     assert result.status == "fail"
     # Secret findings are still reported in checks even when failing.
     assert result.checks["secret_scan_findings"] == 1
+
+
+def _osn(**kwargs):
+    base = {"enabled": True, "status": "not_run"}
+    base.update(kwargs)
+    return {"osn_verification_contract": base}
+
+
+def test_verification_skipped_warns_with_reason():
+    result = _eval(
+        _osn(status="skipped", skipped_reason="needs_approval: medium-risk command")
+    )
+    assert result.status == "warn"
+    assert result.exit_code == 0
+    assert result.checks["verification"] == "skipped"
+    assert any("skipped" in w.lower() for w in result.warnings)
+    assert any("needs_approval" in w for w in result.warnings)
+
+
+def test_verification_manual_review_warns_not_fails():
+    result = _eval(_osn(status="manual_review"))
+    assert result.status == "warn"
+    assert result.exit_code == 0
+    assert result.checks["verification"] == "manual_review"
+    assert result.checks["manual_review_required"] is False
+
+
+def test_skipped_write_task_with_contract_manual_review_warns_not_fails():
+    # A skipped write task records manual_review_required on the contract, but
+    # verification-driven review must warn rather than fail.
+    result = _eval(_osn(status="skipped", manual_review_required=True))
+    assert result.status == "warn"
+    assert result.exit_code == 0
+    assert result.checks["verification"] == "manual_review"
+    assert result.checks["manual_review_required"] is False
+
+
+def test_verification_contract_failed_still_fails():
+    result = _eval(_osn(status="failed"))
+    assert result.status == "fail"
+    assert result.exit_code == 1
+    assert result.checks["verification"] == "failed"
+
+
+def test_approval_denied_still_fails_with_skipped_verification():
+    # Independent gates remain blocking even when verification only warns.
+    entry = _osn(status="skipped")
+    entry["approval_receipt"] = {"granted": False, "reason": "needs review"}
+    result = _eval(entry)
+    assert result.status == "fail"
+    assert result.checks["manual_review_required"] is True

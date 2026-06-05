@@ -206,9 +206,9 @@ def classify_failure(entry: dict, receipt: "ShardReceipt") -> FailureClassificat
                 if manual_fix and feedback_outcome != "partial"
                 else ["Developer feedback outcome: partial."]
             )
-        elif verification in {"not_run", "unknown"} and _changes_made(receipt):
+        elif verification in {"not_run", "unknown", "skipped"} and _changes_made(receipt):
             category = "verification_not_run"
-            reasons = ["Changes were made but verification was not run."]
+            reasons = ["Changes were made but verification did not produce a result."]
         elif feedback_outcome == "retried":
             category = "unknown_failure"
             reasons = ["Run was retried, implying a prior failure of unclear cause."]

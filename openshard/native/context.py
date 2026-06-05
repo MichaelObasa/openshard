@@ -102,6 +102,7 @@ class NativeVerificationLoop:
     exit_code: int | None = None
     output_chars: int = 0
     truncated: bool = False
+    duration_seconds: float | None = None
     retry_metadata: "RetryMetadata | None" = None
     # Per-check proof wiring (v1: one command per plan)
     check_attempted: list[str] = field(default_factory=list)

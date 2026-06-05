@@ -195,10 +195,11 @@ def evaluate_trust_score(
     def _add(code: str, points: int) -> None:
         penalties.append(TrustPenalty(code=code, points=points, reason=REASONS[code]))
 
-    # 1. Verification.
+    # 1. Verification. skipped is a weak signal like not_run, not a failure.
+    # manual_review is handled below as part of the policy / review group.
     if verification == "failed":
         _add("verification_failed", PENALTY_VERIFICATION_FAILED)
-    elif verification in {"not_run", "unknown"} and changes:
+    elif verification in {"not_run", "unknown", "skipped"} and changes:
         _add("verification_not_run", PENALTY_VERIFICATION_NOT_RUN)
 
     # 2. Policy / approval group — at most one, strongest first (no double count).
@@ -316,6 +317,10 @@ def _summary_reasons(ts: RunTrustScore) -> list[str]:
         reasons.append("Verification failed")
     elif verification == "not_run":
         reasons.append("Verification was not run")
+    elif verification == "skipped":
+        reasons.append("Verification was skipped")
+    elif verification == "manual_review":
+        reasons.append("Verification needs manual review")
     else:
         reasons.append("Verification status is unknown")
 
