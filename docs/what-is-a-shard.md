@@ -26,13 +26,13 @@ That matters because AI coding should not be a black box.
 
 ## Checks
 
-Checks are the tests and validations run during the work — things like formatting,
+Checks are the tests and validations run during the work - things like formatting,
 linting, or build steps. The Shard records, for each one, whether it **passed**,
 **failed**, was **skipped**, or was **not run**. It does not hide a failed check.
 
 ## Trust score
 
-The trust score is a single number that sums up how the run went at a glance — higher
+The trust score is a single number that sums up how the run went at a glance - higher
 when checks passed and nothing risky was blocked, lower when they didn't. It's a quick
 signal to help you decide where to look first. It is a convenience, not a guarantee,
 and it never replaces reading the run for yourself.
@@ -47,14 +47,8 @@ It's a simple way to check that the receipt you're reading is the one that was s
 
 ## Where OpenShard fits
 
-OpenShard is not trying to beat Claude Code, Codex, Cursor, or OpenCode at writing
-code. Those tools do the coding. OpenShard sits around the run and keeps the record of
+The aim of OpenShard is not to to beat Claude Code, Codex, Cursor, or OpenCode at writing
+code, although it does have its own native agent called OpenShard Native (OSN). Those tools do the coding. OpenShard sits around the run and keeps the record of
 what happened.
-
-## The bigger picture
-
-OpenShard starts with receipts. Over time it aims to grow into the control layer for
-AI coding workflows — the place teams go to see, check, and stand behind the AI work
-that touches their code.
 
 Agents write code. OpenShard keeps the receipt.
