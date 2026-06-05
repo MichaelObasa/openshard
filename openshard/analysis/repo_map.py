@@ -324,7 +324,7 @@ class RepoMap:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "RepoMap":
+    def from_dict(cls, d: dict) -> RepoMap:
         git = d.get("git", {}) or {}
         summary = d.get("summary", {}) or {}
         return cls(
@@ -353,7 +353,7 @@ class RepoMap:
 
 
 def _now_iso() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def build_repo_map(root: str | Path, *, now_iso: str | None = None) -> RepoMap:

@@ -9,10 +9,10 @@ from click.testing import CliRunner
 from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
 from openshard.native.context import (
+    NativeOSNLoopStep,
+    NativeOSNLoopSummary,
     OSNLoopMeta,
     OSNLoopStep,
-    NativeOSNLoopSummary,
-    NativeOSNLoopStep,
 )
 
 _DEFAULT_CONFIG = {"approval_mode": "smart"}
@@ -24,8 +24,8 @@ _PYTHON_REPO = RepoFacts(
 
 
 def _make_native_mock(osn_loop=None):
+    from openshard.native.context import NativeApprovalRequest, NativeChangeBudgetSoftGate
     from openshard.native.executor import NativeRunMeta
-    from openshard.native.context import NativeChangeBudgetSoftGate, NativeApprovalRequest
     g = MagicMock()
     g.generate.return_value = MagicMock(usage=None, files=[], summary="done", notes=[])
     g.model = "mock-model"
@@ -196,7 +196,7 @@ class TestNativeLoopRenderingOldRuns(unittest.TestCase):
         return e
 
     def _render(self, entry):
-        from openshard.cli.run_output import _render_native_demo_block, _native_meta_from_entry
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
         meta = _native_meta_from_entry(entry)
         lines = _render_native_demo_block(meta, detail="default")
         return "\n".join(lines)
@@ -319,13 +319,13 @@ class TestOsnLoopSummaryInRunHistory(unittest.TestCase):
         }
 
     def _render_full(self, entry):
-        from openshard.cli.run_output import _render_native_demo_block, _native_meta_from_entry
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
         meta = _native_meta_from_entry(entry)
         lines = _render_native_demo_block(meta, detail="full")
         return "\n".join(lines)
 
     def _render_default(self, entry):
-        from openshard.cli.run_output import _render_native_demo_block, _native_meta_from_entry
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
         meta = _native_meta_from_entry(entry)
         lines = _render_native_demo_block(meta, detail="default")
         return "\n".join(lines)
@@ -393,7 +393,9 @@ class TestOsnLoopSummaryInRunHistory(unittest.TestCase):
 
     def test_experimental_flag_attaches_summary_to_run_metadata(self):
         """End-to-end: executor with native_loop=experimental produces osn_loop_summary in log."""
-        from unittest.mock import MagicMock, patch as _patch
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as _patch
+
         from openshard.native.executor import NativeAgentExecutor
 
         logged = {}

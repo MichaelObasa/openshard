@@ -7,7 +7,7 @@ import click
 from click.testing import CliRunner
 
 from openshard.analysis.repo import RepoFacts
-from openshard.cli.main import cli, _render_log_entry
+from openshard.cli.main import _render_log_entry, cli
 from openshard.cli.run_output import _render_tier_dispatch_block
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry

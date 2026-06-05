@@ -13,9 +13,9 @@ import unittest
 from dataclasses import dataclass
 from typing import Any
 
+from openshard.cli.run_output import _render_native_demo_block
 from openshard.native.context import NativeOSNLoopStep, NativeOSNLoopSummary
 from openshard.native.osn_loop_recorder import OsnLoopRecorder
-from openshard.cli.run_output import _render_native_demo_block
 
 
 def _make_native_meta(**kwargs: Any) -> Any:

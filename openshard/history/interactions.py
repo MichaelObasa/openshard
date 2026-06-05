@@ -9,7 +9,11 @@ from pathlib import Path
 from openshard.history.jsonl_store import append_jsonl
 from openshard.safety.sanitize import (
     is_absolute_path as _is_absolute_path,
+)
+from openshard.safety.sanitize import (
     sanitize_metadata as _sanitize_metadata,
+)
+from openshard.safety.sanitize import (
     sanitize_text as _sanitize_text,
 )
 
@@ -74,7 +78,7 @@ def _sanitize_file_paths(paths) -> list[str]:
     return safe
 
 
-def sanitize_event(event: "DeveloperInteractionEvent") -> "DeveloperInteractionEvent":
+def sanitize_event(event: DeveloperInteractionEvent) -> DeveloperInteractionEvent:
     """Return a privacy-safe copy of ``event``.
 
     Caps + scrubs free text (drops absolute paths/secrets), keeps only relative file
@@ -110,7 +114,7 @@ class DeveloperInteractionEvent:
     run_id: str = ""
     timestamp: str = field(
         default_factory=lambda: datetime.datetime.now(
-            datetime.timezone.utc
+            datetime.UTC
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
     actor: str = "developer"

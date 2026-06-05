@@ -2,16 +2,17 @@ from __future__ import annotations
 
 import httpx
 
+# Re-export shared data types so existing imports from this module keep working.
 from openshard.providers.base import (
     BaseProvider,
+    ChatResponse,
+    ModelInfo,
     ProviderAuthError,
     ProviderError,
     ProviderRateLimitError,
+    UsageStats,
     guard_prompt_before_send,
 )
-
-# Re-export shared data types so existing imports from this module keep working.
-from openshard.providers.base import ChatResponse, ModelInfo, UsageStats
 from openshard.providers.cache import load_cache
 
 __all__ = [

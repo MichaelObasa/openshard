@@ -15,7 +15,6 @@ from openshard.native.sandbox_apply import (
 )
 from openshard.native.sandbox_diff import SandboxDiffResult
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------

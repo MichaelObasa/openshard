@@ -4,6 +4,7 @@ import unittest
 from dataclasses import asdict
 from types import SimpleNamespace
 
+from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
 from openshard.native.context import (
     NativeContextPacket,
     NativeContextUsageSummary,
@@ -18,7 +19,6 @@ from openshard.native.context import (
     build_native_context_usage_summary,
     render_native_context_usage_summary,
 )
-from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
 
 
 def _build(**kwargs) -> NativeContextUsageSummary:

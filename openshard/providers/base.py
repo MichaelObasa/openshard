@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from openshard.security.secret_scan import SecretScanResult, scrub_text_for_secrets
 
-
 # ---------------------------------------------------------------------------
 # Provider-neutral exceptions
 # ---------------------------------------------------------------------------

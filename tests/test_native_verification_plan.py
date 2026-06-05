@@ -5,13 +5,13 @@ import unittest
 from dataclasses import asdict
 from types import SimpleNamespace
 
+from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
 from openshard.native.context import (
     NativeChangeBudget,
     NativePlan,
     NativeVerificationPlan,
     build_native_verification_plan,
 )
-from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
 
 
 def _build(**kwargs) -> NativeVerificationPlan:

@@ -17,7 +17,7 @@ class NativeRunCheckpointEvent:
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     run_id: str = ""
     timestamp: str = field(
-        default_factory=lambda: datetime.datetime.now(datetime.timezone.utc).strftime(
+        default_factory=lambda: datetime.datetime.now(datetime.UTC).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         )
     )

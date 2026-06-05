@@ -43,6 +43,8 @@ from openshard.history.completeness import score_receipt
 from openshard.history.failures import classify_failure
 from openshard.history.shard_schema import (
     shard_changes_made as _changes_made,
+)
+from openshard.history.shard_schema import (
     shard_manual_fix_required as _manual_fix_required,
 )
 
@@ -145,7 +147,7 @@ def _band_for(score: int) -> str:
 
 def evaluate_trust_score(
     entry: dict,
-    receipt: "ShardReceipt",
+    receipt: ShardReceipt,
     *,
     interaction_event_types: list[str] | None = None,
 ) -> RunTrustScore:

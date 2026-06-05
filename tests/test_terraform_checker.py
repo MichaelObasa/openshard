@@ -6,8 +6,8 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from openshard.review.terraform_checker import scan_terraform
 from openshard.history.shard_contract import ShardFinding
+from openshard.review.terraform_checker import scan_terraform
 
 
 def _write_tf(tmp_path: Path, name: str, content: str) -> Path:
@@ -783,8 +783,10 @@ class TestGoldenDemoOutput(unittest.TestCase):
 
     def _render_last(self) -> str:
         from dataclasses import asdict
+
         import click
         from click.testing import CliRunner
+
         from openshard.cli.main import _render_log_entry
         findings = self._findings()
         entry = {
@@ -884,7 +886,10 @@ class TestGoldenDemoOutput(unittest.TestCase):
     # ── Compact receipt ──────────────────────────────────────────────────────
 
     def test_compact_receipt_at_most_5_findings(self):
-        from openshard.history.shard_contract import build_live_run_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_live_run_receipt,
+            render_compact_shard_receipt,
+        )
         findings = self._findings()
         receipt = build_live_run_receipt(
             task="/pack production-iac-hardening",
@@ -912,7 +917,9 @@ class TestGoldenDemoOutput(unittest.TestCase):
 
     def test_compact_receipt_has_more_line_when_over_5(self):
         from openshard.history.shard_contract import (
-            ShardFinding, build_live_run_receipt, render_compact_shard_receipt,
+            ShardFinding,
+            build_live_run_receipt,
+            render_compact_shard_receipt,
         )
         many = [ShardFinding(severity="High", message=f"Issue {i}") for i in range(10)]
         receipt = build_live_run_receipt(
@@ -936,7 +943,10 @@ class TestGoldenDemoOutput(unittest.TestCase):
         self.assertIn("more findings recorded", rendered)
 
     def test_compact_receipt_changed_zero(self):
-        from openshard.history.shard_contract import build_live_run_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_live_run_receipt,
+            render_compact_shard_receipt,
+        )
         receipt = build_live_run_receipt(
             task="/pack production-iac-hardening",
             run_id="golden-zero",
@@ -992,8 +1002,8 @@ class TestGoldenDemoOutput(unittest.TestCase):
 
     def test_no_duplicate_medium_header(self):
         """When metadata noise AND substantive Medium findings coexist, only one Medium header."""
-        from openshard.history.shard_contract import ShardFinding
         from openshard.cli.run_output import render_review_tldr_memo
+        from openshard.history.shard_contract import ShardFinding
         findings = [
             ShardFinding(severity="Critical", message="IAM role too broad — use least privilege"),
             ShardFinding(severity="Medium", message="TLS 1.0 enabled — disable in favor of TLS 1.2+"),
@@ -1007,6 +1017,7 @@ class TestGoldenDemoOutput(unittest.TestCase):
     def test_receipt_result_uses_two_count_format(self):
         """build_shard_receipt() with review findings must produce two-count Result."""
         from dataclasses import asdict
+
         from openshard.history.shard_contract import build_shard_receipt
         findings = self._findings()
         entry = {
@@ -1021,7 +1032,11 @@ class TestGoldenDemoOutput(unittest.TestCase):
 
     def test_compact_receipt_ellipsis_long_finding(self):
         """Finding messages longer than 79 chars are word-safely truncated with ellipsis."""
-        from openshard.history.shard_contract import build_live_run_receipt, render_compact_shard_receipt, ShardFinding
+        from openshard.history.shard_contract import (
+            ShardFinding,
+            build_live_run_receipt,
+            render_compact_shard_receipt,
+        )
         long_msg = "A" * 40 + " " + "B" * 40  # 81 chars with a word boundary at 40
         receipt = build_live_run_receipt(
             task="test",
@@ -1053,6 +1068,7 @@ class TestGoldenDemoOutput(unittest.TestCase):
         """render_post_run() must NOT echo 'Review complete' — pipeline.py owns that."""
         import click
         from click.testing import CliRunner
+
         from openshard.cli.run_output import render_post_run
         findings = self._findings()
 
@@ -1094,6 +1110,7 @@ class TestGoldenDemoOutput(unittest.TestCase):
         """render_post_run() with readonly_task=True → compact receipt shows Sandbox Off."""
         import click
         from click.testing import CliRunner
+
         from openshard.cli.run_output import render_post_run
 
         @click.command()
@@ -1159,6 +1176,7 @@ class TestGoldenDemoOutput(unittest.TestCase):
         """
         import click
         from click.testing import CliRunner
+
         from openshard.cli.run_output import render_post_run
         findings = self._findings()
 
@@ -1199,6 +1217,7 @@ class TestGoldenDemoOutput(unittest.TestCase):
     def test_last_receipt_result_two_count(self):
         """build_shard_receipt() with review findings → Result contains both counts."""
         from dataclasses import asdict
+
         from openshard.history.shard_contract import build_shard_receipt
         findings = self._findings()
         entry = {
@@ -1214,10 +1233,12 @@ class TestGoldenDemoOutput(unittest.TestCase):
 
     def test_model_line_hidden_in_more_mode(self):
         """_render_log_entry() with detail='more' must not print a standalone 'Model:' line."""
+        from dataclasses import asdict
+
         import click
         from click.testing import CliRunner
+
         from openshard.cli.main import _render_log_entry
-        from dataclasses import asdict
         findings = self._findings()
         entry = {
             "task": "/pack production-iac-hardening",
@@ -1247,8 +1268,9 @@ class TestProviderDetection(unittest.TestCase):
     """detect_terraform_providers() identifies cloud providers from .tf content."""
 
     def _detect(self, content: str) -> frozenset[str]:
-        from openshard.review.terraform_checker import detect_terraform_providers
         import tempfile
+
+        from openshard.review.terraform_checker import detect_terraform_providers
         with tempfile.TemporaryDirectory() as d:
             p = Path(d)
             _write_tf(p, "main.tf", content)
@@ -1287,8 +1309,9 @@ class TestProviderDetection(unittest.TestCase):
         self.assertEqual(providers, frozenset())
 
     def test_no_tf_files_returns_empty(self):
-        from openshard.review.terraform_checker import detect_terraform_providers
         import tempfile
+
+        from openshard.review.terraform_checker import detect_terraform_providers
         with tempfile.TemporaryDirectory() as d:
             result = detect_terraform_providers(Path(d))
         self.assertEqual(result, frozenset())

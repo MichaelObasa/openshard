@@ -16,7 +16,6 @@ from dataclasses import asdict
 from typing import Any
 from unittest.mock import patch
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -178,7 +177,7 @@ class TestOSNProgressMemoryDefaults(unittest.TestCase):
         self.assertEqual(OSNProgressMemory().source, "osn_progress_memory_v1")
 
     def test_valid_confidence_values_stable(self):
-        from openshard.native.progress_memory import OSNProgressMemory, _VALID_CONFIDENCE
+        from openshard.native.progress_memory import _VALID_CONFIDENCE, OSNProgressMemory
         for val in ("low", "medium", "high", "unknown"):
             self.assertIn(val, _VALID_CONFIDENCE)
             m = OSNProgressMemory(confidence=val)
@@ -631,8 +630,8 @@ class TestOSNProgressMemoryIntegration(unittest.TestCase):
         json.dumps(d["osn_progress_memory"])  # must not raise
 
     def test_native_meta_from_entry_reads_progress_memory(self):
-        from openshard.native.progress_memory import OSNProgressMemory
         from openshard.cli.run_output import _native_meta_from_entry
+        from openshard.native.progress_memory import OSNProgressMemory
         pm_dict = asdict(OSNProgressMemory(enabled=True, confidence="medium", summary="snapshot"))
         entry = {
             "workflow": "native",
@@ -645,8 +644,8 @@ class TestOSNProgressMemoryIntegration(unittest.TestCase):
         self.assertEqual(pm.get("enabled") if isinstance(pm, dict) else getattr(pm, "enabled", None), True)
 
     def test_history_entry_renders_osn_progress(self):
-        from openshard.native.progress_memory import OSNProgressMemory
         from openshard.cli.run_output import _native_meta_from_entry
+        from openshard.native.progress_memory import OSNProgressMemory
         pm_dict = asdict(OSNProgressMemory(
             enabled=True, confidence="medium", summary="repo observed",
             relevant_files=["openshard/native/executor.py"],
@@ -659,6 +658,7 @@ class TestOSNProgressMemoryIntegration(unittest.TestCase):
 
     def test_no_shell_command_executed_during_build(self):
         import subprocess
+
         from openshard.native.progress_memory import build_osn_progress_memory
         obs = _make_obs(stack_signals=["python"])
         loop = _make_loop_summary()

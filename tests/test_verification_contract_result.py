@@ -6,8 +6,8 @@ from dataclasses import asdict
 
 from openshard.native.context import (
     NativeContractCheckResult,
-    NativeVerificationContractResult,
     NativeValidationContract,
+    NativeVerificationContractResult,
     NativeVerificationLoop,
     build_native_verification_contract_result,
 )

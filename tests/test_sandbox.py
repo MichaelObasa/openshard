@@ -4,16 +4,20 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import click
 from click.testing import CliRunner
 
-from openshard.native.context import NativeSandboxMeta
-from openshard.native.sandbox import _safe_branch_name, _detect_git_root, _detect_git_state, create_run_sandbox
-from openshard.cli.run_output import _native_meta_from_entry
-from openshard.cli.run_output import _render_native_demo_block
 from openshard.cli.main import _render_log_entry
+from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
+from openshard.native.context import NativeSandboxMeta
+from openshard.native.sandbox import (
+    _detect_git_root,
+    _detect_git_state,
+    _safe_branch_name,
+    create_run_sandbox,
+)
 from openshard.security.paths import UnsafePathError, resolve_safe_repo_path
 
 

@@ -7,12 +7,13 @@ import click
 from click.testing import CliRunner
 
 from openshard.cli.main import _model_label, _render_log_entry
+from openshard.cli.run_output import _native_meta_from_entry
 from openshard.history.shard_contract import display_model_name as _sc_display_model_name
-from openshard.routing.engine import MODEL_MAIN, MODEL_STRONG
 from openshard.native.context import (
     NativeContextQualityScore,
     NativeModelCandidateScore,
     NativeModelCandidateScoring,
+    NativeModelPolicyReceipt,
     NativeModelRoleDecision,
     NativeModelSelectionDecision,
     NativeObservation,
@@ -22,9 +23,9 @@ from openshard.native.context import (
     NativeValidationContract,
     build_native_context_provenance,
     build_native_model_candidate_scoring,
+    build_native_model_policy,
 )
-from openshard.cli.run_output import _native_meta_from_entry
-from openshard.native.context import build_native_model_policy, NativeModelPolicyReceipt
+from openshard.routing.engine import MODEL_MAIN, MODEL_STRONG
 
 
 def _render(entry: dict, detail: str = "more") -> str:
@@ -414,6 +415,7 @@ class TestLastNativeInspection(unittest.TestCase):
 
     def test_render_native_demo_block_shows_backend_builtin(self):
         from types import SimpleNamespace
+
         from openshard.cli.run_output import _render_native_demo_block
 
         meta = SimpleNamespace(
@@ -434,6 +436,7 @@ class TestLastNativeInspection(unittest.TestCase):
 
     def test_render_native_demo_block_shows_backend_unavailable(self):
         from types import SimpleNamespace
+
         from openshard.cli.run_output import _render_native_demo_block
 
         meta = SimpleNamespace(
@@ -454,6 +457,7 @@ class TestLastNativeInspection(unittest.TestCase):
 
     def test_render_native_demo_block_no_backend_field_no_error(self):
         from types import SimpleNamespace
+
         from openshard.cli.run_output import _render_native_demo_block
 
         meta = SimpleNamespace(
@@ -470,6 +474,7 @@ class TestLastNativeInspection(unittest.TestCase):
 
     def test_backend_line_appears_after_repo_and_before_observation(self):
         from types import SimpleNamespace
+
         from openshard.cli.run_output import _render_native_demo_block
 
         meta = SimpleNamespace(
@@ -720,6 +725,7 @@ class TestPatchProposalRendering(unittest.TestCase):
 
     def test_proposal_metadata_contains_no_raw_content(self):
         from dataclasses import asdict
+
         from openshard.native.context import NativePatchProposal
         proposal = NativePatchProposal(
             file_count=1,
@@ -1895,6 +1901,7 @@ class TestNativeValidationContractRendering(unittest.TestCase):
     def test_pipeline_dict_round_trips_via_native_meta_from_entry(self):
         """Prove the full save→load path: asdict output reconstructed by _native_meta_from_entry."""
         from dataclasses import asdict
+
         from openshard.cli.run_output import _native_meta_from_entry
         from openshard.native.context import NativeValidationContract
         original = NativeValidationContract(
@@ -3578,7 +3585,7 @@ class TestToolSearchEventsRendering(unittest.TestCase):
 
     def test_dict_backed_events_render_same_as_object_backed(self):
         """Regression: dict events (from saved JSONL) render correctly via _loop_event_value."""
-        from openshard.cli.run_output import _render_native_demo_block, _native_meta_from_entry
+        from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
         events_as_dicts = [
             {"tool_name": "search_repo", "result_quality": "weak", "result_count": 2,
              "selected_reason": "read-search strategy=default", "query": "main",
@@ -4084,7 +4091,10 @@ class TestReviewRiskRendering(unittest.TestCase):
         }
 
     def test_high_risk_from_form_factor_shown_in_compact_receipt(self):
-        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_compact_shard_receipt,
+        )
         entry = self._entry_with_risk("high")
         receipt = build_shard_receipt(entry)
         rendered = render_compact_shard_receipt(receipt)
@@ -4797,7 +4807,10 @@ class TestModelAdvisoryRendering(unittest.TestCase):
         self.assertNotIn("MODEL ADVISORY", out)
 
     def test_compact_receipt_no_advisory_row(self):
-        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_compact_shard_receipt,
+        )
         receipt = build_shard_receipt(self._plain_entry(self._ADVISORY))
         out = render_compact_shard_receipt(receipt)
         self.assertNotIn("Advisory", out)
@@ -4893,7 +4906,10 @@ class TestFeedbackRoutingAdvisoryRendering(unittest.TestCase):
     # -- compact receipt never shows advisory --
 
     def test_compact_receipt_never_shows_feedback_advisory(self):
-        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_compact_shard_receipt,
+        )
         receipt = build_shard_receipt(self._entry_with_fra())
         out = render_compact_shard_receipt(receipt)
         self.assertNotIn("FEEDBACK ROUTING ADVISORY", out)

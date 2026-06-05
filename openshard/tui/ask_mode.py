@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from openshard.models.registry import all_models, display_name_for, models_by_capability, models_by_role
+from openshard.models.registry import (
+    all_models,
+    display_name_for,
+    models_by_capability,
+    models_by_role,
+)
 
 _ASK_FALLBACK = (
     "Ask Mode v1 can answer OpenShard/product questions only.\n"

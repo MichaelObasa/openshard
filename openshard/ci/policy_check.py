@@ -52,7 +52,7 @@ class CICheckResult:
 _verification_status = verification_status_from_receipt
 
 
-def _independent_manual_review(entry: dict, receipt: "ShardReceipt") -> bool:
+def _independent_manual_review(entry: dict, receipt: ShardReceipt) -> bool:
     """Manual review required by a gate independent of verification.
 
     These always block CI: denied approval, progress blockers, retry diagnosis,
@@ -79,7 +79,7 @@ def _independent_manual_review(entry: dict, receipt: "ShardReceipt") -> bool:
     return False
 
 
-def _manual_review_required(entry: dict, receipt: "ShardReceipt") -> bool:
+def _manual_review_required(entry: dict, receipt: ShardReceipt) -> bool:
     """Full manual-review detection, including the verification contract signal.
 
     Used by failure classification and trust scoring as a weak signal. CI uses
@@ -100,7 +100,7 @@ _secret_scan_findings = secret_scan_finding_count
 
 
 def evaluate_ci_check(
-    entry: dict, receipt: "ShardReceipt", *, strict: bool = False
+    entry: dict, receipt: ShardReceipt, *, strict: bool = False
 ) -> CICheckResult:
     """Evaluate a single run entry/receipt into a CI verdict. Never raises."""
     verification = _verification_status(receipt)

@@ -3,11 +3,11 @@ from __future__ import annotations
 import uuid
 
 from openshard.native.context import (
-    NativeOSNLoopStep,
-    NativeOSNLoopSummary,
     _MAX_REPEATED_BLOCKED_TOOL,
     _MAX_RETRY_COUNT,
     _MAX_STEP_EVENTS_RECORDED,
+    NativeOSNLoopStep,
+    NativeOSNLoopSummary,
     normalize_osn_stop_reason,
 )
 

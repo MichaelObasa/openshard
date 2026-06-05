@@ -5,10 +5,10 @@ import json
 import pytest
 
 from openshard.execution.generator import (
+    _VALID_CHANGE_TYPES,
     ChangedFile,
     ExecutionGenerator,
     ExecutionResult,
-    _VALID_CHANGE_TYPES,
 )
 from openshard.providers.base import ProviderError
 

@@ -8,7 +8,6 @@ from openshard.scoring.policy import EXACT_BONUS, FAMILY_BONUS, policy_bonus
 from openshard.scoring.requirements import TaskRequirements
 from openshard.scoring.scorer import score_model, select_candidate
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -78,7 +78,7 @@ def render_check_actions_section(checks: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_evidence_section(evidence: list["FileEvidence"]) -> str:
+def render_evidence_section(evidence: list[FileEvidence]) -> str:
     if not evidence:
         return ""
     lines = ["[bold]EVIDENCE[/bold]"]
@@ -109,7 +109,7 @@ def render_evidence_section(evidence: list["FileEvidence"]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_result_section(receipt: "ShardReceipt") -> str:
+def render_result_section(receipt: ShardReceipt) -> str:
     rows: list[str] = []
 
     if receipt.result and receipt.result not in _NOT_RECORDED:

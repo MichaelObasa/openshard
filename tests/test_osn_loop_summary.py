@@ -14,12 +14,12 @@ from openshard.native.context import (
     NativeOSNLoopSummary,
     OSNLoopMeta,
 )
-from openshard.native.osn_loop_recorder import OsnLoopRecorder, should_enable_osn_recorder
 from openshard.native.executor import (
-    NativeAgentExecutor,
     _LOOP_ALLOWED_TOOLS,
+    NativeAgentExecutor,
     _is_safe_osn_tool_name,
 )
+from openshard.native.osn_loop_recorder import OsnLoopRecorder, should_enable_osn_recorder
 
 
 def _make_executor(native_loop: str | None = "experimental"):
@@ -737,7 +737,7 @@ class TestOsnLoopRecorderCounters(unittest.TestCase):
 class TestNormalizeOsnStopReason(unittest.TestCase):
 
     def setUp(self):
-        from openshard.native.context import normalize_osn_stop_reason, _VALID_OSN_STOP_REASONS
+        from openshard.native.context import _VALID_OSN_STOP_REASONS, normalize_osn_stop_reason
         self._normalize = normalize_osn_stop_reason
         self._valid = _VALID_OSN_STOP_REASONS
 

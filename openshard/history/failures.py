@@ -33,6 +33,8 @@ from openshard.ci.policy_check import (
 )
 from openshard.history.shard_schema import (
     shard_changes_made as _changes_made,
+)
+from openshard.history.shard_schema import (
     shard_manual_fix_required as _manual_fix_required,
 )
 
@@ -121,7 +123,7 @@ def _safe_error_class(value: object) -> str | None:
     return token
 
 
-def _policy_denied(receipt: "ShardReceipt") -> bool:
+def _policy_denied(receipt: ShardReceipt) -> bool:
     """True when an approval was required-but-denied, or a policy decision denied."""
     if receipt.approval_required and not receipt.approval_granted:
         return True
@@ -131,7 +133,7 @@ def _policy_denied(receipt: "ShardReceipt") -> bool:
     )
 
 
-def _feedback_outcome(receipt: "ShardReceipt") -> str | None:
+def _feedback_outcome(receipt: ShardReceipt) -> str | None:
     """Extract the developer feedback outcome string, if any."""
     df = receipt.developer_feedback
     if not isinstance(df, dict):
@@ -163,7 +165,7 @@ class FailureReport:
     failures: list[FailureClassification] = field(default_factory=list)
 
 
-def classify_failure(entry: dict, receipt: "ShardReceipt") -> FailureClassification:
+def classify_failure(entry: dict, receipt: ShardReceipt) -> FailureClassification:
     """Classify a single run entry/receipt into one failure category. Never raises."""
     shard_id = receipt.shard_id or ""
     try:
@@ -233,7 +235,7 @@ def classify_failure(entry: dict, receipt: "ShardReceipt") -> FailureClassificat
 
 
 def evaluate_failures(
-    pairs: list[tuple[dict, "ShardReceipt"]],
+    pairs: list[tuple[dict, ShardReceipt]],
 ) -> FailureReport:
     """Aggregate failure taxonomy over (entry, receipt) pairs. Never raises.
 

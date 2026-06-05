@@ -21,7 +21,7 @@ _VERIFICATION_TOKENS: frozenset[str] = frozenset(
 )
 
 
-def verification_status_from_receipt(receipt: "ShardReceipt") -> str:
+def verification_status_from_receipt(receipt: ShardReceipt) -> str:
     """Map a receipt's status into a verification enum.
 
     Returns one of: ``passed`` | ``failed`` | ``skipped`` | ``manual_review`` |
@@ -51,7 +51,7 @@ def verification_status_from_receipt(receipt: "ShardReceipt") -> str:
         return "unknown"
 
 
-def secret_scan_finding_count(receipt: "ShardReceipt") -> int:
+def secret_scan_finding_count(receipt: ShardReceipt) -> int:
     """Count redacted secret-scan evidence capsules on the receipt."""
     try:
         return sum(

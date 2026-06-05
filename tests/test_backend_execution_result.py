@@ -60,6 +60,5 @@ class TestBackendExecutionResultDefaults(unittest.TestCase):
 
 import unittest.mock  # noqa: E402 — after class to avoid circular at module level
 
-
 if __name__ == "__main__":
     unittest.main()

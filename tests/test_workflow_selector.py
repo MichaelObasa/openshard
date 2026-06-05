@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+
 from openshard.analysis.repo import RepoFacts
 from openshard.routing.workflow_selector import (
     MIN_CATEGORY_RUNS,

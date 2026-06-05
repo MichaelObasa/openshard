@@ -17,7 +17,6 @@ from openshard.cli.run_output import _safe_console_text, build_stage_displays, r
 from openshard.execution.stages import Stage, StageRun
 from openshard.routing.engine import RoutingDecision
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -387,8 +386,9 @@ class TestTimelineWordingGuards(unittest.TestCase):
 
 class TestOldEntriesUnaffected(unittest.TestCase):
     def test_last_rendering_still_contains_receipt_saved(self):
-        from openshard.cli.run_output import _render_native_receipt
         from types import SimpleNamespace as NS
+
+        from openshard.cli.run_output import _render_native_receipt
 
         meta = NS(
             final_report=NS(
@@ -421,6 +421,7 @@ class TestReceiptPanel(unittest.TestCase):
     def _render_rich(self, stages, mode_label=None, cost_str=None) -> str:
         import click
         from click.testing import CliRunner
+
         from openshard.cli.ui.console import make_console
         from openshard.cli.ui.run_screen import render_receipt_panel
 
@@ -433,6 +434,7 @@ class TestReceiptPanel(unittest.TestCase):
     def _render_plain(self, stages, mode_label=None, cost_str=None) -> str:
         import click
         from click.testing import CliRunner
+
         from openshard.cli.ui.run_screen import render_receipt_panel_plain
 
         @click.command()

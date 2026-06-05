@@ -8,72 +8,73 @@ from typing import Any
 
 from openshard.analysis.repo import RepoFacts
 from openshard.execution.generator import ExecutionGenerator, ExecutionResult
-from openshard.security.secret_scan import SecretScanResult, scrub_text_for_secrets
+from openshard.native.backends import DeepAgentsAdapterMeta, build_deepagents_adapter_meta
 from openshard.native.context import (
     CompactRunState,
-    NativeClarificationRequest,
-    NativeCommandPolicyPreview,
-    NativeContextBudget,
     NativeApprovalReceipt,
     NativeApprovalRequest,
+    NativeCandidateSummary,
     NativeChangeBudget,
     NativeChangeBudgetPreview,
     NativeChangeBudgetSoftGate,
+    NativeClarificationRequest,
+    NativeCommandPolicyPreview,
+    NativeContextBudget,
     NativeContextPacket,
+    NativeContextProvenance,
     NativeContextQualityAdvisory,
     NativeContextQualityScore,
-    NativeContextProvenance,
     NativeContextUsageSummary,
     NativeDiffReview,
+    NativeEditLoopSummary,
     NativeEvidence,
     NativeFailureMemory,
+    NativeFailureMemoryRoutingAdvisory,
     NativeFileContext,
     NativeFileSnippet,
     NativeFinalReport,
-    NativeObservation,
-    NativePatchProposal,
-    NativePlan,
-    NativeVerificationCommandSummary,
-    NativeVerificationLoop,
-    NativeVerificationPlan,
-    NativeRunTrustScore,
-    NativeModelSelectionDecision,
     NativeModelCandidateScoring,
     NativeModelPolicy,
     NativeModelPolicyReceipt,
+    NativeModelSelectionDecision,
+    NativeObservation,
+    NativeOSNLoopSummary,
+    NativePatchProposal,
+    NativePlan,
+    NativePlanLedger,
     NativeRoutingPreview,
     NativeRoutingReceipt,
+    NativeRunTrustScore,
+    NativeSandboxMeta,
     NativeTierDispatchReceipt,
     NativeValidationContract,
+    NativeVerificationCommandSummary,
     NativeVerificationContractResult,
-    NativeOSNLoopSummary,
-    NativeSandboxMeta,
-    NativeFailureMemoryRoutingAdvisory,
-    NativeCandidateSummary,
-    NativeEditLoopSummary,
-    NativePlanLedger,
+    NativeVerificationLoop,
+    NativeVerificationPlan,
     OSNLoopMeta,
     OSNLoopStep,
+    OSNObservationPacket,
     build_initial_context_budget,
     build_native_approval_receipt,
     build_native_budget_gate_approval_request,
-    build_native_clarification_request,
-    build_native_command_policy_preview,
-    build_native_context_packet,
     build_native_change_budget,
     build_native_change_budget_preview,
     build_native_change_budget_soft_gate,
+    build_native_clarification_request,
+    build_native_command_policy_preview,
+    build_native_context_packet,
+    build_native_context_provenance,
     build_native_context_quality_advisory,
     build_native_context_quality_score,
-    build_native_context_provenance,
     build_native_context_usage_summary,
     build_native_diff_review,
     build_native_final_report,
+    build_native_model_policy,
     build_native_patch_proposal,
+    build_native_validation_contract,
     build_native_verification_command_summary,
     build_native_verification_plan,
-    build_native_validation_contract,
-    build_native_model_policy,
     build_osn_loop_meta,
     normalize_osn_stop_reason,
     render_native_change_budget,
@@ -84,22 +85,26 @@ from openshard.native.context import (
     render_native_plan,
     render_native_validation_contract,
     render_osn_loop_context,
-    OSNObservationPacket,
     render_osn_observation_context,
 )
-from openshard.native.verification_contract import OSNVerificationContract
-from openshard.native.retry_diagnosis import OSNRetryDiagnosis
+from openshard.native.loop import NativeLoopTrace
 from openshard.native.progress_memory import OSNProgressMemory
 from openshard.native.repo_context import (
     NativeRepoContextSummary,
     build_repo_context_summary,
     render_repo_context_summary,
 )
-from openshard.native.backends import DeepAgentsAdapterMeta, build_deepagents_adapter_meta
-from openshard.native.loop import NativeLoopTrace
+from openshard.native.retry_diagnosis import OSNRetryDiagnosis
 from openshard.native.skills import match_builtin_skills, selected_skill_names
 from openshard.native.tool_runner import NativeToolRunner
-from openshard.native.tools import NativeToolCall, NativeToolResult, NativeToolSearchEvent, list_native_tools
+from openshard.native.tools import (
+    NativeToolCall,
+    NativeToolResult,
+    NativeToolSearchEvent,
+    list_native_tools,
+)
+from openshard.native.verification_contract import OSNVerificationContract
+from openshard.security.secret_scan import SecretScanResult, scrub_text_for_secrets
 
 
 @dataclass

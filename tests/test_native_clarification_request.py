@@ -5,13 +5,13 @@ import unittest
 from dataclasses import asdict
 from types import SimpleNamespace
 
+from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
 from openshard.native.context import (
     NativeClarificationRequest,
     NativeVerificationPlan,
     build_native_clarification_request,
     build_native_verification_plan,
 )
-from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
 
 
 def _vplan(task_type: str = "unknown", clarification_needed: list[str] | None = None) -> NativeVerificationPlan:

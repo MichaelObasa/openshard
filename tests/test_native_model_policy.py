@@ -4,9 +4,9 @@ import json
 import unittest
 from dataclasses import asdict
 
+from openshard.cli.run_output import _native_meta_from_entry
 from openshard.native.context import NativeModelPolicy, build_native_model_policy
 from openshard.native.executor import NativeRunMeta
-from openshard.cli.run_output import _native_meta_from_entry
 
 
 class TestNativeModelPolicyDefaults(unittest.TestCase):

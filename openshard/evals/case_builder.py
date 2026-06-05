@@ -41,7 +41,7 @@ _EVAL_ID_MAX_LEN = 48
 _SECRET_TOKEN_LEN = 24
 
 
-def is_eligible(classification: "FailureClassification") -> bool:
+def is_eligible(classification: FailureClassification) -> bool:
     """True when the run carries a useful learning signal worth an eval case.
 
     The failure taxonomy is the single source of eligibility truth: any category
@@ -133,14 +133,14 @@ def _sanitise_id_fragment(value: object) -> str:
     return kept[:_EVAL_ID_MAX_LEN].strip("-_")
 
 
-def make_eval_id(receipt: "ShardReceipt", created_at: str) -> str:
+def make_eval_id(receipt: ShardReceipt, created_at: str) -> str:
     """Build a deterministic, filename-safe eval id from an untrusted shard id."""
     return "eval-" + _safe_eval_id(receipt.shard_id, created_at)
 
 
 def build_eval_case(
-    receipt: "ShardReceipt",
-    classification: "FailureClassification",
+    receipt: ShardReceipt,
+    classification: FailureClassification,
     created_at: str,
 ) -> dict:
     """Assemble a safe, versioned eval-case dict from a receipt + classification.

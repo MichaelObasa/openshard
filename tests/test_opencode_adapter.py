@@ -85,6 +85,7 @@ class TestInstallGuidance(unittest.TestCase):
 class TestAdapterDoctor(unittest.TestCase):
     def test_output_says_detected_when_available(self):
         from click.testing import CliRunner
+
         from openshard.cli.main import cli
 
         with patch("openshard.execution.opencode_adapter.shutil.which", return_value="/usr/bin/opencode"):
@@ -95,6 +96,7 @@ class TestAdapterDoctor(unittest.TestCase):
 
     def test_output_says_not_installed_when_missing(self):
         from click.testing import CliRunner
+
         from openshard.cli.main import cli
 
         with patch("openshard.execution.opencode_adapter.shutil.which", return_value=None):
@@ -107,6 +109,7 @@ class TestAdapterDoctor(unittest.TestCase):
 
     def test_output_includes_install_options_when_missing(self):
         from click.testing import CliRunner
+
         from openshard.cli.main import cli
 
         with patch("openshard.execution.opencode_adapter.shutil.which", return_value=None):
@@ -118,6 +121,7 @@ class TestAdapterDoctor(unittest.TestCase):
 
     def test_doctor_never_calls_subprocess(self):
         from click.testing import CliRunner
+
         from openshard.cli.main import cli
 
         with patch("subprocess.run") as mock_sub:
@@ -130,6 +134,7 @@ class TestAdapterDoctor(unittest.TestCase):
 
     def test_output_shows_path_when_detected(self):
         from click.testing import CliRunner
+
         from openshard.cli.main import cli
 
         with patch("openshard.execution.opencode_adapter.shutil.which", return_value="/usr/local/bin/opencode"):
@@ -435,14 +440,20 @@ class TestAdapterShardReceipt(unittest.TestCase):
         self.assertFalse(receipt.adapter_available)
 
     def test_compact_receipt_does_not_include_adapter_section(self):
-        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_compact_shard_receipt,
+        )
 
         receipt = build_shard_receipt(self._opencode_entry())
         rendered = render_compact_shard_receipt(receipt)
         self.assertNotIn("ADAPTER", rendered)
 
     def test_compact_receipt_renders_without_crashing(self):
-        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_compact_shard_receipt,
+        )
 
         receipt = build_shard_receipt(self._opencode_entry())
         rendered = render_compact_shard_receipt(receipt)

@@ -3,12 +3,12 @@ from __future__ import annotations
 import unittest
 
 from openshard.history.feedback_scoring import (
-    MIN_EVIDENCE,
     _ADJ_MAX,
     _ADJ_MIN,
+    MIN_EVIDENCE,
     _feedback_signal,
-    compute_feedback_adjustments,
     compute_feedback_adjustment_reasons,
+    compute_feedback_adjustments,
 )
 
 

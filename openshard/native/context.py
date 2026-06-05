@@ -5,6 +5,8 @@ from typing import Any
 
 from openshard.native.dispatch import (
     _ROLE_DEFAULT_TIER as _DEFAULT_ROLE_TIERS,
+)
+from openshard.native.dispatch import (
     _ROLE_VALID_TIERS as _VALID_TIERS_BY_ROLE,
 )
 
@@ -103,7 +105,7 @@ class NativeVerificationLoop:
     output_chars: int = 0
     truncated: bool = False
     duration_seconds: float | None = None
-    retry_metadata: "RetryMetadata | None" = None
+    retry_metadata: RetryMetadata | None = None
     # Per-check proof wiring (v1: one command per plan)
     check_attempted: list[str] = field(default_factory=list)
     check_passed: list[str] = field(default_factory=list)
@@ -1756,7 +1758,7 @@ def build_native_context_provenance(
     osn_loop: Any | None = None,
     skills_context: str | None = None,
     injected_source_names: set[str] | None = None,
-) -> "NativeContextProvenance":
+) -> NativeContextProvenance:
     _inj = injected_source_names or set()
 
     def _src(name: str, used: bool, item_count: int, summary: str) -> NativeContextSource:
@@ -1957,7 +1959,7 @@ def build_native_context_provenance(
     )
 
 
-def render_native_context_provenance(provenance: "NativeContextProvenance | None") -> str:
+def render_native_context_provenance(provenance: NativeContextProvenance | None) -> str:
     """Audit/display renderer — NOT injected into model prompt."""
     if provenance is None:
         return ""
@@ -2178,7 +2180,7 @@ def build_native_run_trust_score(
     )
 
 
-def render_native_run_trust_score(score: "NativeRunTrustScore | None", detail: str = "compact") -> str:
+def render_native_run_trust_score(score: NativeRunTrustScore | None, detail: str = "compact") -> str:
     if score is None:
         return ""
     _score = getattr(score, "score", 0)
@@ -2359,7 +2361,7 @@ def build_native_model_selection_decision(
 
 
 def render_native_model_selection_decision(
-    msd: "NativeModelSelectionDecision | None",
+    msd: NativeModelSelectionDecision | None,
     detail: str = "compact",
 ) -> str:
     if msd is None:
@@ -2722,7 +2724,7 @@ def _ns_to_dict(obj: object) -> dict:
 
 
 def render_native_model_candidate_scoring(
-    scoring: "NativeModelCandidateScoring | None",
+    scoring: NativeModelCandidateScoring | None,
     detail: str = "compact",
 ) -> str:
     if scoring is None:
@@ -2785,7 +2787,7 @@ class NativeModelPolicy:
     warnings: list[str] = field(default_factory=list)
 
 
-def build_native_model_policy(mode: str | None) -> "NativeModelPolicy":
+def build_native_model_policy(mode: str | None) -> NativeModelPolicy:
     """Parse a mode string into a NativeModelPolicy. Enforced in candidate scoring."""
     if mode is None or mode == "auto":
         return NativeModelPolicy()
@@ -2836,7 +2838,7 @@ def build_native_model_policy_receipt(
     model_selection_decision_before=None,
     model_selection_decision_after=None,
     model_candidate_scoring=None,
-) -> "NativeModelPolicyReceipt":
+) -> NativeModelPolicyReceipt:
     _mode = "auto"
     if model_policy is not None:
         _mode = (
@@ -2938,7 +2940,7 @@ def build_native_routing_preview(
     model_selection_decision=None,
     model_policy_receipt=None,
     run_trust_score=None,
-) -> "NativeRoutingPreview":
+) -> NativeRoutingPreview:
     def _get(obj, key, default=None):
         if obj is None:
             return default
@@ -3016,7 +3018,7 @@ def build_native_routing_receipt(
     routing_preview=None,
     model_policy_receipt=None,
     run_trust_score=None,
-) -> "NativeRoutingReceipt":
+) -> NativeRoutingReceipt:
     def _get(obj, key, default=None):
         if obj is None:
             return default
@@ -3055,10 +3057,10 @@ def build_native_routing_receipt(
 
 
 def sync_native_model_selection_decision_with_candidate_scoring(
-    model_selection_decision: "NativeModelSelectionDecision | None",
-    model_candidate_scoring: "NativeModelCandidateScoring | None",
-    model_policy: "NativeModelPolicy | None" = None,
-) -> "NativeModelSelectionDecision | None":
+    model_selection_decision: NativeModelSelectionDecision | None,
+    model_candidate_scoring: NativeModelCandidateScoring | None,
+    model_policy: NativeModelPolicy | None = None,
+) -> NativeModelSelectionDecision | None:
     if model_selection_decision is None or model_candidate_scoring is None:
         return model_selection_decision
     selected = getattr(model_candidate_scoring, "selected_by_role", {}) or {}
@@ -3138,7 +3140,7 @@ def build_native_tier_dispatch_receipt(
     executor_model_actual: str | None = None,
     validator_model_actual: str | None = None,
     validator_dispatch_status: str = "",
-) -> "NativeTierDispatchReceipt":
+) -> NativeTierDispatchReceipt:
     """Build a tier dispatch receipt.
 
     Priority for tier source:
@@ -3319,7 +3321,7 @@ def build_native_failure_memory_routing_advisory(
 
 
 def render_native_failure_memory_routing_advisory(
-    advisory: "NativeFailureMemoryRoutingAdvisory | dict | None",
+    advisory: NativeFailureMemoryRoutingAdvisory | dict | None,
     detail: str = "compact",
 ) -> str:
     if advisory is None:
@@ -3505,7 +3507,7 @@ def record_native_edit_loop_attempt(
 
 
 def render_native_edit_loop_summary(
-    summary: "NativeEditLoopSummary | Any | None",
+    summary: NativeEditLoopSummary | Any | None,
     detail: str = "compact",
 ) -> str:
     if summary is None:
@@ -3596,13 +3598,13 @@ def record_native_candidate_attempt(
     return summary
 
 
-def score_native_candidate_attempt(candidate: "Any") -> "tuple[float, list[str]]":
+def score_native_candidate_attempt(candidate: Any) -> tuple[float, list[str]]:
     """Compute a deterministic score for a single candidate attempt.
 
     Supports dataclass, dict, and SimpleNamespace candidates.
     Returns (score, reasons) without mutating the candidate.
     """
-    def _g(key: str, default: "Any" = None) -> "Any":
+    def _g(key: str, default: Any = None) -> Any:
         if isinstance(candidate, dict):
             return candidate.get(key, default)
         return getattr(candidate, key, default)
@@ -3684,7 +3686,7 @@ def select_native_candidate(summary: NativeCandidateSummary) -> NativeCandidateS
 
 
 def render_native_candidate_summary(
-    summary: "NativeCandidateSummary | Any | None",
+    summary: NativeCandidateSummary | Any | None,
     detail: str = "compact",
 ) -> str:
     """Supports dataclass, SimpleNamespace, and dict objects."""

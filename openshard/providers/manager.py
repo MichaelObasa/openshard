@@ -97,7 +97,7 @@ class ProviderManager:
             cache["cached_at"] = time.time()
             save_cache(cache)
 
-        generated_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        generated_at = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         return UnifiedInventory(
             models=entries,
             generated_at=generated_at,

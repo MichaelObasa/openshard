@@ -5,9 +5,10 @@ from unittest.mock import patch
 
 import pytest
 
-from openshard.security.paths import UnsafePathError, resolve_safe_repo_path
 from openshard.cli.main import _write_files
 from openshard.execution.generator import ChangedFile
+from openshard.security.paths import UnsafePathError, resolve_safe_repo_path
+
 
 def _symlink_ok() -> bool:
     import tempfile

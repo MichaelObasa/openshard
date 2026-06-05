@@ -4,7 +4,7 @@ import dataclasses
 import shutil
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from openshard.evals.registry import EvalTask
@@ -44,7 +44,7 @@ def run_eval_task(
     workspace_root: Path,
 ) -> EvalResult:
     start = time.monotonic()
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     fixtures_dir = task.task_dir / "fixtures"
     if fixtures_dir.exists():

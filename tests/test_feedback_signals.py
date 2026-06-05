@@ -142,8 +142,9 @@ class TestFeedbackCLI(unittest.TestCase):
             self.assertIn("Feedback recorded: rejected", result.output)
 
     def test_no_external_network_behaviour(self):
-        import openshard.history.feedback as fb_module
         import inspect
+
+        import openshard.history.feedback as fb_module
         source = inspect.getsource(fb_module)
         for net_import in ("socket", "urllib", "requests", "httpx", "http.client"):
             self.assertNotIn(net_import, source, f"feedback.py must not import {net_import}")

@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import tempfile
 from dataclasses import asdict
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-from pathlib import Path
 
 import click
 from click.testing import CliRunner
@@ -29,7 +29,6 @@ from openshard.native.context import (
     record_native_edit_loop_attempt,
     render_native_edit_loop_summary,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers (mirror test_iterative_retry_loop.py patterns exactly)

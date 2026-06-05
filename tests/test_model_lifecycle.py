@@ -12,9 +12,9 @@ from __future__ import annotations
 import unittest
 
 from openshard.models.registry import (
+    _REGISTRY,
     LIFECYCLE_VALUES,
     ROUTING_DEFAULT_ELIGIBLE_LIFECYCLES,
-    _REGISTRY,
     is_routing_default_eligible,
     lifecycle_for,
     models_by_lifecycle,

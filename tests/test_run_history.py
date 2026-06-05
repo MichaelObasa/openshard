@@ -10,11 +10,11 @@ from unittest.mock import MagicMock, patch
 from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import _log_run
 from openshard.execution.stages import Stage, StageRun
+from openshard.providers.base import ModelInfo
+from openshard.providers.manager import InventoryEntry
 from openshard.routing.engine import MODEL_MAIN, MODEL_STRONG
 from openshard.scoring.requirements import TaskRequirements
 from openshard.scoring.scorer import ScoredRoutingResult, select_with_info
-from openshard.providers.base import ModelInfo
-from openshard.providers.manager import InventoryEntry
 from openshard.skills.discovery import SkillDef
 from openshard.skills.matcher import MatchedSkill
 
@@ -400,8 +400,11 @@ class TestVerificationPlanLogging(unittest.TestCase):
 
     def _make_plan(self):
         from openshard.verification.plan import (
-            CommandSafety, VerificationCommand, VerificationKind,
-            VerificationPlan, VerificationSource,
+            CommandSafety,
+            VerificationCommand,
+            VerificationKind,
+            VerificationPlan,
+            VerificationSource,
         )
         cmd = VerificationCommand(
             name="tests",
@@ -771,11 +774,12 @@ class TestVerificationContractResultHistory(unittest.TestCase):
         self.assertFalse(stored["raw_content_stored"])
 
     def test_verification_contract_result_json_roundtrip(self):
+        from dataclasses import asdict
+
         from openshard.native.context import (
             NativeContractCheckResult,
             NativeVerificationContractResult,
         )
-        from dataclasses import asdict
         result = NativeVerificationContractResult(
             checks=[
                 NativeContractCheckResult(

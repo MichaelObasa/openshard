@@ -15,8 +15,9 @@ static field-name strings, integer counts/percents, and the receipt ``shard_id``
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from openshard.ci.policy_check import _verification_status
 
@@ -29,7 +30,7 @@ class FieldDef:
     """A single scored completeness field: a name and a presence predicate."""
 
     name: str
-    present: Callable[["ShardReceipt"], bool]
+    present: Callable[[ShardReceipt], bool]
 
 
 # Explicit, ordered field set. Each field is chosen so that *present* means a
@@ -125,7 +126,7 @@ class CompletenessReport:
     receipts: list[ReceiptCompleteness] = field(default_factory=list)
 
 
-def score_receipt(receipt: "ShardReceipt") -> ReceiptCompleteness:
+def score_receipt(receipt: ShardReceipt) -> ReceiptCompleteness:
     """Score a single receipt against ``FIELD_DEFINITIONS``. Never raises."""
     present: list[str] = []
     missing: list[str] = []
@@ -146,7 +147,7 @@ def score_receipt(receipt: "ShardReceipt") -> ReceiptCompleteness:
     )
 
 
-def evaluate_completeness(receipts: list["ShardReceipt"]) -> CompletenessReport:
+def evaluate_completeness(receipts: list[ShardReceipt]) -> CompletenessReport:
     """Aggregate completeness over receipts. Never raises.
 
     Empty input yields a zeroed report with empty collections.

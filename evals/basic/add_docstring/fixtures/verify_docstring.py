@@ -1,4 +1,5 @@
 import sys
+
 from csv_utils import parse_csv_row
 
 doc = parse_csv_row.__doc__

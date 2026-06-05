@@ -3,7 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from openshard.routing.engine import (
-    MODEL_CHEAP, MODEL_MAIN, MODEL_STRONG,
+    MODEL_CHEAP,
+    MODEL_MAIN,
+    MODEL_STRONG,
 )
 
 # ---------------------------------------------------------------------------

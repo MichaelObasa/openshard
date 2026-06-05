@@ -126,10 +126,10 @@ def make_timeline_event(
     *,
     kind: str = "run",
     status: str = "completed",
-    detail: "str | None" = None,
-    target: "str | None" = None,
-    count: "int | None" = None,
-    metadata: "dict | None" = None,
+    detail: str | None = None,
+    target: str | None = None,
+    count: int | None = None,
+    metadata: dict | None = None,
 ) -> RunTimelineEvent:
     """Construct a sanitised RunTimelineEvent.
 
@@ -150,7 +150,7 @@ def make_timeline_event(
     _detail = sanitize_text(detail, _MAX_DETAIL_CHARS) if detail is not None else None
     _target = sanitize_text(target, _MAX_TARGET_CHARS) if target is not None else None
 
-    _count: "int | None" = None
+    _count: int | None = None
     if isinstance(count, bool):
         _count = None
     elif isinstance(count, int) and count >= 0:

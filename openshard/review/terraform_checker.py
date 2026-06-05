@@ -27,7 +27,6 @@ from pathlib import Path
 
 from openshard.history.shard_contract import ShardFinding
 
-
 # ---------------------------------------------------------------------------
 # Regex patterns
 # ---------------------------------------------------------------------------

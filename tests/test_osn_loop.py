@@ -13,10 +13,10 @@ from openshard.native.context import (
     render_osn_loop_context,
 )
 from openshard.native.executor import (
-    NativeAgentExecutor,
     _LOOP_ALLOWED_TOOLS,
     _MAX_OSN_LOOP_STEPS,
     _MAX_OSN_QUEUE_CAP,
+    NativeAgentExecutor,
 )
 from openshard.native.tools import NativeToolResult
 

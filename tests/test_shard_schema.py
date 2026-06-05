@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+from openshard.history.shard_contract import build_shard_receipt
 from openshard.history.shard_schema import (
     SHARD_BLOCKED_FIELDS,
     SHARD_SCHEMA_VERSION,
@@ -13,8 +14,6 @@ from openshard.history.shard_schema import (
     shard_changes_made,
     shard_manual_fix_required,
 )
-from openshard.history.shard_contract import build_shard_receipt
-
 
 # ---------------------------------------------------------------------------
 # Helpers

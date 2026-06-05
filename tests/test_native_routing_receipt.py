@@ -5,6 +5,7 @@ import unittest
 from dataclasses import asdict
 from types import SimpleNamespace
 
+from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
 from openshard.native.context import (
     NativeModelPolicyReceipt,
     NativeRoutingPreview,
@@ -12,7 +13,6 @@ from openshard.native.context import (
     NativeRunTrustScore,
     build_native_routing_receipt,
 )
-from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
 
 
 def _ns(**kwargs: object) -> SimpleNamespace:

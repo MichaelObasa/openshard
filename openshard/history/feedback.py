@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from openshard.history.jsonl_store import append_jsonl
 
@@ -32,7 +31,7 @@ def build_feedback_record(entry: dict, run_index: int, outcome: str, note: str) 
     timestamp = entry.get("timestamp", "")
     task = entry.get("task", "") or ""
     task_short = task[:70]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     feedback_id = now.strftime("fb-%Y%m%d-%H%M%S-") + f"{now.microsecond:06d}"
     shard_id = _make_shard_id(timestamp, run_index)
     created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -75,13 +74,13 @@ def _dict_to_record(d: dict) -> FeedbackRecord:
     )
 
 
-def log_feedback_record(record: FeedbackRecord, cwd: Optional[Path] = None) -> None:
+def log_feedback_record(record: FeedbackRecord, cwd: Path | None = None) -> None:
     base = cwd if cwd is not None else Path.cwd()
     path = base / _FEEDBACK_PATH
     append_jsonl(path, _record_to_dict(record))
 
 
-def load_feedback_records(cwd: Optional[Path] = None) -> list[FeedbackRecord]:
+def load_feedback_records(cwd: Path | None = None) -> list[FeedbackRecord]:
     base = cwd if cwd is not None else Path.cwd()
     path = base / _FEEDBACK_PATH
     if not path.exists():
@@ -98,5 +97,5 @@ def load_feedback_records(cwd: Optional[Path] = None) -> list[FeedbackRecord]:
     return records
 
 
-def load_feedback_for_shard(shard_id: str, cwd: Optional[Path] = None) -> list[FeedbackRecord]:
+def load_feedback_for_shard(shard_id: str, cwd: Path | None = None) -> list[FeedbackRecord]:
     return [r for r in load_feedback_records(cwd) if r.shard_id == shard_id]

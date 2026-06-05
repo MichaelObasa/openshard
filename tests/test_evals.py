@@ -3,13 +3,22 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
 from click.testing import CliRunner
 
-from openshard.evals.registry import EvalTask, build_category_map, load_eval_tasks, validate_eval_task
-from openshard.evals.runner import EvalResult, run_eval_task
-from openshard.evals.stats import compute_category_stats, compute_eval_stats, load_eval_runs, rank_models
 from openshard.cli.main import cli
+from openshard.evals.registry import (
+    EvalTask,
+    build_category_map,
+    load_eval_tasks,
+    validate_eval_task,
+)
+from openshard.evals.runner import EvalResult, run_eval_task
+from openshard.evals.stats import (
+    compute_category_stats,
+    compute_eval_stats,
+    load_eval_runs,
+    rank_models,
+)
 from openshard.execution.generator import ChangedFile, ExecutionResult
 from openshard.providers.base import UsageStats
 

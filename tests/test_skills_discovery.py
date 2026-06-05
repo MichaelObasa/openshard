@@ -1,7 +1,11 @@
 
 
-from openshard.skills.discovery import discover_skills, _parse_frontmatter, _parse_list, _parse_body_preview
-
+from openshard.skills.discovery import (
+    _parse_body_preview,
+    _parse_frontmatter,
+    _parse_list,
+    discover_skills,
+)
 
 # ---------------------------------------------------------------------------
 # _parse_list

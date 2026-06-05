@@ -13,23 +13,22 @@ import click
 
 from openshard.analysis.repo import RepoFacts, analyze_repo
 from openshard.cli.run_output import (
-    _Spinner,
     _build_routing_line,
     _exec_message,
-    _extract_structured_findings,
     _extract_findings_from_model_answer,
     _extract_findings_from_review_files,
+    _extract_structured_findings,
     _model_label,
-    _profile_display_label,
     _print_dry_run,
     _print_shrunk,
     _print_summary,
+    _profile_display_label,
     _should_shrink,
+    _Spinner,
     render_post_run,
 )
-from openshard.run.timeline import RunTimelineEvent, make_timeline_event
 from openshard.config.settings import get_anthropic_api_key, get_openai_api_key
-from openshard.execution.gates import GateEvaluator, VALID_APPROVAL_MODES, resolve_gate_decisions
+from openshard.execution.gates import VALID_APPROVAL_MODES, GateEvaluator, resolve_gate_decisions
 from openshard.execution.generator import (
     ChangedFile,
     ExecutionGenerator,
@@ -37,6 +36,36 @@ from openshard.execution.generator import (
     check_stack_mismatch,
 )
 from openshard.execution.opencode_executor import OpenCodeExecutor
+from openshard.execution.stages import (
+    Stage,
+    StageRun,
+    route_stage,
+    run_planning_stage,
+    run_validator_stage,
+    split_task,
+)
+from openshard.history.adjustments import (
+    compute_history_adjustment_reasons,
+    compute_history_adjustments,
+)
+from openshard.history.failure_memory import (
+    NativeFailureMemoryEvent,
+    log_failure_memory_event,
+    parse_failure_summary,
+)
+from openshard.history.feedback_scoring import (
+    compute_feedback_adjustment_reasons,
+    compute_feedback_adjustments,
+)
+from openshard.history.jsonl_store import append_jsonl
+from openshard.history.metrics import load_runs
+from openshard.history.run_checkpoints import (
+    NativeRunCheckpointEvent,
+)
+from openshard.history.run_checkpoints import (
+    log_run_checkpoint_event as _log_run_checkpoint,
+)
+from openshard.history.shard_schema import SHARD_SCHEMA_VERSION, coerce_shard_entry
 from openshard.native.context import (
     NativeCandidateSummary,
     NativeEditLoopSummary,
@@ -49,31 +78,19 @@ from openshard.native.context import (
     select_native_candidate,
 )
 from openshard.native.executor import NativeAgentExecutor
-from openshard.execution.stages import Stage, StageRun, split_task, route_stage, run_planning_stage, run_validator_stage
-from openshard.history.adjustments import (
-    compute_history_adjustments,
-    compute_history_adjustment_reasons,
-)
-from openshard.history.feedback_scoring import (
-    compute_feedback_adjustments,
-    compute_feedback_adjustment_reasons,
-)
-from openshard.history.failure_memory import (
-    NativeFailureMemoryEvent,
-    parse_failure_summary,
-    log_failure_memory_event,
-)
-from openshard.history.run_checkpoints import (
-    NativeRunCheckpointEvent,
-    log_run_checkpoint_event as _log_run_checkpoint,
-)
-from openshard.history.jsonl_store import append_jsonl
-from openshard.history.metrics import load_runs
-from openshard.history.shard_schema import SHARD_SCHEMA_VERSION, coerce_shard_entry
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
 from openshard.providers.manager import ProviderManager
 from openshard.providers.openrouter import MODEL_PRICING, compute_cost
-from openshard.routing.engine import ESCALATION_CHAIN, MODEL_STRONG, RoutingDecision, route, is_readonly_task, has_inline_readonly_instruction, looks_like_review_task, classify_review_domain
+from openshard.routing.engine import (
+    ESCALATION_CHAIN,
+    MODEL_STRONG,
+    RoutingDecision,
+    classify_review_domain,
+    has_inline_readonly_instruction,
+    is_readonly_task,
+    looks_like_review_task,
+    route,
+)
 from openshard.routing.form_factor_policy import ExecutionFormFactorDecision, select_form_factor
 from openshard.routing.profiles import (
     ProfileDecision,
@@ -86,15 +103,24 @@ from openshard.routing.workflow_selector import (
     build_workflow_history_summary,
     select_workflow,
 )
+from openshard.run.timeline import RunTimelineEvent, make_timeline_event
+from openshard.run.validator_policy import ValidatorPolicyDecision, should_run_validator
 from openshard.scoring.requirements import requirements_from_category
 from openshard.scoring.scorer import ScoredRoutingResult, select_with_info
-from openshard.security.paths import resolve_safe_repo_path, UnsafePathError
+from openshard.security.paths import UnsafePathError, resolve_safe_repo_path
 from openshard.skills.context import build_skills_context
 from openshard.skills.discovery import discover_skills
 from openshard.skills.matcher import MatchedSkill, match_skills
-from openshard.run.validator_policy import ValidatorPolicyDecision, should_run_validator
-from openshard.verification.executor import run_verification_plan as _run_verification_plan, confirm_or_abort  # noqa: F401
-from openshard.verification.plan import CommandSafety, VerificationPlan, build_verification_plan, safe_check_label
+from openshard.verification.executor import confirm_or_abort
+from openshard.verification.executor import (  # noqa: F401
+    run_verification_plan as _run_verification_plan,
+)
+from openshard.verification.plan import (
+    CommandSafety,
+    VerificationPlan,
+    build_verification_plan,
+    safe_check_label,
+)
 
 
 def _build_explicit_file_context(task: str, *, root: Path | None = None) -> str:
@@ -103,12 +129,12 @@ def _build_explicit_file_context(task: str, *, root: Path | None = None) -> str:
     Used by the direct/staged execution path where NativeAgentExecutor is not active.
     Returns "" when no safe, readable, named files are found.
     """
-    from openshard.native.executor import (
-        _extract_explicit_file_paths,
-        _build_explicit_file_outline,
-        _MAX_EXPLICIT_SNIPPET_FILES,
-    )
     from openshard.native.context import NativeEvidence, NativeFileSnippet, render_native_evidence
+    from openshard.native.executor import (
+        _MAX_EXPLICIT_SNIPPET_FILES,
+        _build_explicit_file_outline,
+        _extract_explicit_file_paths,
+    )
 
     paths = _extract_explicit_file_paths(task)
     if not paths:
@@ -294,7 +320,7 @@ class RunPipeline:
         start = time.time()
         result_obj.start = start
         _run_id = datetime.datetime.fromtimestamp(
-            start, tz=datetime.timezone.utc
+            start, tz=datetime.UTC
         ).isoformat().replace("+00:00", "Z")
         retry_triggered = False
         workspace: Path | None = None
@@ -503,8 +529,15 @@ class RunPipeline:
                 _eval_records: list[dict] = []
                 if _use_eval_scoring:
                     try:
-                        from openshard.evals.stats import EVAL_RUNS_PATH, compute_eval_stats, load_eval_runs
-                        from openshard.evals.adjustments import compute_eval_adjustments, compute_eval_adjustment_reasons
+                        from openshard.evals.adjustments import (
+                            compute_eval_adjustment_reasons,
+                            compute_eval_adjustments,
+                        )
+                        from openshard.evals.stats import (
+                            EVAL_RUNS_PATH,
+                            compute_eval_stats,
+                            load_eval_runs,
+                        )
                         _eval_records = load_eval_runs(Path.cwd() / EVAL_RUNS_PATH)
                         _eval_stats_data = compute_eval_stats(_eval_records)
                         _eval_adjustments = compute_eval_adjustments(_eval_stats_data)
@@ -513,12 +546,12 @@ class RunPipeline:
                         pass
                     if routing_decision and routing_decision.category and _eval_records:
                         try:
+                            from openshard.evals.adjustments import (
+                                compute_category_eval_adjustment_reasons,
+                                compute_category_eval_adjustments,
+                            )
                             from openshard.evals.registry import build_category_map
                             from openshard.evals.stats import compute_category_stats
-                            from openshard.evals.adjustments import (
-                                compute_category_eval_adjustments,
-                                compute_category_eval_adjustment_reasons,
-                            )
                             _suites = {r.get("suite") for r in _eval_records if r.get("suite")}
                             _cat_maps: dict[str, dict[str, str]] = {}
                             for _s in _suites:
@@ -564,7 +597,7 @@ class RunPipeline:
                     _all_eval_models = set(_eval_adjustments) | set(_cat_adjustments)
                     for _em in _all_eval_models:
                         _combined = _eval_adjustments.get(_em, 0.0) + _cat_adjustments.get(_em, 0.0)
-                        from openshard.evals.adjustments import _ADJ_MIN, _ADJ_MAX
+                        from openshard.evals.adjustments import _ADJ_MAX, _ADJ_MIN
                         _combined = max(_ADJ_MIN, min(_ADJ_MAX, _combined))
                         if _combined != 0.0:
                             _merged_adjustments[_em] = _merged_adjustments.get(_em, 0.0) + _combined
@@ -870,8 +903,8 @@ class RunPipeline:
             and effective_executor != "native"
         )
         if _can_dispatch:
-            from openshard.native.dispatch import resolve_tier, resolve_tier_for_category
             from openshard.native.context import NativeTierDispatchReceipt
+            from openshard.native.dispatch import resolve_tier, resolve_tier_for_category
 
             _cat = routing_decision.category if routing_decision else None
             _p_tier = "frontier-reasoning-model"
@@ -1031,7 +1064,10 @@ class RunPipeline:
                 else ("Executing - running with OpenCode" if opencode_mode else "Executing - running task")
             )
             if effective_executor == "native":
-                from openshard.native.context import build_native_plan_ledger, update_native_plan_ledger_status
+                from openshard.native.context import (
+                    build_native_plan_ledger,
+                    update_native_plan_ledger_status,
+                )
                 generator.native_meta.plan_ledger = build_native_plan_ledger(task)
                 generator.native_meta.plan_ledger = update_native_plan_ledger_status(
                     generator.native_meta.plan_ledger, "Understand task", "passed", evidence="context prepared"
@@ -1249,7 +1285,7 @@ class RunPipeline:
         _TASK_SUFFIX_STRIP = "\n\nAfter completing your analysis"
         _task_display = task[:task.index(_TASK_SUFFIX_STRIP)].rstrip() if _TASK_SUFFIX_STRIP in task else task
         _clean_summary, _extracted_findings = _extract_structured_findings(exec_result.summary)
-        _extraction_source: "str | None" = None
+        _extraction_source: str | None = None
         if _extracted_findings:
             _extraction_source = "STRUCTURED_FINDINGS"
         elif _is_review_task or _is_readonly_review_task:
@@ -1373,7 +1409,7 @@ class RunPipeline:
             _receipt_risk = "High"
         _receipt_sandbox = "Off" if (_readonly_task or _is_review_task) else "Not recorded"
         _receipt_approval = "Not required" if _readonly_task else "Not recorded"
-        _receipt_index: "int | None" = None
+        _receipt_index: int | None = None
         try:
             _log_p = Path.cwd() / _LOG_PATH
             if _log_p.exists():
@@ -1897,7 +1933,9 @@ class RunPipeline:
             )
             import copy
             _before_sync = copy.deepcopy(_native_meta.model_selection_decision)
-            from openshard.native.context import sync_native_model_selection_decision_with_candidate_scoring
+            from openshard.native.context import (
+                sync_native_model_selection_decision_with_candidate_scoring,
+            )
             _native_meta.model_selection_decision = sync_native_model_selection_decision_with_candidate_scoring(
                 model_selection_decision=_native_meta.model_selection_decision,
                 model_candidate_scoring=_native_meta.model_candidate_scoring,
@@ -2284,11 +2322,14 @@ class RunPipeline:
         # NOTE: runs post-run (after model use). Records findings for receipt visibility.
         # Does not prevent secrets from reaching the model in v1.
         try:
+            from dataclasses import asdict as _scan_asdict
+
             from openshard.security.secret_scan import (
                 SecretScanResult,
+            )
+            from openshard.security.secret_scan import (
                 scan_paths_for_secrets as _scan_secrets,
             )
-            from dataclasses import asdict as _scan_asdict
             _scan_file_paths: list[Path] = []
             if _native_meta is not None and _native_meta.file_context is not None:
                 _scan_file_paths = [
@@ -2342,8 +2383,10 @@ class RunPipeline:
         # Record runtime policy decisions — recording only, no behaviour change.
         try:
             from openshard.policy.runtime import (
-                build_runtime_policy_decisions as _build_pdecisions,
                 _dedup_decisions as _pd_dedup,
+            )
+            from openshard.policy.runtime import (
+                build_runtime_policy_decisions as _build_pdecisions,
             )
             _runtime_pds = _build_pdecisions(
                 approval_request=(_extra_metadata or {}).get("approval_request"),
@@ -2647,7 +2690,7 @@ def _log_run(
 ) -> None:
     entry: dict = {
         "schema_version": SHARD_SCHEMA_VERSION,
-        "timestamp": run_id if run_id else datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+        "timestamp": run_id if run_id else datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z"),
         "task": task,
         "execution_model": model or generator.model,
         "retry_triggered": retry_triggered,
@@ -2761,6 +2804,8 @@ def _log_run(
     try:
         from openshard.models.feedback_advisory import (
             _load_recent_session_signals as _load_sigs,
+        )
+        from openshard.models.feedback_advisory import (
             build_feedback_routing_advisory as _build_fra,
         )
         _sig_path = Path.cwd() / ".openshard" / "session_signals.jsonl"
@@ -2788,6 +2833,8 @@ def _log_run(
     try:
         from openshard.history.routing_truth import (
             build_routing_truth as _brt,
+        )
+        from openshard.history.routing_truth import (
             routing_truth_to_dict as _rttd,
         )
         entry["routing_truth"] = _rttd(_brt(entry))

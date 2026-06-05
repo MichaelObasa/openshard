@@ -10,7 +10,12 @@ from openshard.cli.main import cli
 from openshard.execution.generator import ChangedFile
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry
-from openshard.routing.engine import is_readonly_task, has_inline_readonly_instruction, looks_like_review_task, classify_review_domain
+from openshard.routing.engine import (
+    classify_review_domain,
+    has_inline_readonly_instruction,
+    is_readonly_task,
+    looks_like_review_task,
+)
 
 _DEFAULT_CONFIG = {"approval_mode": "smart"}
 
@@ -908,6 +913,7 @@ class TestDomainEvidenceAccuracy(unittest.TestCase):
         """find_review_domain_files must not return files under .openshard/."""
         import tempfile
         from pathlib import Path as _Path
+
         from openshard.review.domain_files import find_review_domain_files
 
         with tempfile.TemporaryDirectory() as tmpdir:

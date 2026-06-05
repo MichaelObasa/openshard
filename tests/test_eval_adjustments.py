@@ -7,8 +7,6 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from openshard.evals.adjustments import (
-    MIN_EVAL_RUNS,
-    MIN_CATEGORY_EVAL_RUNS,
     _ADJ_MAX,
     _ADJ_MIN,
     _CAT_COST_BONUS,
@@ -19,10 +17,12 @@ from openshard.evals.adjustments import (
     _PASS_RATE_PENALTY,
     _TOKEN_BONUS,
     _UNSAFE_PENALTY,
-    compute_category_eval_adjustments,
+    MIN_CATEGORY_EVAL_RUNS,
+    MIN_EVAL_RUNS,
     compute_category_eval_adjustment_reasons,
-    compute_eval_adjustments,
+    compute_category_eval_adjustments,
     compute_eval_adjustment_reasons,
+    compute_eval_adjustments,
 )
 from openshard.evals.stats import CategoryStats, EvalStats
 
@@ -220,8 +220,8 @@ class TestEvalScoringCLI(unittest.TestCase):
         self.assertNotEqual(result.exit_code, 2)
 
     def test_more_output_shows_eval_scoring_enabled(self, tmp_path=None):
-        import tempfile
         import os
+        import tempfile
         tmp = Path(tempfile.mkdtemp())
         eval_dir = tmp / ".openshard"
         eval_dir.mkdir()
@@ -243,8 +243,8 @@ class TestEvalScoringCLI(unittest.TestCase):
         self.assertIn("eval scoring: enabled", result.output)
 
     def test_more_output_without_flag_does_not_show_eval_scoring(self, tmp_path=None):
-        import tempfile
         import os
+        import tempfile
         tmp = Path(tempfile.mkdtemp())
         runner = CliRunner()
         old = os.getcwd()
@@ -302,6 +302,7 @@ class TestEvalScoringCLI(unittest.TestCase):
 
     def test_config_eval_scoring_respected(self):
         from unittest.mock import MagicMock, patch
+
         from openshard.cli.main import cli
 
         mock_gen = MagicMock()

@@ -8,7 +8,6 @@ from click.testing import CliRunner
 from openshard.cli.main import cli
 from openshard.history.metrics import compute_skill_stats
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

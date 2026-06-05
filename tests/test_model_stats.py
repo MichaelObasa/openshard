@@ -6,8 +6,8 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from openshard.history.metrics import compute_model_stats
 from openshard.cli.main import cli
+from openshard.history.metrics import compute_model_stats
 
 
 def _run(**kwargs) -> dict:
