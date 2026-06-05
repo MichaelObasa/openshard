@@ -29,6 +29,10 @@ def configure_test_git_identity(repo_path: Path) -> None:
         ["git", "config", "user.name", "OpenShard Test"],
         cwd=str(repo_path), capture_output=True, check=True,
     )
+    subprocess.run(
+        ["git", "config", "commit.gpgsign", "false"],
+        cwd=str(repo_path), capture_output=True, check=True,
+    )
 
 
 def _init_git_repo(path: Path) -> None:
