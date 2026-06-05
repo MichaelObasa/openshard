@@ -1265,6 +1265,13 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
         click.echo("")
         click.echo(render_compact_shard_receipt(_shard))
 
+        # One compact proof-quality line, derived from the Shard Proof Contract.
+        from openshard.history.shard_quality import build_shard_quality_summary
+        _quality = build_shard_quality_summary(entry, _shard)
+        click.echo(f"Proof: {_quality['status']}")
+        if _quality["unsafe_findings_count"] > 0:
+            click.echo(f"Unsafe findings: {_quality['unsafe_findings_count']}")
+
     click.echo(f"\nTime: {duration:.1f}s   Cost: {cost_str}")
 
     # Baseline comparison and cost section (after Time/Cost footer)
@@ -1336,6 +1343,7 @@ def last(more: bool, full: bool, as_json: bool):
         entry = entries[-1]
         receipt = build_shard_receipt(entry, index=len(entries) - 1)
         from openshard.history.proof_contract import build_shard_proof_contract
+        from openshard.history.shard_quality import build_shard_quality_summary
         from openshard.history.trust_score import evaluate_trust_score
 
         _ts = evaluate_trust_score(
@@ -1354,6 +1362,7 @@ def last(more: bool, full: bool, as_json: bool):
                 ],
             },
             proof_contract=build_shard_proof_contract(entry),
+            shard_quality=build_shard_quality_summary(entry, receipt),
         )
         click.echo(json.dumps(payload, indent=2))
         return
