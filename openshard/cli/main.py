@@ -3152,15 +3152,20 @@ def _demo_feedback() -> None:
     click.echo("  You can view it with 'openshard last --more'.")
 
 
-@cli.command()
+@cli.group("demo", invoke_without_command=True)
 @click.option(
     "--scenario",
     type=click.Choice(["readonly", "tier-dispatch", "feedback"], case_sensitive=False),
     default=None,
     help="Show a focused walkthrough for a specific scenario.",
 )
-def demo(scenario: str | None) -> None:
+@click.pass_context
+def demo(ctx: click.Context, scenario: str | None) -> None:
     """Show a walkthrough of OpenShard concepts and common scenarios."""
+    if ctx.invoked_subcommand is not None:
+        # A subcommand (e.g. `demo shard`) will run; the scenario walkthrough
+        # only applies to the bare `openshard demo` invocation.
+        return
     if scenario is None:
         _demo_default()
     elif scenario.lower() == "readonly":
@@ -3169,6 +3174,169 @@ def demo(scenario: str | None) -> None:
         _demo_tier_dispatch()
     else:
         _demo_feedback()
+
+
+# A realistic, in-memory example Shard used only by `openshard demo shard`. It is
+# never written to history and never triggers a model, provider, or API key. The
+# fields are tuned so the run lands in the "good" trust band: a completed,
+# verified, single-file fix whose receipt has a few recommended gaps and a dirty
+# repo. The model id is a real registry entry; nothing here implies live access.
+_DEMO_SHARD_ENTRY: dict = {
+    "schema_version": "1.2",
+    "timestamp": "2026-01-01T00:00:00Z",
+    "task": "Fix a failing test",
+    "execution_model": "anthropic/claude-sonnet-4.6",
+    "execution_profile": "native_light",
+    "routing_category": "standard",
+    "routing_rationale": "standard bug fix",
+    "routing_selected_model": "anthropic/claude-sonnet-4.6",
+    "routing_selected_provider": "anthropic",
+    "estimated_cost": 0.0123,
+    "prompt_tokens": 1200,
+    "completion_tokens": 300,
+    "total_tokens": 1500,
+    "files_created": 0,
+    "files_updated": 1,
+    "files_deleted": 0,
+    "files_detail": [
+        {"path": "src/calculator.py", "change_type": "update",
+         "summary": "Corrected off-by-one in range check"},
+    ],
+    "verification_attempted": True,
+    "verification_passed": True,
+    "osn_verification_contract": {
+        "enabled": True,
+        "status": "passed",
+        "manual_review_required": False,
+        "summary": "All checks passed",
+        "returncode": 0,
+        "duration_seconds": 4.2,
+        "raw_output_stored": False,
+    },
+    "git_branch": "demo/fix-failing-test",
+    "git_dirty": True,
+    "run_timeline": [
+        {"event_type": "stage", "label": "Planning", "status": "completed"},
+        {"event_type": "stage", "label": "Implementation", "status": "completed"},
+        {"event_type": "stage", "label": "Verification", "status": "completed"},
+    ],
+    "duration_seconds": 12.4,
+    "summary": "Fixed the failing test in one file; checks passed.",
+}
+
+_DEMO_NEXT_COMMANDS: list[str] = [
+    'openshard repo plan "review this repo"',
+    'openshard run "fix a small bug" --verify',
+    "openshard last",
+    "openshard proof last",
+    "openshard trust last",
+]
+
+
+def _demo_shard_artifacts():
+    """Build the in-memory demo Shard and its receipt/proof/quality/trust views.
+
+    Pure and offline: no API key, no model call, no disk read or write. Returns a
+    tuple of ``(entry, receipt, contract, quality, trust)`` so the human and JSON
+    branches share a single source of truth.
+    """
+    from openshard.history.proof_contract import build_shard_proof_contract
+    from openshard.history.shard_contract import build_shard_receipt
+    from openshard.history.shard_quality import build_shard_quality_summary
+    from openshard.history.shard_schema import coerce_shard_entry
+    from openshard.history.trust_score import evaluate_trust_score
+
+    entry = coerce_shard_entry(dict(_DEMO_SHARD_ENTRY))
+    receipt = build_shard_receipt(entry, index=0)
+    contract = build_shard_proof_contract(entry)
+    quality = build_shard_quality_summary(entry, receipt)
+    # interaction_event_types=[] keeps this fully in-memory: the disk-reading
+    # interaction loader is never touched for the demo.
+    trust = evaluate_trust_score(entry, receipt, interaction_event_types=[])
+    return entry, receipt, contract, quality, trust
+
+
+def _demo_shard_human_lines(receipt, contract, quality, trust) -> list[str]:
+    """Render the plain-language demo walkthrough as a list of lines."""
+    unsafe_count = int(quality.get("unsafe_findings_count") or 0)
+    unsafe_display = "none" if unsafe_count == 0 else str(unsafe_count)
+    lines = [
+        "OpenShard demo",
+        "",
+        "This is what OpenShard records after an AI coding run.",
+        "",
+        "Receipt:",
+        f"  Task: {receipt.task_full}",
+        "  Status: completed",
+        f"  Files changed: {receipt.files_changed}",
+        f"  Verification: {receipt.verification_status}",
+        "",
+        "Proof:",
+        f"  Status: {contract.get('overall_status', 'unknown')}",
+        f"  Required proof: {quality.get('required_proof', 'unknown')}",
+        f"  Unsafe findings: {unsafe_display}",
+        "",
+        "Trust:",
+        f"  Band: {trust.band}",
+        f"  Score: {trust.score}/100",
+        "",
+        "What this means:",
+        '  OpenShard does not just say "the agent changed code."',
+        "  It records what happened, what was checked, and whether the proof is",
+        "  good enough to rely on.",
+        "",
+        "  Receipt is what happened.",
+        "  Proof is whether the saved record is good enough.",
+        "  Trust is whether the run is safe to rely on.",
+        "  A Shard is the saved proof record for one AI coding run.",
+        "",
+        "Try next:",
+    ]
+    lines.extend(f"  {cmd}" for cmd in _DEMO_NEXT_COMMANDS)
+    return lines
+
+
+@demo.command("shard")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Machine-readable output (valid JSON only).")
+def demo_shard(as_json: bool) -> None:
+    """Show a realistic example Shard and explain the OpenShard loop.
+
+    Needs no API key, makes no model call, reads no real repo, and never writes
+    run history. The Receipt, Proof, and Trust values are produced by the same
+    builders used by real runs, so the example is genuine rather than faked.
+    """
+    entry, receipt, contract, quality, trust = _demo_shard_artifacts()
+
+    if as_json:
+        compact_receipt = {
+            "task": receipt.task_full,
+            "status": "completed",
+            "files_changed": receipt.files_changed,
+            "verification": receipt.verification_status,
+        }
+        payload = _machine_envelope(
+            "demo shard", "ok", shard_id=receipt.shard_id,
+            demo=True,
+            run=_export_run_entry(entry, include_timeline=True, receipt=receipt),
+            receipt=compact_receipt,
+            proof_contract=contract,
+            shard_quality=quality,
+            trust={
+                "score": trust.score,
+                "band": trust.band,
+                "penalties": [
+                    {"code": p.code, "points": p.points, "reason": p.reason}
+                    for p in trust.penalties
+                ],
+            },
+            next_commands=list(_DEMO_NEXT_COMMANDS),
+        )
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    for line in _demo_shard_human_lines(receipt, contract, quality, trust):
+        click.echo(line)
 
 
 def _demo_run() -> None:
