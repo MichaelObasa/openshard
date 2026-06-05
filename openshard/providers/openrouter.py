@@ -55,6 +55,16 @@ class RateLimitError(ProviderRateLimitError, OpenRouterError):
 
 # Dollars per million tokens — (prompt, completion).  Updated 2026-04.
 # Prices marked ~est are approximate; verify current rates at openrouter.ai/models.
+#
+# NOTE: a few legacy IDs below (anthropic/claude-opus-4.6,
+# anthropic/claude-haiku-4.5-20251001, openai/gpt-4o, openai/gpt-4o-mini) are
+# intentionally retained in this snapshot even though they are not in the model
+# registry. This is a deliberate, tracked exception:
+# this pricing table is a separate snapshot, and gpt-4o* still back the OpenAI
+# provider default. Consolidation onto the registry is deferred to
+# feat/registry-metadata-v2. The drift test mirrors this via the allowlist
+# LEGACY_PRICING_IDS_ALLOWED_UNTIL_METADATA_V2, so any new untracked drift
+# fails the test. Do not add further unregistered IDs here.
 MODEL_PRICING: dict[str, tuple[float, float]] = {
     # Anthropic
     "anthropic/claude-haiku-4.5":           (0.80,   4.00),

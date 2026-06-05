@@ -750,3 +750,33 @@ def supports(model_id: str, capability: str) -> bool:
 def all_models() -> list[ModelEntry]:
     """Return all registered models as a list."""
     return list(_REGISTRY)
+
+
+def is_known_model(model_id: str) -> bool:
+    """Return True if *model_id* is a registered model.
+
+    This is the single source of truth for model existence. Prefer it over
+    reaching into the private registry or comparing against hand-maintained
+    lists elsewhere in the codebase.
+    """
+    return model_id in _INDEX
+
+
+def require_model(model_id: str) -> str:
+    """Return *model_id* if it is registered, else raise ValueError.
+
+    Useful for asserting at import or startup that a hardcoded constant still
+    points at a real registry entry.
+    """
+    if model_id not in _INDEX:
+        raise ValueError(f"Unknown model id (not in registry): {model_id}")
+    return model_id
+
+
+def registry_ids() -> frozenset[str]:
+    """Return the set of all registered model IDs.
+
+    Lets callers and tests check membership without reaching into the private
+    registry structures.
+    """
+    return frozenset(_INDEX)

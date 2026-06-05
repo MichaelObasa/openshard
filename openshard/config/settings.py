@@ -10,7 +10,7 @@ _DEFAULTS: dict[str, Any] = {
     "model_tiers": [
         {"name": "fast",     "model": "anthropic/claude-haiku-4.5",  "max_tokens": 1024},
         {"name": "balanced", "model": "anthropic/claude-sonnet-4.6", "max_tokens": 4096},
-        {"name": "powerful", "model": "anthropic/claude-opus-4.6",   "max_tokens": 8192},
+        {"name": "powerful", "model": "anthropic/claude-opus-4.7",   "max_tokens": 8192},
     ],
     "planning_model":      "anthropic/claude-sonnet-4.6",
     "execution_model":     "anthropic/claude-sonnet-4.6",
