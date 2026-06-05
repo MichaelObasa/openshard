@@ -6,6 +6,8 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from openshard.history.jsonl_store import append_jsonl
+
 _NATIVE_STEPS_PATH = Path(".openshard") / "native_steps.jsonl"
 
 
@@ -86,11 +88,9 @@ def _dict_to_event(d: dict) -> NativeStepEvent:
 
 def log_native_step_event(event: NativeStepEvent) -> None:
     steps_path = Path.cwd() / _NATIVE_STEPS_PATH
-    steps_path.parent.mkdir(parents=True, exist_ok=True)
     d = _event_to_dict(event)
     d["raw_content_stored"] = False
-    with steps_path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(d) + "\n")
+    append_jsonl(steps_path, d)
 
 
 def load_native_step_events() -> list[NativeStepEvent]:

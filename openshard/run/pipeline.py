@@ -1,5 +1,4 @@
 import datetime
-import json
 import re
 import shutil
 import subprocess
@@ -68,6 +67,7 @@ from openshard.history.run_checkpoints import (
     NativeRunCheckpointEvent,
     log_run_checkpoint_event as _log_run_checkpoint,
 )
+from openshard.history.jsonl_store import append_jsonl
 from openshard.history.metrics import load_runs
 from openshard.history.shard_schema import SHARD_SCHEMA_VERSION, coerce_shard_entry
 from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
@@ -2797,9 +2797,7 @@ def _log_run(
     entry = coerce_shard_entry(entry)
 
     log_path = Path.cwd() / _LOG_PATH
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(entry) + "\n")
+    append_jsonl(log_path, entry)
 
 
 def _copy_cwd_to_workspace(workspace: Path) -> None:

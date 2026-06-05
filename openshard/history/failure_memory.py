@@ -6,6 +6,8 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from openshard.history.jsonl_store import append_jsonl
+
 _FAILURE_MEMORY_PATH = Path(".openshard") / "failure_memory.jsonl"
 
 
@@ -90,11 +92,9 @@ def _dict_to_event(d: dict) -> NativeFailureMemoryEvent:
 
 def log_failure_memory_event(event: NativeFailureMemoryEvent) -> None:
     path = Path.cwd() / _FAILURE_MEMORY_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
     d = _event_to_dict(event)
     d["raw_content_stored"] = False
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(d) + "\n")
+    append_jsonl(path, d)
 
 
 def load_failure_memory_events() -> list[NativeFailureMemoryEvent]:
