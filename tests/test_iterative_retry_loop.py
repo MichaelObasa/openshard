@@ -29,7 +29,6 @@ from openshard.native.context import (
     build_failure_summary,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -221,8 +220,8 @@ def test_record_osn_loop_step_metadata_not_passed_to_osn_recorder() -> None:
 
 def test_record_osn_loop_step_metadata_reaches_step_event() -> None:
     """metadata kwarg is forwarded to NativeStepEvent."""
-    from openshard.native.executor import NativeAgentExecutor
     from openshard.history.native_steps import NativeStepEvent
+    from openshard.native.executor import NativeAgentExecutor
 
     captured: list[NativeStepEvent] = []
 
@@ -265,8 +264,8 @@ _PYTHON_REPO_WITH_TEST_CMD = RepoFacts(
 
 def _make_native_mock(generate_side_effect=None):
     """Return a generator mock wired to look like NativeAgentExecutor."""
+    from openshard.native.context import NativeApprovalRequest, NativeChangeBudgetSoftGate
     from openshard.native.executor import NativeRunMeta
-    from openshard.native.context import NativeChangeBudgetSoftGate, NativeApprovalRequest
 
     g = MagicMock()
     if generate_side_effect is not None:

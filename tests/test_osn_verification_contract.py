@@ -16,7 +16,6 @@ from dataclasses import asdict, fields
 from types import SimpleNamespace
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -92,7 +91,7 @@ class TestOSNVerificationContractDefaults(unittest.TestCase):
         self.assertEqual(_ALLOWED_STATUSES, expected)
 
     def test_4_lists_are_capped(self) -> None:
-        from openshard.native.verification_contract import OSNVerificationContract, _MAX_CHECKS
+        from openshard.native.verification_contract import _MAX_CHECKS, OSNVerificationContract
         long_list = [f"check_{i}" for i in range(20)]
         c = OSNVerificationContract(
             expected_checks=long_list,
@@ -111,9 +110,9 @@ class TestOSNVerificationContractDefaults(unittest.TestCase):
 
     def test_5_summary_and_skipped_reason_are_capped(self) -> None:
         from openshard.native.verification_contract import (
-            OSNVerificationContract,
             _MAX_REASON_CHARS,
             _MAX_SUMMARY_CHARS,
+            OSNVerificationContract,
         )
         long_str = "x" * 500
         c = OSNVerificationContract(summary=long_str, skipped_reason=long_str)
@@ -209,16 +208,18 @@ class TestOSNIntegration(unittest.TestCase):
         self.assertIsNotNone(c.status)
 
     def test_17_no_shell_command_executed_by_contract(self) -> None:
-        import openshard.native.verification_contract as vc_mod
         import inspect
+
+        import openshard.native.verification_contract as vc_mod
         src = inspect.getsource(vc_mod)
         self.assertNotIn("subprocess", src)
         self.assertNotIn("os.system", src)
         self.assertNotIn("Popen", src)
 
     def test_18_no_provider_model_call_added(self) -> None:
-        import openshard.native.verification_contract as vc_mod
         import inspect
+
+        import openshard.native.verification_contract as vc_mod
         src = inspect.getsource(vc_mod)
         self.assertNotIn("anthropic", src)
         self.assertNotIn("openai", src)
@@ -579,7 +580,10 @@ class TestVerificationLoopWiring(unittest.TestCase):
         self.assertLessEqual(len(contract.passed_checks), 8)
 
     def test_48_render_shows_passed_row(self) -> None:
-        from openshard.native.verification_contract import OSNVerificationContract, render_osn_verification_receipt
+        from openshard.native.verification_contract import (
+            OSNVerificationContract,
+            render_osn_verification_receipt,
+        )
         contract = OSNVerificationContract(
             enabled=True, status="passed",
             attempted_checks=["pytest"], passed_checks=["pytest"],
@@ -589,7 +593,10 @@ class TestVerificationLoopWiring(unittest.TestCase):
         self.assertTrue(any("pytest" in ln for ln in lines))
 
     def test_49_render_shows_failed_row(self) -> None:
-        from openshard.native.verification_contract import OSNVerificationContract, render_osn_verification_receipt
+        from openshard.native.verification_contract import (
+            OSNVerificationContract,
+            render_osn_verification_receipt,
+        )
         contract = OSNVerificationContract(
             enabled=True, status="failed",
             attempted_checks=["pytest"], failed_checks=["pytest"],
@@ -598,7 +605,10 @@ class TestVerificationLoopWiring(unittest.TestCase):
         self.assertTrue(any("Failed" in ln for ln in lines))
 
     def test_50_render_shows_skipped_row(self) -> None:
-        from openshard.native.verification_contract import OSNVerificationContract, render_osn_verification_receipt
+        from openshard.native.verification_contract import (
+            OSNVerificationContract,
+            render_osn_verification_receipt,
+        )
         contract = OSNVerificationContract(
             enabled=True, status="skipped",
             skipped_checks=["make test"],
@@ -609,7 +619,10 @@ class TestVerificationLoopWiring(unittest.TestCase):
         self.assertTrue(any("make test" in ln for ln in lines))
 
     def test_51_render_backward_compat_empty_per_check_lists(self) -> None:
-        from openshard.native.verification_contract import OSNVerificationContract, render_osn_verification_receipt
+        from openshard.native.verification_contract import (
+            OSNVerificationContract,
+            render_osn_verification_receipt,
+        )
         contract = OSNVerificationContract(enabled=True, status="passed")
         lines = render_osn_verification_receipt(contract)
         self.assertTrue(any("OSN VERIFICATION" in ln for ln in lines))
@@ -625,8 +638,8 @@ class TestVerificationLoopWiringIntegration(unittest.TestCase):
         """Imports _build_osn_verification_contract_with_loop from the real pipeline module
         and calls it with a native_meta stub. Proves the helper passes verification_loop
         into build_osn_verification_contract — the wiring cannot be silently removed."""
-        from openshard.run.pipeline import _build_osn_verification_contract_with_loop
         from openshard.native.context import NativeVerificationLoop
+        from openshard.run.pipeline import _build_osn_verification_contract_with_loop
 
         loop = NativeVerificationLoop()
         loop.attempted = True
@@ -656,8 +669,12 @@ class TestVerificationLoopWiringIntegration(unittest.TestCase):
         from openshard.native.context import NativeVerificationLoop
         from openshard.native.verification_contract import build_osn_verification_contract
         from openshard.verification.plan import (
-            CommandSafety, VerificationCommand, VerificationKind,
-            VerificationPlan, VerificationSource, safe_check_label,
+            CommandSafety,
+            VerificationCommand,
+            VerificationKind,
+            VerificationPlan,
+            VerificationSource,
+            safe_check_label,
         )
 
         # Simulate a safe plan with one pytest command
@@ -698,8 +715,12 @@ class TestVerificationLoopWiringIntegration(unittest.TestCase):
         from openshard.native.context import NativeVerificationLoop
         from openshard.native.verification_contract import build_osn_verification_contract
         from openshard.verification.plan import (
-            CommandSafety, VerificationCommand, VerificationKind,
-            VerificationPlan, VerificationSource, safe_check_label,
+            CommandSafety,
+            VerificationCommand,
+            VerificationKind,
+            VerificationPlan,
+            VerificationSource,
+            safe_check_label,
         )
 
         cmd = VerificationCommand(
@@ -832,7 +853,8 @@ class TestExecutionMetadata(unittest.TestCase):
 
     def test_62_full_receipt_shows_exit_code_and_duration(self) -> None:
         from openshard.native.verification_contract import (
-            OSNVerificationContract, render_osn_verification_receipt,
+            OSNVerificationContract,
+            render_osn_verification_receipt,
         )
         c = OSNVerificationContract(
             enabled=True, status="passed", returncode=0,

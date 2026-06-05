@@ -3,9 +3,9 @@ from __future__ import annotations
 import unittest
 
 from openshard.models.registry import (
+    _REGISTRY,
     ROLE_GROUPS,
     ModelEntry,
-    _REGISTRY,
     display_name_for,
     get_model,
     is_experimental,
@@ -14,7 +14,6 @@ from openshard.models.registry import (
     supports,
 )
 from openshard.routing.engine import MODEL_CHEAP, MODEL_MAIN, MODEL_STRONG
-
 
 # ---------------------------------------------------------------------------
 # Registry completeness

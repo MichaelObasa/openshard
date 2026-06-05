@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from openshard.history.jsonl_store import append_jsonl
@@ -43,7 +43,7 @@ class SessionEventWriter:
             "session_id": session_id,
             "run_id": run_id,
             "shard_id": shard_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "source": "tui",
             "event_type": event_type,
             "command": command,

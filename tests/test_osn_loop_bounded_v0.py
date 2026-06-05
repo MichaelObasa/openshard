@@ -19,7 +19,6 @@ from unittest.mock import MagicMock, patch
 from openshard.native.executor import NativeAgentExecutor
 from openshard.native.tools import NativeToolResult
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -322,8 +321,9 @@ class TestNativeLoopWriteSecurity(unittest.TestCase):
         self._tmpdir.cleanup()
 
     def _write_files(self, files):
-        from openshard.run.pipeline import _write_files as _wf
         from unittest.mock import patch
+
+        from openshard.run.pipeline import _write_files as _wf
         # Suppress click.echo output during tests
         with patch("openshard.run.pipeline.click"):
             _wf(files, Path(self._tmpdir.name))

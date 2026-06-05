@@ -9,12 +9,12 @@ import json
 from pathlib import Path
 
 from openshard.native.context import (
-    OSNObservationPacket,
     _OBS_MAX_CANDIDATE_FILES,
     _OBS_MAX_CONFIG_FILES,
-    _OBS_MAX_TEST_FILES,
     _OBS_MAX_RISKY_MARKERS,
     _OBS_MAX_SUGGESTED_CHECKS,
+    _OBS_MAX_TEST_FILES,
+    OSNObservationPacket,
 )
 
 # Noisy dirs to skip - mirrors analysis/repo.py _SKIP_DIRS with .codegraph added.

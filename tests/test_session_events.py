@@ -7,7 +7,6 @@ import pytest
 
 from openshard.history.session_events import SessionEventWriter, _truncate
 
-
 # ── _truncate ───────────────────────────────────────────────────────────────
 
 

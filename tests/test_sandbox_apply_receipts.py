@@ -18,7 +18,6 @@ from openshard.history.sandbox_apply_receipts import (
 )
 from openshard.security.paths import UnsafePathError, resolve_safe_repo_path
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------

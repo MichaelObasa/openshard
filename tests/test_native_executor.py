@@ -55,10 +55,10 @@ from openshard.native.context import (
     render_verification_failure_context,
 )
 from openshard.native.executor import (
-    NativeAgentExecutor,
-    NativeRunMeta,
     _MAX_EXPLICIT_SNIPPET_FILES,
     _MAX_OSN_LOOP_STEPS,
+    NativeAgentExecutor,
+    NativeRunMeta,
     _build_native_plan,
     _extract_explicit_file_paths,
     _extract_search_query,
@@ -2235,7 +2235,10 @@ class TestNativeDiffReviewPipeline(unittest.TestCase):
 
 def _safe_cmd():
     from openshard.verification.plan import (
-        CommandSafety, VerificationCommand, VerificationKind, VerificationSource,
+        CommandSafety,
+        VerificationCommand,
+        VerificationKind,
+        VerificationSource,
     )
     return VerificationCommand(
         name="pytest",
@@ -2249,7 +2252,10 @@ def _safe_cmd():
 
 def _unsafe_cmd(safety_label):
     from openshard.verification.plan import (
-        CommandSafety, VerificationCommand, VerificationKind, VerificationSource,
+        CommandSafety,
+        VerificationCommand,
+        VerificationKind,
+        VerificationSource,
     )
     return VerificationCommand(
         name="make",
@@ -2350,8 +2356,11 @@ class TestNativeVerificationLoop(unittest.TestCase):
     def test_native_retry_calls_review_diff_twice(self):
         from openshard.execution.generator import ChangedFile
         from openshard.verification.plan import (
-            CommandSafety, VerificationCommand, VerificationKind,
-            VerificationPlan, VerificationSource,
+            CommandSafety,
+            VerificationCommand,
+            VerificationKind,
+            VerificationPlan,
+            VerificationSource,
         )
 
         safe_file = ChangedFile(
@@ -2696,7 +2705,10 @@ class TestNativeVerificationCommandSummary(unittest.TestCase):
 
     def _cmd(self, safety_label: str):
         from openshard.verification.plan import (
-            CommandSafety, VerificationCommand, VerificationKind, VerificationSource,
+            CommandSafety,
+            VerificationCommand,
+            VerificationKind,
+            VerificationSource,
         )
         return VerificationCommand(
             name="pytest",
@@ -2875,7 +2887,10 @@ class TestNativeCommandPolicyPreview(unittest.TestCase):
 
     def _cmd(self, safety_label: str):
         from openshard.verification.plan import (
-            CommandSafety, VerificationCommand, VerificationKind, VerificationSource,
+            CommandSafety,
+            VerificationCommand,
+            VerificationKind,
+            VerificationSource,
         )
         return VerificationCommand(
             name="pytest",
@@ -3347,6 +3362,7 @@ import click  # noqa: E402 — needed for CliRunner command wrapper below
 
 def _render_native_summary(report: NativeFinalReport | None) -> str:
     from click.testing import CliRunner
+
     from openshard.cli.run_output import _print_native_summary
 
     meta = NativeRunMeta()
@@ -3362,6 +3378,7 @@ def _render_native_summary(report: NativeFinalReport | None) -> str:
 def _render_native_demo_block_str(meta: NativeRunMeta | None) -> str:
     """Wrap _print_native_demo_block in CliRunner for unit testing."""
     from click.testing import CliRunner
+
     from openshard.cli.run_output import _print_native_demo_block
 
     @click.command()
@@ -3715,6 +3732,7 @@ class TestNativeSummaryRenderer(unittest.TestCase):
     # 15 — getattr guard: passing None directly must not crash
     def test_renderer_accepts_none_meta(self):
         from click.testing import CliRunner
+
         from openshard.cli.run_output import _print_native_summary
 
         @click.command()
@@ -4118,6 +4136,7 @@ class TestNativeBackends(unittest.TestCase):
 
     def test_deepagents_unavailable_when_not_installed(self):
         import sys
+
         from openshard.native.backends import DeepAgentsNativeBackend
 
         with patch.dict(sys.modules, {"deepagents": None}):
@@ -4130,6 +4149,7 @@ class TestNativeBackends(unittest.TestCase):
 
     def test_deepagents_available_when_installed(self):
         import sys
+
         from openshard.native.backends import DeepAgentsNativeBackend
 
         with patch.dict(sys.modules, {"deepagents": MagicMock()}):
@@ -4207,6 +4227,7 @@ class TestDeepAgentsReadonlyProof(unittest.TestCase):
 
     def test_missing_deepagents_returns_unavailable(self):
         import sys
+
         from openshard.native.backends import _default_deepagents_proof
         with patch.dict(sys.modules, {"deepagents": None}):
             result = _default_deepagents_proof("fix bug")
@@ -4216,6 +4237,7 @@ class TestDeepAgentsReadonlyProof(unittest.TestCase):
     def test_installed_no_model_returns_unconfigured(self):
         # No deepagents_model in context → unconfigured without calling create_deep_agent
         import sys
+
         from openshard.native.backends import _default_deepagents_proof
         mock_create = MagicMock()
         fake_da = MagicMock()
@@ -4361,6 +4383,8 @@ class TestNativeContextPacket(unittest.TestCase):
 
     from openshard.native.context import (
         NativeContextPacket as _NativeContextPacket,
+    )
+    from openshard.native.context import (
         build_native_context_packet as _build_packet,
     )
 
@@ -4441,8 +4465,9 @@ class TestNativeContextPacket(unittest.TestCase):
         self.assertEqual(packet.selected_skills, ["python"])
 
     def test_builder_does_not_store_raw_content(self):
-        from openshard.native.context import build_native_context_packet
         import dataclasses
+
+        from openshard.native.context import build_native_context_packet
         packet = build_native_context_packet(
             task="fix the bug",
             read_search_findings=["file:src/main.py"],
@@ -4474,6 +4499,7 @@ class TestNativeContextPacket(unittest.TestCase):
 
     def test_pipeline_serializes_context_packet(self):
         from dataclasses import asdict
+
         from openshard.native.context import NativeContextPacket
         packet = NativeContextPacket(
             task_preview="do something",
@@ -5446,8 +5472,9 @@ class TestNativeApprovalRequest(unittest.TestCase):
     # --- executor integration tests ---
 
     def test_executor_stores_approval_request(self):
-        from openshard.native.executor import NativeAgentExecutor
         from unittest.mock import patch as _patch
+
+        from openshard.native.executor import NativeAgentExecutor
         fake_gen = _make_generator_mock()
         with _patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
             executor = NativeAgentExecutor(provider=MagicMock())
@@ -5459,8 +5486,9 @@ class TestNativeApprovalRequest(unittest.TestCase):
         self.assertIs(executor.native_meta.approval_request, request)
 
     def test_executor_records_approval_request_loop_step(self):
-        from openshard.native.executor import NativeAgentExecutor
         from unittest.mock import patch as _patch
+
+        from openshard.native.executor import NativeAgentExecutor
         fake_gen = _make_generator_mock()
         with _patch("openshard.native.executor.ExecutionGenerator", return_value=fake_gen):
             executor = NativeAgentExecutor(provider=MagicMock())

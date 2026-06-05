@@ -17,7 +17,6 @@ from openshard.evals.case_builder import (
 from openshard.history.failures import FailureClassification, classify_failure
 from openshard.history.shard_contract import build_shard_receipt
 
-
 # --- CLI harness ------------------------------------------------------------
 
 def _invoke(args: list[str], entries: list[dict] | None, *, prewrite=None):

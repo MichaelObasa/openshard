@@ -1,7 +1,7 @@
 
+from openshard.skills.context import build_skills_context
 from openshard.skills.discovery import SkillDef
 from openshard.skills.matcher import MatchedSkill
-from openshard.skills.context import build_skills_context
 
 
 def _skill(slug="jwt-auth", name="JWT Auth", description="Handles JWT flows",

@@ -17,7 +17,6 @@ from openshard.reflection.reflector import (
     render_run_reflection,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -391,6 +390,7 @@ class TestCLIReflectLast(unittest.TestCase):
 
     def test_no_history_shows_helpful_message(self):
         from click.testing import CliRunner
+
         from openshard.cli.main import cli
         runner = CliRunner()
         with runner.isolated_filesystem():
@@ -400,6 +400,7 @@ class TestCLIReflectLast(unittest.TestCase):
 
     def test_with_history_renders_reflection(self):
         from click.testing import CliRunner
+
         from openshard.cli.main import cli
 
         entry = {
@@ -436,6 +437,7 @@ class TestCLIReflectLast(unittest.TestCase):
 
     def test_reflect_output_does_not_expose_raw_task_text(self):
         from click.testing import CliRunner
+
         from openshard.cli.main import cli
 
         raw_task = "Add unit tests for the auth module with secret key sk-ant-abc123"

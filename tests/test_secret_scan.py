@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
-
 from dataclasses import asdict
+from pathlib import Path
 
 from openshard.security.secret_scan import (
     SecretScanResult,
@@ -14,7 +13,6 @@ from openshard.security.secret_scan import (
     scan_paths_for_secrets,
     scrub_text_for_secrets,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -356,7 +354,11 @@ class TestReceiptIntegration(unittest.TestCase):
         self.assertNotIn(raw_secret, rendered)
 
     def test_old_receipt_without_scan_renders_safely(self):
-        from openshard.history.shard_contract import build_shard_receipt, render_full_shard_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_compact_shard_receipt,
+            render_full_shard_receipt,
+        )
         entry = {
             "task": "old task",
             "timestamp": "2025-01-01T00:00:00Z",
@@ -373,14 +375,20 @@ class TestReceiptIntegration(unittest.TestCase):
         self.assertNotIn("EVIDENCE CAPSULES\n\n", full)
 
     def test_compact_receipt_shows_secrets_row_when_findings(self):
-        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_compact_shard_receipt,
+        )
         receipt = build_shard_receipt(self._entry_with_scan_result())
         compact = render_compact_shard_receipt(receipt)
         self.assertIn("Secrets", compact)
         self.assertIn("finding", compact)
 
     def test_compact_receipt_no_secrets_row_when_clean(self):
-        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_compact_shard_receipt,
+        )
         entry = {
             "task": "clean task",
             "timestamp": "2026-04-13T06:24:08.695472Z",
@@ -411,7 +419,10 @@ class TestReceiptIntegration(unittest.TestCase):
         self.assertIn("secret_scan", kinds)
 
     def test_compact_receipt_wording_honest(self):
-        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_compact_shard_receipt,
+        )
         receipt = build_shard_receipt(self._entry_with_scan_result())
         compact = render_compact_shard_receipt(receipt)
         # Must not imply blocking or model protection

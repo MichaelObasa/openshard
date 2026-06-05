@@ -35,7 +35,6 @@ from openshard.history.run_checkpoints import (
 )
 from openshard.security.paths import UnsafePathError, resolve_safe_repo_path
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -596,8 +595,8 @@ _PYTHON_REPO_CP = RepoFacts(
 
 
 def _make_native_mock_cp(generate_side_effect=None):
+    from openshard.native.context import NativeApprovalRequest, NativeChangeBudgetSoftGate
     from openshard.native.executor import NativeRunMeta
-    from openshard.native.context import NativeChangeBudgetSoftGate, NativeApprovalRequest
 
     g = MagicMock()
     if generate_side_effect is not None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from openshard.tui.commands import TuiCommand, parse_tui_input
 
-
 # ── Plain natural language ─────────────────────────────────────────────────
 
 

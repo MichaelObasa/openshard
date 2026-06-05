@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+
 from openshard.analysis.repo import RepoFacts
 from openshard.routing.form_factor_policy import (
     ExecutionFormFactorDecision,

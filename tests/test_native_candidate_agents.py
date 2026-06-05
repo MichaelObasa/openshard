@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import tempfile
 from dataclasses import asdict
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
-from pathlib import Path
 
 from click.testing import CliRunner
 
@@ -22,15 +22,14 @@ from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
 from openshard.native.context import (
     NativeApprovalRequest,
-    NativeChangeBudgetSoftGate,
     NativeCandidateAttempt,
     NativeCandidateSummary,
+    NativeChangeBudgetSoftGate,
     NativeSandboxMeta,
     record_native_candidate_attempt,
     render_native_candidate_summary,
     select_native_candidate,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers

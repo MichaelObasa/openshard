@@ -3,9 +3,8 @@ from __future__ import annotations
 import re
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path, PureWindowsPath
-from typing import Optional
 
 from openshard.run.timeline import normalize_timeline
 
@@ -217,8 +216,8 @@ def _is_metadata_noise(f: ShardFinding) -> bool:
 def group_review_findings(
     findings: list[ShardFinding],
     *,
-    caps: "dict[str, int] | None" = None,
-) -> "tuple[list[ShardFinding], ShardFinding | None, int, int]":
+    caps: dict[str, int] | None = None,
+) -> tuple[list[ShardFinding], ShardFinding | None, int, int]:
     """Group and rank findings for compact display.
 
     Returns (visible_substantive, grouped_metadata_or_None, hidden_substantive_count, raw_total).
@@ -266,7 +265,7 @@ def group_review_findings(
         hidden_count += max(0, len(group) - cap)
 
     # Build grouped metadata finding
-    meta_group: "ShardFinding | None" = None
+    meta_group: ShardFinding | None = None
     if metadata:
         # Detect term (labels vs tags) from messages
         uses_labels = any("label" in f.message.lower() for f in metadata)
@@ -401,12 +400,12 @@ class ShardReceipt:
     cost_display: str
     result: str
     status: str
-    duration_seconds: Optional[float]
-    repo: Optional[str] = None
-    branch: Optional[str] = None
-    git_state: Optional[str] = None
-    context_quality: Optional[str] = None
-    files_read_count: Optional[int] = None
+    duration_seconds: float | None
+    repo: str | None = None
+    branch: str | None = None
+    git_state: str | None = None
+    context_quality: str | None = None
+    files_read_count: int | None = None
     inspected_files: list[str] = field(default_factory=list)
     files_referenced: list[str] = field(default_factory=list)
     files_touched: list[str] = field(default_factory=list)
@@ -415,17 +414,17 @@ class ShardReceipt:
     blocked_paths: list[str] = field(default_factory=list)
     blocked_commands: list[str] = field(default_factory=list)
     check_results: list[str] = field(default_factory=list)
-    diff_added: Optional[int] = None
-    diff_removed: Optional[int] = None
-    cost_raw: Optional[float] = None
+    diff_added: int | None = None
+    diff_removed: int | None = None
+    cost_raw: float | None = None
     # Each tuple is (friendly_stage_label, friendly_model_name).
     model_stages: list[tuple[str, str]] = field(default_factory=list)
     findings: list[ShardFinding] = field(default_factory=list)
     agent_notes: list[str] = field(default_factory=list)
     run_timeline: list = field(default_factory=list)
-    developer_feedback: Optional[dict] = None
+    developer_feedback: dict | None = None
     approval_required: bool = False
-    approval_granted: Optional[bool] = None
+    approval_granted: bool | None = None
     approval_reason: str = ""
     file_evidence: list[FileEvidence] = field(default_factory=list)
     model_advisory: list[dict] = field(default_factory=list)
@@ -476,7 +475,7 @@ class ShardReceipt:
 
 def _verification_from_osn_contract(
     entry: dict,
-) -> tuple[str, str, Optional[int], Optional[float], bool]:
+) -> tuple[str, str, int | None, float | None, bool]:
     """Map a persisted OSN verification contract to canonical receipt fields.
 
     Returns (status_token, reason, returncode, duration_seconds, raw_output_stored).
@@ -519,12 +518,12 @@ def _verification_from_osn_contract(
     return token, reason, returncode, duration, raw_stored
 
 
-def _make_shard_id(timestamp: str, index: Optional[int]) -> str:
+def _make_shard_id(timestamp: str, index: int | None) -> str:
     try:
         dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         date_str = dt.strftime("%Y%m%d")
     except (ValueError, AttributeError, TypeError):
-        date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+        date_str = datetime.now(UTC).strftime("%Y%m%d")
     n = (index + 1) if index is not None else 1
     return f"shard-{date_str}-{n:04d}"
 
@@ -589,7 +588,7 @@ def _workspace_folder_name(raw: object) -> str | None:
     return Path(value).name or None
 
 
-def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceipt:
+def build_shard_receipt(entry: dict, index: int | None = None) -> ShardReceipt:
     """Convert a raw run-history entry dict into a ShardReceipt. Never raises."""
     timestamp = entry.get("timestamp") or ""
     task = entry.get("task") or ""
@@ -706,7 +705,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     else:
         approval = "Not recorded"
     _approval_required = bool(approval_receipt_raw)
-    _approval_granted: Optional[bool] = (
+    _approval_granted: bool | None = (
         approval_receipt_raw.get("granted") if approval_receipt_raw else None
     )
     _approval_reason: str = approval_receipt_raw.get("reason", "") if approval_receipt_raw else ""
@@ -807,7 +806,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     findings = _extract_findings(entry)
     agent_notes = _safe_str_list(entry.get("agent_notes"))
 
-    repo: Optional[str] = entry.get("repo_name") or None
+    repo: str | None = entry.get("repo_name") or None
     if repo is None:
         repo = _workspace_folder_name(entry.get("workspace_path"))
 
@@ -829,7 +828,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     cqs = entry.get("context_quality_score") or {}
     _cqs_level = cqs.get("level") if isinstance(cqs, dict) else None
     if _cqs_level in ("good", "strong"):
-        context_quality: Optional[str] = "Good"
+        context_quality: str | None = "Good"
     elif _cqs_level == "fair":
         context_quality = "Partial"
     elif _cqs_level == "weak":
@@ -841,7 +840,7 @@ def build_shard_receipt(entry: dict, index: Optional[int] = None) -> ShardReceip
     _fc_read = _fc.get("files_read")
     _fc_paths = _fc.get("paths")
     if type(_fc_read) is int:
-        files_read_count: Optional[int] = _fc_read
+        files_read_count: int | None = _fc_read
     else:
         _fr2 = entry.get("final_report") or {}
         _snip = _fr2.get("snippet_files")
@@ -1171,24 +1170,24 @@ def build_live_run_receipt(
     *,
     task: str,
     run_id: str,
-    run_index: "Optional[int]",
+    run_index: int | None,
     agent: str,
     stage_runs: list,
-    routing_model: "Optional[str]",
+    routing_model: str | None,
     risk: str,
     sandbox: str,
     files_changed: int,
-    verification_attempted: "Optional[bool]",
-    verification_passed: "Optional[bool]",
+    verification_attempted: bool | None,
+    verification_passed: bool | None,
     approval: str,
-    estimated_cost: "Optional[float]",
+    estimated_cost: float | None,
     result_summary: str,
-    result: "Optional[str]" = None,
-    agent_notes: "Optional[list[str]]" = None,
-    findings: "Optional[list[ShardFinding]]" = None,
-    run_timeline: "Optional[list[dict]]" = None,
-    review_checks: "Optional[list[dict]]" = None,
-    routing_selected_model: "Optional[str]" = None,
+    result: str | None = None,
+    agent_notes: list[str] | None = None,
+    findings: list[ShardFinding] | None = None,
+    run_timeline: list[dict] | None = None,
+    review_checks: list[dict] | None = None,
+    routing_selected_model: str | None = None,
 ) -> ShardReceipt:
     """Build a ShardReceipt from live run metadata (before log write). Pure, no I/O.
 

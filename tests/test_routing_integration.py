@@ -370,7 +370,7 @@ class TestDeepSeekBoilerplateModel(unittest.TestCase):
     """DeepSeek V4 Flash is the boilerplate model; V3.2 is no longer the default."""
 
     def test_boilerplate_keyword_routes_to_v4_flash(self):
-        from openshard.routing.engine import route, MODEL_CHEAP
+        from openshard.routing.engine import MODEL_CHEAP, route
         decision = route("add a simple validation helper")
         self.assertEqual(decision.category, "boilerplate")
         self.assertEqual(decision.model, MODEL_CHEAP)

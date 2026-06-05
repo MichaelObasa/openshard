@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 _SIGNALS_FILE = Path(".openshard") / "session_signals.jsonl"
@@ -12,7 +12,7 @@ RETRY_WORDS = frozenset({"retry", "try again", "redo", "again", "fix that"})
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _signal(

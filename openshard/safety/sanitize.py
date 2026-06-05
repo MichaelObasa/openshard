@@ -42,7 +42,7 @@ def looks_like_secret(s: str) -> bool:
     return any(pat.search(s) for pat in SECRET_PATTERNS)
 
 
-def sanitize_text(s: object, limit: int) -> "str | None":
+def sanitize_text(s: object, limit: int) -> str | None:
     """Sanitise an untrusted string for safe export.
 
     - Coerces to str; returns None for non-str/empty input.

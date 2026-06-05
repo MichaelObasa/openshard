@@ -20,9 +20,9 @@ from openshard.cli.run_output import (
 from openshard.history.shard_contract import (
     ShardFinding,
     ShardReceipt,
+    _display_model_name,
     build_live_run_receipt,
     render_compact_shard_receipt,
-    _display_model_name,
 )
 
 
@@ -621,6 +621,7 @@ class TestModelDisplayFallback(unittest.TestCase):
 def _render_last(entry: dict, detail: str = "default") -> str:
     import click
     from click.testing import CliRunner
+
     from openshard.cli.main import _render_log_entry
 
     @click.command()
@@ -938,7 +939,7 @@ class TestExtractFindingsFromModelAnswer(unittest.TestCase):
 class TestExecutorMetadataConsistency(unittest.TestCase):
     """Executor label in receipt is consistent with actual execution metadata."""
 
-    def _make_receipt(self, agent: str) -> "ShardReceipt":
+    def _make_receipt(self, agent: str) -> ShardReceipt:
         return build_live_run_receipt(
             task="production-iac-hardening review",
             run_id="2026-05-22T10:00:00Z",
@@ -970,6 +971,7 @@ class TestExecutorMetadataConsistency(unittest.TestCase):
     def test_render_post_run_native_shows_openshard_native(self):
         import click
         from click.testing import CliRunner
+
         from openshard.cli.run_output import render_post_run
 
         @click.command()
@@ -1004,6 +1006,7 @@ class TestExecutorMetadataConsistency(unittest.TestCase):
     def test_render_post_run_non_native_shows_openshard(self):
         import click
         from click.testing import CliRunner
+
         from openshard.cli.run_output import render_post_run
 
         @click.command()
@@ -1065,7 +1068,7 @@ class TestExecutionSuffixVisibleMemoInstruction(unittest.TestCase):
 class TestReviewTaskRiskFloorInReceipt(unittest.TestCase):
     """is_review_task flag raises risk floor to High in build_shard_receipt (mirrors live receipt)."""
 
-    def _entry(self, is_review_task: bool, risk_level: "str | None") -> dict:
+    def _entry(self, is_review_task: bool, risk_level: str | None) -> dict:
         entry: dict = {
             "task": "production-iac-hardening",
             "timestamp": "2026-05-22T10:00:00Z",
@@ -1099,7 +1102,10 @@ class TestReviewTaskRiskFloorInReceipt(unittest.TestCase):
         self.assertEqual(receipt.risk, "Low")
 
     def test_review_task_risk_high_in_compact_receipt(self):
-        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_compact_shard_receipt,
+        )
         receipt = build_shard_receipt(self._entry(is_review_task=True, risk_level="low"))
         rendered = render_compact_shard_receipt(receipt)
         self.assertIn("High", rendered)
@@ -1297,10 +1303,11 @@ class TestExecutorAutoSelection(unittest.TestCase):
     def test_explicit_opencode_mapping_unchanged(self):
         # Confirm pipeline maps effective_workflow="opencode" → effective_executor="opencode"
         # without going through _suggest_executor (which never returns opencode)
-        import openshard.run.pipeline as _pipe_mod
         # The mapping is a simple if/elif at lines ~353-354; verify the constant exists
         # We test the module compiles and the workflow choice "opencode" is accepted
         import inspect
+
+        import openshard.run.pipeline as _pipe_mod
         src = inspect.getsource(_pipe_mod.RunPipeline.run)
         self.assertIn('"opencode"', src, "opencode workflow mapping must be preserved in pipeline.run()")
 
@@ -1338,7 +1345,7 @@ class TestShardIdConsistency(unittest.TestCase):
 
     def test_fallback_to_computed_when_shard_id_not_stored(self):
         """When no stored shard_id, build_shard_receipt falls back to _make_shard_id(ts, index)."""
-        from openshard.history.shard_contract import build_shard_receipt, _make_shard_id
+        from openshard.history.shard_contract import _make_shard_id, build_shard_receipt
         entry = self._minimal_entry()
         receipt = build_shard_receipt(entry, index=4)
         expected = _make_shard_id("2026-05-25T12:00:00Z", 4)
@@ -1350,6 +1357,7 @@ class TestShardIdConsistency(unittest.TestCase):
         import json
         import time
         from unittest.mock import MagicMock, patch
+
         from openshard.run.pipeline import _log_run
 
         captured: list[str] = []

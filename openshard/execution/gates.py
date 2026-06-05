@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List
 
 from openshard.policy.decision import PolicyDecision, resolve_policy_decisions
 
@@ -41,12 +40,12 @@ def _risky_match(file_path: str, risky_paths: set[str]) -> bool:
 
 
 class GateEvaluator:
-    def __init__(self, approval_mode: str, risky_paths: List[str] | None, cost_threshold: float):
+    def __init__(self, approval_mode: str, risky_paths: list[str] | None, cost_threshold: float):
         self.approval_mode = approval_mode
         self.risky_paths = set(risky_paths or [])
         self.cost_threshold = cost_threshold
 
-    def check_file_write(self, files: List[str]) -> GateDecision:
+    def check_file_write(self, files: list[str]) -> GateDecision:
         if self.approval_mode == "ask":
             return GateDecision(True, f"File write requested: {', '.join(files[:3])}")
         if self.approval_mode == "smart" and self.risky_paths:
@@ -71,20 +70,20 @@ class GateEvaluator:
             return GateDecision(True, f"Estimated cost ${estimate:.4f} exceeds threshold ${self.cost_threshold:.2f}")
         return GateDecision(False, "")
 
-    def check_risky_paths(self, files: List[str]) -> GateDecision:
+    def check_risky_paths(self, files: list[str]) -> GateDecision:
         if self.approval_mode in ("ask", "smart") and self.risky_paths:
             hits = [f for f in files if _risky_match(f, self.risky_paths)]
             if hits:
                 return GateDecision(True, f"Risky paths detected: {', '.join(hits[:3])}")
         return GateDecision(False, "")
 
-    def check_stack_mismatch(self, mismatches: List[str]) -> GateDecision:
+    def check_stack_mismatch(self, mismatches: list[str]) -> GateDecision:
         if mismatches:
             return GateDecision(True, f"Stack mismatch: {', '.join(mismatches[:3])}")
         return GateDecision(False, "")
 
 
-def resolve_gate_decisions(decisions: List[GateDecision]) -> GateDecision:
+def resolve_gate_decisions(decisions: list[GateDecision]) -> GateDecision:
     """Combine multiple gate decisions through the canonical policy resolver's
     deny > ask > allow ordering instead of ad-hoc if/elif logic.
 

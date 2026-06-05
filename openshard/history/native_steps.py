@@ -18,7 +18,7 @@ class NativeStepEvent:
     run_id: str = ""
     timestamp: str = field(
         default_factory=lambda: datetime.datetime.now(
-            datetime.timezone.utc
+            datetime.UTC
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
     step_index: int = 0

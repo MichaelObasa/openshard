@@ -14,7 +14,6 @@ from dataclasses import asdict, fields
 from types import SimpleNamespace
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

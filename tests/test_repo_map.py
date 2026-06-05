@@ -10,10 +10,10 @@ from openshard.analysis import repo_map as rm
 from openshard.analysis.repo_map import (
     GitInfo,
     RepoMap,
-    build_repo_map,
-    compute_repo_fingerprint,
     _porcelain_is_dirty,
     _sanitize_meta,
+    build_repo_map,
+    compute_repo_fingerprint,
 )
 from openshard.analysis.repo_map_cache import (
     cache_path_for,

@@ -4,20 +4,19 @@ import json
 import unittest
 from types import SimpleNamespace
 
+from openshard.native.context import build_native_tier_dispatch_receipt
 from openshard.native.dispatch import (
-    TierCandidate,
     _ROLE_DEFAULT_TIER,
     _ROLE_VALID_TIERS,
     _TIER_CANDIDATES,
     _TIER_MODEL_MAP,
     _UNKNOWN_TIER_FALLBACK,
+    TierCandidate,
     get_tier_candidate,
     resolve_role,
     resolve_tier,
 )
-from openshard.native.context import build_native_tier_dispatch_receipt
 from openshard.routing.engine import MODEL_CHEAP, MODEL_MAIN, MODEL_STRONG
-
 
 # ---------------------------------------------------------------------------
 # TierCandidate structure

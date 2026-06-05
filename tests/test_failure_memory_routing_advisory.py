@@ -25,6 +25,10 @@ from types import SimpleNamespace
 import click
 from click.testing import CliRunner
 
+from openshard.cli.run_output import (
+    _native_meta_from_entry,
+    _render_native_demo_block,
+)
 from openshard.history.failure_memory import (
     NativeFailureMemoryEvent,
     _event_to_dict,
@@ -35,11 +39,6 @@ from openshard.native.context import (
     build_native_failure_memory_routing_advisory,
     render_native_failure_memory_routing_advisory,
 )
-from openshard.cli.run_output import (
-    _native_meta_from_entry,
-    _render_native_demo_block,
-)
-
 
 # ---------------------------------------------------------------------------
 # Helpers

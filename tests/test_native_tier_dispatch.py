@@ -5,14 +5,14 @@ import unittest
 from dataclasses import asdict
 from types import SimpleNamespace
 
+from openshard.native.context import (
+    NativeTierDispatchReceipt,
+    build_native_tier_dispatch_receipt,
+)
 from openshard.native.dispatch import (
     _TIER_MODEL_MAP,
     resolve_tier,
     resolve_tier_for_category,
-)
-from openshard.native.context import (
-    NativeTierDispatchReceipt,
-    build_native_tier_dispatch_receipt,
 )
 from openshard.routing.engine import MODEL_CHEAP, MODEL_MAIN, MODEL_STRONG
 

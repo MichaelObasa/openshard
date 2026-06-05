@@ -177,7 +177,7 @@ def coerce_shard_entry(entry: object) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def shard_changes_made(receipt: "ShardReceipt") -> bool:
+def shard_changes_made(receipt: ShardReceipt) -> bool:
     """True when the run recorded at least one file change."""
     try:
         return bool(receipt.files_detail) or (receipt.files_changed or 0) > 0
@@ -185,7 +185,7 @@ def shard_changes_made(receipt: "ShardReceipt") -> bool:
         return False
 
 
-def shard_manual_fix_required(receipt: "ShardReceipt") -> bool:
+def shard_manual_fix_required(receipt: ShardReceipt) -> bool:
     """True when developer feedback flagged that a manual fix was required."""
     df = getattr(receipt, "developer_feedback", None)
     return bool(df.get("manual_fix_required")) if isinstance(df, dict) else False

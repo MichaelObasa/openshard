@@ -17,7 +17,7 @@ class SandboxApplyReceipt:
     receipt_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: str = field(
         default_factory=lambda: datetime.datetime.now(
-            datetime.timezone.utc
+            datetime.UTC
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
     source_run_id: str = ""

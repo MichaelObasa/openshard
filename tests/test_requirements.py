@@ -3,7 +3,11 @@ from __future__ import annotations
 import unittest
 
 from openshard.execution.stages import Stage
-from openshard.scoring.requirements import TaskRequirements, requirements_from_category, requirements_from_stage
+from openshard.scoring.requirements import (
+    TaskRequirements,
+    requirements_from_category,
+    requirements_from_stage,
+)
 
 
 class TestRequirementsFromCategory(unittest.TestCase):

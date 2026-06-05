@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
+
 import pytest
 
 from openshard.verification.plan import (
@@ -260,7 +261,12 @@ def test_render_shows_config_source():
 
 
 def _make_cmd_for_label(argv: list[str]) -> object:
-    from openshard.verification.plan import VerificationCommand, CommandSafety, VerificationKind, VerificationSource
+    from openshard.verification.plan import (
+        CommandSafety,
+        VerificationCommand,
+        VerificationKind,
+        VerificationSource,
+    )
     return VerificationCommand(
         name="tests",
         argv=argv,

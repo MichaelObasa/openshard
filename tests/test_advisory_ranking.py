@@ -9,7 +9,6 @@ from openshard.routing.executor_advisory import (
     render_executor_advisory,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -231,6 +230,7 @@ class TestPurity(unittest.TestCase):
         # rank_executors takes opencode_available as a plain bool — it never
         # calls detect_opencode() or runs a subprocess internally.
         import inspect
+
         import openshard.routing.executor_advisory as mod
         src = inspect.getsource(mod.rank_executors)
         # Check for actual subprocess call patterns, not just the word in a docstring
@@ -243,6 +243,7 @@ class TestPurity(unittest.TestCase):
 
     def test_rank_executors_has_no_network_imports(self):
         import inspect
+
         import openshard.routing.executor_advisory as mod
         src = inspect.getsource(mod)
         self.assertNotIn("urllib", src)

@@ -25,7 +25,7 @@ def run_verification_plan(
     capture: bool = False,
     detail: str = "default",
     timeout: float = _DEFAULT_TIMEOUT,
-) -> "int | tuple[int, str]":
+) -> int | tuple[int, str]:
     """Execute the first VerificationCommand from *plan*.
 
     - No commands  → returns 0; announces nothing-to-run (matches old behaviour).

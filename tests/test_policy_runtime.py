@@ -285,7 +285,10 @@ class TestReceiptRendering(unittest.TestCase):
         self.assertIn("budget exceeded", out)
 
     def test_compact_receipt_unchanged_with_runtime_policy_decisions(self):
-        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_compact_shard_receipt,
+        )
 
         entry = self._make_entry_with_runtime_pds()
         receipt = build_shard_receipt(entry)

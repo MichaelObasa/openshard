@@ -11,7 +11,6 @@ import yaml
 
 from openshard.config.settings import _DEFAULTS, load_config
 
-
 # ---------------------------------------------------------------------------
 # _DEFAULTS structure
 # ---------------------------------------------------------------------------

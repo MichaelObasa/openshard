@@ -17,13 +17,13 @@ from click.testing import CliRunner
 
 from openshard.cli.main import cli
 from openshard.github.pr_comment import (
-    PRCommentSummary,
     _MAX_CHECKS,
     _MAX_EVIDENCE,
     _MAX_INSPECTED_FILES,
     _MAX_OSN_SECTIONS,
     _MAX_TEXT,
     _MAX_WARNINGS,
+    PRCommentSummary,
     build_pr_comment_summary,
     render_pr_comment,
 )

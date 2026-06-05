@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import click
 from click.testing import CliRunner
 
+from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
 from openshard.native.context import (
     NativeModelCandidateScoring,
     NativeModelPolicyReceipt,
@@ -17,7 +18,6 @@ from openshard.native.context import (
     NativeRunTrustScore,
     build_native_routing_preview,
 )
-from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
 
 
 def _ns(**kwargs: object) -> SimpleNamespace:

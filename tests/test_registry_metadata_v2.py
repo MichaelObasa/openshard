@@ -11,12 +11,12 @@ from __future__ import annotations
 import unittest
 
 from openshard.models.registry import (
+    _REGISTRY,
     METADATA_VERSION,
     PRICING_SOURCES,
     RISK_LEVELS,
     SOURCE_VALUES,
     StaticPricing,
-    _REGISTRY,
 )
 
 

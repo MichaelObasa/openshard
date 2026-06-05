@@ -4,8 +4,11 @@ import unittest
 from dataclasses import asdict
 from types import SimpleNamespace
 
+from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
 from openshard.native.context import (
+    NativeClarificationRequest,
     NativeContextProvenance,
+    NativeContextQualityScore,
     NativeContextSource,
     NativeContextUsageSummary,
     NativeEvidence,
@@ -14,12 +17,9 @@ from openshard.native.context import (
     NativeObservation,
     NativePlan,
     NativeValidationContract,
-    NativeContextQualityScore,
-    NativeClarificationRequest,
     build_native_context_provenance,
     render_native_context_provenance,
 )
-from openshard.cli.run_output import _native_meta_from_entry, _render_native_demo_block
 
 
 def _build(**kwargs) -> NativeContextProvenance:

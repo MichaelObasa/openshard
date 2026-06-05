@@ -12,9 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from openshard.analysis.repo_map import (
+    _DIRTY_WARNING,
     MAX_WARNINGS,
     RepoMap,
-    _DIRTY_WARNING,
     build_repo_map,
     compute_repo_fingerprint,
 )

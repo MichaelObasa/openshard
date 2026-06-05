@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from openshard.models.registry import CAPABILITY_NAMES, ModelEntry, _CAPABILITY_ATTRS, all_models
+from openshard.models.registry import _CAPABILITY_ATTRS, CAPABILITY_NAMES, ModelEntry, all_models
 
 _COST_ORDER: dict[str, int] = {
     "free": 0,

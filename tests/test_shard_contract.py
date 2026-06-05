@@ -2173,7 +2173,7 @@ class TestBuildShardReceiptWithReviewChecks(unittest.TestCase):
 
 class TestBuildLiveReceiptWithReviewChecks(unittest.TestCase):
 
-    def _build(self, review_checks=None) -> "ShardReceipt":
+    def _build(self, review_checks=None) -> ShardReceipt:
         return build_live_run_receipt(
             task="review infra",
             run_id="2026-05-23T00:00:00Z",

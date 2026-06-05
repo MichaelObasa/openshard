@@ -9,53 +9,60 @@ from pathlib import Path
 import click
 
 from openshard import __version__
-from openshard.config.settings import (
-    load_config,
-    load_config_safe,
-    save_config,
-    find_config_path,
-    get_onboarding,
-    get_api_key,
-    get_anthropic_api_key,
-    get_openai_api_key,
+from openshard.cli.run_output import (
+    _PUBLIC_MODE_LABEL,
+    _RATIONALE_SHORT,
+    _model_label,
+    _native_meta_from_entry,
+    _profile_display_label,
+    _render_native_inspection,
+    _truncate_note,
 )
-from openshard.planning.generator import PlanGenerator
-from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
-from openshard.run.pipeline import (
-    RunPipeline,
-    _LOG_PATH,
-    _suggest_executor as _suggest_executor,
-    _pre_run_cost_hint as _pre_run_cost_hint,
-    _parse_cost_hint as _parse_cost_hint,
-    _log_run as _log_run,
-    _copy_cwd_to_workspace,
-    _build_retry_prompt as _build_retry_prompt,
-    _write_files as _write_files,
-    _detect_command as _detect_command,
-    _run_verification as _run_verification,
-    _run_verification_plan as _run_verification_plan,
-    confirm_or_abort as confirm_or_abort,
+from openshard.cli.run_output import (
+    _build_model_line as _build_model_line,
+)
+from openshard.cli.run_output import (
+    _build_routing_line as _build_routing_line,
+)
+from openshard.cli.run_output import (
+    _exec_message as _exec_message,
+)
+from openshard.cli.run_output import (
+    _format_model_slug as _format_model_slug,
+)
+from openshard.cli.run_output import (
+    _print_dry_run as _print_dry_run,
+)
+from openshard.cli.run_output import (
+    _print_shrunk as _print_shrunk,
+)
+from openshard.cli.run_output import (
+    _print_summary as _print_summary,
+)
+from openshard.cli.run_output import (
+    _render_repo_map as _render_repo_map,
+)
+from openshard.cli.run_output import (
+    _render_repo_plan as _render_repo_plan,
+)
+from openshard.cli.run_output import (
+    _render_repo_summary as _render_repo_summary,
+)
+from openshard.cli.run_output import (
+    _should_shrink as _should_shrink,
 )
 from openshard.cli.run_output import (
     _Spinner as _Spinner,
-    _print_summary as _print_summary,
-    _render_repo_summary as _render_repo_summary,
-    _render_repo_map as _render_repo_map,
-    _render_repo_plan as _render_repo_plan,
-    _format_model_slug as _format_model_slug,
-    _model_label,
-    _profile_display_label,
-    _build_routing_line as _build_routing_line,
-    _exec_message as _exec_message,
-    _build_model_line as _build_model_line,
-    _truncate_note,
-    _should_shrink as _should_shrink,
-    _print_shrunk as _print_shrunk,
-    _print_dry_run as _print_dry_run,
-    _render_native_inspection,
-    _native_meta_from_entry,
-    _RATIONALE_SHORT,
-    _PUBLIC_MODE_LABEL,
+)
+from openshard.config.settings import (
+    find_config_path,
+    get_anthropic_api_key,
+    get_api_key,
+    get_onboarding,
+    get_openai_api_key,
+    load_config,
+    load_config_safe,
+    save_config,
 )
 from openshard.evals.registry import load_eval_tasks
 from openshard.evals.runner import append_eval_result, run_eval_task
@@ -64,6 +71,43 @@ from openshard.history.sandbox_apply_receipts import (
     SandboxApplyReceipt,
     log_sandbox_apply_receipt,
     recent_sandbox_apply_receipts,
+)
+from openshard.planning.generator import PlanGenerator
+from openshard.providers.base import ProviderAuthError, ProviderError, ProviderRateLimitError
+from openshard.run.pipeline import (
+    _LOG_PATH,
+    RunPipeline,
+    _copy_cwd_to_workspace,
+)
+from openshard.run.pipeline import (
+    _build_retry_prompt as _build_retry_prompt,
+)
+from openshard.run.pipeline import (
+    _detect_command as _detect_command,
+)
+from openshard.run.pipeline import (
+    _log_run as _log_run,
+)
+from openshard.run.pipeline import (
+    _parse_cost_hint as _parse_cost_hint,
+)
+from openshard.run.pipeline import (
+    _pre_run_cost_hint as _pre_run_cost_hint,
+)
+from openshard.run.pipeline import (
+    _run_verification as _run_verification,
+)
+from openshard.run.pipeline import (
+    _run_verification_plan as _run_verification_plan,
+)
+from openshard.run.pipeline import (
+    _suggest_executor as _suggest_executor,
+)
+from openshard.run.pipeline import (
+    _write_files as _write_files,
+)
+from openshard.run.pipeline import (
+    confirm_or_abort as confirm_or_abort,
 )
 
 
@@ -1041,7 +1085,9 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
             click.echo(f"\n{prefix}: {', '.join(parts)}")
         elif _routing_selected or routing_model:
             _display_model = _routing_selected or routing_model
-            from openshard.history.shard_contract import display_model_name as _sc_display_model_name
+            from openshard.history.shard_contract import (
+                display_model_name as _sc_display_model_name,
+            )
             lbl = _sc_display_model_name(_display_model)
             if _routing_selected and _routing_selected != routing_model:
                 # Scored routing overrode the keyword pick — mirror receipt format.
@@ -1055,6 +1101,8 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
         # never imply three models ran when one did.
         from openshard.history.routing_truth import (
             build_routing_truth as _brt,
+        )
+        from openshard.history.routing_truth import (
             render_routing_truth_lines as _rrtl,
         )
         for _rt_line in _rrtl(_brt(entry), "default"):
@@ -1077,6 +1125,8 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
         click.echo(render_full_shard_receipt(_shard, detail=detail))
         from openshard.history.routing_truth import (
             build_routing_truth as _brt,
+        )
+        from openshard.history.routing_truth import (
             render_routing_truth_lines as _rrtl,
         )
         _rt_lines = _rrtl(_brt(entry), detail)
@@ -1297,7 +1347,10 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
 
     # Compact RECEIPT — default view only, appears before Time/Cost footer
     if detail == "default":
-        from openshard.history.shard_contract import build_shard_receipt, render_compact_shard_receipt
+        from openshard.history.shard_contract import (
+            build_shard_receipt,
+            render_compact_shard_receipt,
+        )
         _shard = build_shard_receipt(entry, index)
         click.echo("")
         click.echo(render_compact_shard_receipt(_shard))
@@ -1596,11 +1649,11 @@ def _proof_verify_last(as_json: bool) -> None:
     record is complete, safe, and usable as evidence. This is an inspection
     surface, not a CI gate.
     """
-    from openshard.history.shard_contract import build_shard_receipt
     from openshard.history.proof_contract import (
         build_shard_proof_contract,
         validate_shard_proof_contract,
     )
+    from openshard.history.shard_contract import build_shard_receipt
 
     log_path = Path.cwd() / _LOG_PATH
     entries = _load_run_entries(log_path)
@@ -1692,8 +1745,8 @@ def reflect_group() -> None:
 @click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output.")
 def reflect_last(as_json: bool) -> None:
     """Show a reflection on the most recent run."""
-    from openshard.reflection.reflector import build_run_reflection, render_run_reflection
     from openshard.history.shard_contract import build_shard_receipt
+    from openshard.reflection.reflector import build_run_reflection, render_run_reflection
 
     log_path = Path.cwd() / _LOG_PATH
     entries = _load_run_entries(log_path)
@@ -1740,8 +1793,8 @@ def pr_comment(output: str | None, as_json: bool, github_step_summary: bool, git
     referenced by $GITHUB_STEP_SUMMARY and $GITHUB_OUTPUT. This is a local,
     file-based Actions layer only: no GitHub API, no gh, no network, no auth.
     """
-    from openshard.history.shard_contract import build_shard_receipt
     from openshard.github.pr_comment import build_pr_comment_summary, render_pr_comment
+    from openshard.history.shard_contract import build_shard_receipt
 
     log_path = Path.cwd() / _LOG_PATH
     entries = _load_run_entries(log_path)
@@ -1854,8 +1907,8 @@ def ci_check(as_json: bool, strict: bool, github_output: bool) -> None:
     to pass / warn / fail / skip. No GitHub API, no gh, no network, no auth.
     Exit code is 1 only for fail (and for warnings under --strict); otherwise 0.
     """
-    from openshard.history.shard_contract import build_shard_receipt
     from openshard.ci.policy_check import evaluate_ci_check
+    from openshard.history.shard_contract import build_shard_receipt
 
     log_path = Path.cwd() / _LOG_PATH
     entries = _load_run_entries(log_path)
@@ -2041,8 +2094,8 @@ def stats_completeness(as_json: bool, limit: int) -> None:
     the fields that are consistently present (strong) or missing (weak) across
     recent runs. No network, no model calls; no secrets or absolute paths leak.
     """
-    from openshard.history.shard_contract import build_shard_receipt
     from openshard.history.completeness import evaluate_completeness
+    from openshard.history.shard_contract import build_shard_receipt
 
     log_path = Path.cwd() / _LOG_PATH
     entries = _load_run_entries(log_path)
@@ -2125,8 +2178,8 @@ def stats_failures(as_json: bool, limit: int) -> None:
     network, no model calls; no secrets, raw error messages, or absolute paths
     leak.
     """
-    from openshard.history.shard_contract import build_shard_receipt
     from openshard.history.failures import evaluate_failures
+    from openshard.history.shard_contract import build_shard_receipt
 
     log_path = Path.cwd() / _LOG_PATH
     entries = _load_run_entries(log_path)
@@ -2209,8 +2262,8 @@ def apply_last(dry_run: bool, include_files: tuple[str, ...], exclude_files: tup
     """Promote files from the most recent sandbox run into the real repo."""
     from openshard.native.sandbox_apply import (
         apply_sandbox_changes,
-        extract_sandbox_path_from_entry,
         extract_candidate_sandbox_path_from_entry,
+        extract_sandbox_path_from_entry,
         filter_sandbox_changed_files,
         list_sandbox_changed_files,
     )
@@ -2348,11 +2401,11 @@ def candidates_last() -> None:
               help="Show diff for a specific candidate (1-based index).")
 def diff_last(show_full: bool, candidate_index: int | None) -> None:
     """Preview the diff from the most recent native sandbox run."""
-    from openshard.native.sandbox_diff import get_sandbox_diff
     from openshard.native.sandbox_apply import (
-        extract_sandbox_path_from_entry,
         extract_candidate_sandbox_path_from_entry,
+        extract_sandbox_path_from_entry,
     )
+    from openshard.native.sandbox_diff import get_sandbox_diff
 
     log_path = Path.cwd() / _LOG_PATH
     if not log_path.exists():
@@ -2442,8 +2495,8 @@ def checkpoints_cmd(last_n: int) -> None:
 @cli.command("resume-last")
 def resume_last() -> None:
     """Show safe resume guidance for the most recent native run (v0)."""
-    from openshard.native.sandbox_apply import extract_sandbox_path_from_entry
     from openshard.history.run_checkpoints import run_checkpoints_for_run
+    from openshard.native.sandbox_apply import extract_sandbox_path_from_entry
 
     log_path = Path.cwd() / _LOG_PATH
     entries = _load_run_entries(log_path)
@@ -2685,7 +2738,7 @@ def feedback(
         "ci_failed": ci_failed,
         "pr_created": pr_created,
         "pr_merged": pr_merged,
-        "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "recorded_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "source": "cli",
     }
     entries[-1]["developer_feedback"] = df
@@ -3043,7 +3096,7 @@ def interactions_cmd(last_n: int) -> None:
 )
 def export_interactions(output: str | None, redacted: bool) -> None:
     """Export developer interaction events as JSONL."""
-    from openshard.history.interactions import load_interaction_events, _event_to_dict
+    from openshard.history.interactions import _event_to_dict, load_interaction_events
     events = load_interaction_events()
     if not events:
         click.echo("No interaction events recorded yet.")
@@ -3109,7 +3162,7 @@ def failure_memory_cmd(last_n: int) -> None:
 )
 def export_failure_memory(output: str | None, redacted: bool) -> None:
     """Export native failure memory events as JSONL."""
-    from openshard.history.failure_memory import load_failure_memory_events, _event_to_dict
+    from openshard.history.failure_memory import _event_to_dict, load_failure_memory_events
     events = load_failure_memory_events()
     if not events:
         click.echo("No failure memory events recorded yet.")
@@ -3740,7 +3793,12 @@ def eval_report(suite: str | None, model: str | None):
 @click.option("--by-category", is_flag=True, default=False, help="Group results by task category.")
 def eval_stats(suite: str | None, model: str | None, task: str | None, by_category: bool):
     """Show grouped pass/fail stats from .openshard/eval-runs.jsonl."""
-    from openshard.evals.stats import EVAL_RUNS_PATH, compute_category_stats, compute_eval_stats, load_eval_runs
+    from openshard.evals.stats import (
+        EVAL_RUNS_PATH,
+        compute_category_stats,
+        compute_eval_stats,
+        load_eval_runs,
+    )
 
     records = load_eval_runs(Path.cwd() / EVAL_RUNS_PATH)
 
@@ -3893,9 +3951,9 @@ def eval_create_from_last(as_json: bool, output: str | None, force: bool) -> Non
     under .openshard/evals/generated/. No network, no model calls; no secrets,
     raw file contents, diffs, transcripts, error messages, or absolute paths leak.
     """
-    from openshard.history.shard_contract import build_shard_receipt
-    from openshard.history.failures import classify_failure
     from openshard.evals.case_builder import build_eval_case, is_eligible
+    from openshard.history.failures import classify_failure
+    from openshard.history.shard_contract import build_shard_receipt
 
     command = "eval create-from-last"
     log_path = Path.cwd() / _LOG_PATH
@@ -3937,7 +3995,7 @@ def eval_create_from_last(as_json: bool, output: str | None, force: bool) -> Non
             click.echo(message)
         return
 
-    created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    created_at = datetime.datetime.now(datetime.UTC).isoformat()
     case = build_eval_case(receipt, classification, created_at)
     eval_id = case["eval_id"]
     target, warnings = _resolve_eval_output_path(eval_id, output)
@@ -4222,7 +4280,7 @@ def init(as_json: bool, assume_yes: bool, mode: str | None, provider: str | None
         "provider": sel_provider,
         "model_mode": sel_model_mode,
         "output_mode": sel_output_mode,
-        "completed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "completed_at": datetime.datetime.now(datetime.UTC).isoformat(),
     }
 
     # Merge over the full loaded base so model_tiers and friends are preserved.

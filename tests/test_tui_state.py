@@ -5,7 +5,6 @@ from unittest.mock import MagicMock, patch
 
 from openshard.tui.state import get_guardrails, load_git_info, load_recent_runs
 
-
 # ---------------------------------------------------------------------------
 # load_git_info
 # ---------------------------------------------------------------------------

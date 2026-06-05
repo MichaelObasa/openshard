@@ -5,13 +5,13 @@ from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
+from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
-from openshard.execution.stages import _parse_verdict, run_validator_stage, VALIDATOR_SYSTEM
+from openshard.execution.stages import VALIDATOR_SYSTEM, _parse_verdict, run_validator_stage
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry
 from openshard.routing.engine import MODEL_MAIN, MODEL_STRONG
 from openshard.routing.workflow_selector import WorkflowDecision
-from openshard.analysis.repo import RepoFacts
 
 _DEFAULT_CONFIG = {"approval_mode": "smart"}
 _PYTHON_REPO = RepoFacts(
@@ -266,6 +266,7 @@ class TestValidatorLastRendering(unittest.TestCase):
 
     def _render(self, entry: dict, detail: str) -> str:
         import click
+
         from openshard.cli.main import _render_log_entry
 
         @click.command()

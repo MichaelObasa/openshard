@@ -51,7 +51,7 @@ class OSNVerificationContract:
             self.status = "unknown"
 
 
-def _safe_check_summary(contract: "OSNVerificationContract") -> str:
+def _safe_check_summary(contract: OSNVerificationContract) -> str:
     """Compose a safe one-line per-check summary, or empty when no label exists.
 
     Uses only the path-free check label, the status token, and the integer

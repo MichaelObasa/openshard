@@ -15,7 +15,6 @@ from openshard.execution.stages import StageRun
 from openshard.routing.engine import MODEL_STRONG, RoutingDecision
 from openshard.run.timeline import normalize_timeline, timeline_symbol
 
-
 _ASCII_FALLBACKS: tuple[tuple[str, str], ...] = (
     ("→", "->"),   # →
     ("–", "-"),    # –
@@ -632,7 +631,11 @@ def _render_native_demo_block(native_meta: Any, detail: str = "default", entry: 
 
     plan_ledger_data = getattr(native_meta, "plan_ledger", None)
     if plan_ledger_data is not None and detail in ("more", "full"):
-        from openshard.native.context import NativePlanItem, NativePlanLedger, render_native_plan_ledger
+        from openshard.native.context import (
+            NativePlanItem,
+            NativePlanLedger,
+            render_native_plan_ledger,
+        )
         _items_raw = getattr(plan_ledger_data, "items", []) or []
         _items = []
         for _it in _items_raw:
@@ -2126,7 +2129,7 @@ def _extract_structured_findings(summary: str) -> "tuple[str, list]":
     The tag line (and any continuation lines for multi-line JSON) is stripped from the
     returned summary.  Handles models that output the JSON across multiple lines.
     """
-    from openshard.history.shard_contract import ShardFinding, _SEVERITY_ORDER
+    from openshard.history.shard_contract import _SEVERITY_ORDER, ShardFinding
 
     if not summary or _STRUCTURED_FINDINGS_TAG not in summary:
         return summary, []
@@ -2176,7 +2179,8 @@ def _extract_findings_from_review_files(files: list) -> "list":
     """
     import re as _re
     from pathlib import Path as _Path
-    from openshard.history.shard_contract import ShardFinding, _SEVERITY_ORDER
+
+    from openshard.history.shard_contract import _SEVERITY_ORDER, ShardFinding
 
     findings: list[ShardFinding] = []
     _valid_sevs = {s.lower(): s for s in _SEVERITY_ORDER if s != "Note"}
@@ -2199,7 +2203,7 @@ def _extract_findings_from_review_files(files: list) -> "list":
         if not content:
             continue
 
-        current_sev: "str | None" = None
+        current_sev: str | None = None
         for line in content.splitlines():
             stripped = line.strip()
             heading_m = _HEADING_RE.match(stripped)
@@ -2240,7 +2244,8 @@ def _extract_findings_from_model_answer(text: str) -> "list":
     Prose lines are ignored.
     """
     import re as _re
-    from openshard.history.shard_contract import ShardFinding, _SEVERITY_ORDER
+
+    from openshard.history.shard_contract import _SEVERITY_ORDER, ShardFinding
 
     if not text:
         return []
@@ -2255,7 +2260,7 @@ def _extract_findings_from_model_answer(text: str) -> "list":
     _NUM_RE = _re.compile(r'^\d+[.)]\s+(.+)$')
 
     findings: list[ShardFinding] = []
-    current_sev: "str | None" = None
+    current_sev: str | None = None
 
     for line in text.splitlines():
         stripped = line.strip()
@@ -2299,8 +2304,10 @@ def render_review_tldr_memo(findings: list, files: list) -> str:
     from openshard.history.shard_contract import (
         _FINDING_ICONS,
         _SEVERITY_ORDER,
-        _UNICODE_OK as _UNIC,
         group_review_findings,
+    )
+    from openshard.history.shard_contract import (
+        _UNICODE_OK as _UNIC,
     )
 
     if not findings:
@@ -2459,7 +2466,11 @@ def render_post_run(
 ) -> None:
     """Render the post-execution receipt in compact shard format."""
     import click
-    from openshard.history.shard_contract import build_live_run_receipt, render_compact_shard_receipt
+
+    from openshard.history.shard_contract import (
+        build_live_run_receipt,
+        render_compact_shard_receipt,
+    )
 
     _tl_lines = render_run_timeline(run_timeline, task=task, run_label=run_label)
     if _tl_lines:

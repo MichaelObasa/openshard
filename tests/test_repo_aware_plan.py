@@ -7,7 +7,6 @@ from openshard.tui.plan_mode import (
     answer_plan_mode,
 )
 
-
 # --- Basic safety guarantees ---
 
 

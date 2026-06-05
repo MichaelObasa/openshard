@@ -146,7 +146,7 @@ def _detect_osn_sections(entry: dict) -> list[str]:
     return sections[:_MAX_OSN_SECTIONS]
 
 
-def _collect_warnings(entry: dict, receipt: "ShardReceipt") -> list[str]:
+def _collect_warnings(entry: dict, receipt: ShardReceipt) -> list[str]:
     warnings: list[str] = []
 
     if receipt.error_class:
@@ -185,7 +185,7 @@ def _collect_warnings(entry: dict, receipt: "ShardReceipt") -> list[str]:
     return _cap_list(warnings, _MAX_WARNINGS)
 
 
-def _collect_evidence(receipt: "ShardReceipt", osn_sections: list[str]) -> list[str]:
+def _collect_evidence(receipt: ShardReceipt, osn_sections: list[str]) -> list[str]:
     evidence: list[str] = []
 
     safe_inspected = [p for p in receipt.inspected_files if _is_safe_path(p)]
@@ -232,7 +232,7 @@ def _collect_evidence(receipt: "ShardReceipt", osn_sections: list[str]) -> list[
     return _cap_list(evidence, _MAX_EVIDENCE)
 
 
-def _collect_checks(receipt: "ShardReceipt") -> list[str]:
+def _collect_checks(receipt: ShardReceipt) -> list[str]:
     if receipt.check_results:
         return _cap_list(receipt.check_results, _MAX_CHECKS)
     if receipt.checks_display and receipt.checks_display not in ("Not run", "Not recorded"):
@@ -240,12 +240,12 @@ def _collect_checks(receipt: "ShardReceipt") -> list[str]:
     return []
 
 
-def _collect_inspected_files(receipt: "ShardReceipt") -> list[str]:
+def _collect_inspected_files(receipt: ShardReceipt) -> list[str]:
     safe = [p for p in receipt.inspected_files if _is_safe_path(p)]
     return _cap_list(safe, _MAX_INSPECTED_FILES)
 
 
-def _derive_recommended_next_step(entry: dict, receipt: "ShardReceipt") -> str:
+def _derive_recommended_next_step(entry: dict, receipt: ShardReceipt) -> str:
     """Cascade through metadata sources for the recommended next step.
 
     Order: osn_progress_memory.next_safe_step
@@ -291,7 +291,7 @@ def _derive_recommended_next_step(entry: dict, receipt: "ShardReceipt") -> str:
     return "Review the receipt before merging."
 
 
-def _is_manual_review_required(entry: dict, receipt: "ShardReceipt") -> bool:
+def _is_manual_review_required(entry: dict, receipt: ShardReceipt) -> bool:
     """Return True if any explicit or fallback source requires manual review."""
     # Explicit latest metadata first
     prog = entry.get("osn_progress_memory")
@@ -336,7 +336,7 @@ def _is_manual_review_required(entry: dict, receipt: "ShardReceipt") -> bool:
     return False
 
 
-def build_pr_comment_summary(entry: dict, receipt: "ShardReceipt") -> PRCommentSummary:
+def build_pr_comment_summary(entry: dict, receipt: ShardReceipt) -> PRCommentSummary:
     """Build a safe PRCommentSummary from a run entry and ShardReceipt.
 
     Uses only safe, structured sources. Does not read repo files, run git,
