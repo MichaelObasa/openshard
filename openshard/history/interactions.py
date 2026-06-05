@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from openshard.history.jsonl_store import append_jsonl
 from openshard.safety.sanitize import (
     is_absolute_path as _is_absolute_path,
     sanitize_metadata as _sanitize_metadata,
@@ -167,11 +168,9 @@ def _dict_to_event(d: dict) -> DeveloperInteractionEvent:
 
 def log_interaction_event(event: DeveloperInteractionEvent) -> None:
     interactions_path = Path.cwd() / _INTERACTIONS_PATH
-    interactions_path.parent.mkdir(parents=True, exist_ok=True)
     d = _event_to_dict(sanitize_event(event))
     d["raw_content_stored"] = False
-    with interactions_path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(d) + "\n")
+    append_jsonl(interactions_path, d)
 
 
 def load_interaction_events() -> list[DeveloperInteractionEvent]:

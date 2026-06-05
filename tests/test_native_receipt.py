@@ -1359,6 +1359,12 @@ class TestShardIdConsistency(unittest.TestCase):
                 captured.append(s)
                 return len(s)
 
+            def flush(self) -> None:
+                pass
+
+            def fileno(self) -> int:
+                return 0
+
             def __enter__(self):
                 return self
 
@@ -1376,7 +1382,8 @@ class TestShardIdConsistency(unittest.TestCase):
         gen_mock.fixer_model = "mock-fixer"
 
         with patch("pathlib.Path.open", _fake_path_open), \
-             patch("pathlib.Path.mkdir"):
+             patch("pathlib.Path.mkdir"), \
+             patch("openshard.history.jsonl_store.os.fsync", lambda fd: None):
             _log_run(
                 start=time.time(),
                 task="explain the pipeline",

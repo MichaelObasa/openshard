@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from openshard.history.jsonl_store import append_jsonl
+
 ALLOWED_OUTCOMES = ["accepted", "rejected", "partial", "useful", "wrong", "needs-retry"]
 _FEEDBACK_PATH = ".openshard/feedback.jsonl"
 SCHEMA_VERSION = 1
@@ -76,9 +78,7 @@ def _dict_to_record(d: dict) -> FeedbackRecord:
 def log_feedback_record(record: FeedbackRecord, cwd: Optional[Path] = None) -> None:
     base = cwd if cwd is not None else Path.cwd()
     path = base / _FEEDBACK_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(_record_to_dict(record)) + "\n")
+    append_jsonl(path, _record_to_dict(record))
 
 
 def load_feedback_records(cwd: Optional[Path] = None) -> list[FeedbackRecord]:

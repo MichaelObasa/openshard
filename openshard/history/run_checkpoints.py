@@ -6,6 +6,8 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from openshard.history.jsonl_store import append_jsonl
+
 _CHECKPOINT_PATH = Path(".openshard") / "run_checkpoints.jsonl"
 
 
@@ -77,9 +79,7 @@ def _dict_to_event(d: dict) -> NativeRunCheckpointEvent:
 
 def log_run_checkpoint_event(event: NativeRunCheckpointEvent) -> None:
     path = Path.cwd() / _CHECKPOINT_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(_event_to_dict(event)) + "\n")
+    append_jsonl(path, _event_to_dict(event))
 
 
 def load_run_checkpoint_events() -> list[NativeRunCheckpointEvent]:

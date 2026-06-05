@@ -59,6 +59,7 @@ from openshard.cli.run_output import (
 )
 from openshard.evals.registry import load_eval_tasks
 from openshard.evals.runner import append_eval_result, run_eval_task
+from openshard.history.jsonl_store import write_jsonl
 from openshard.history.sandbox_apply_receipts import (
     SandboxApplyReceipt,
     log_sandbox_apply_receipt,
@@ -2648,9 +2649,7 @@ def feedback(
         "source": "cli",
     }
     entries[-1]["developer_feedback"] = df
-    with log_path.open("w", encoding="utf-8") as fh:
-        for entry in entries:
-            fh.write(json.dumps(entry) + "\n")
+    write_jsonl(log_path, entries)
     click.echo(f"Feedback recorded: {outcome.lower()}")
     try:
         from openshard.history.interactions import DeveloperInteractionEvent, log_interaction_event

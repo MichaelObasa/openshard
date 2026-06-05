@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-import json
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -10,6 +9,7 @@ from pathlib import Path
 
 from openshard.evals.registry import EvalTask
 from openshard.execution.generator import ExecutionGenerator
+from openshard.history.jsonl_store import append_jsonl
 from openshard.providers.openrouter import compute_cost
 from openshard.security.paths import UnsafePathError, resolve_safe_repo_path
 from openshard.verification.executor import run_verification_plan
@@ -132,7 +132,5 @@ def run_eval_task(
 
 
 def append_eval_result(result: EvalResult, log_path: Path) -> None:
-    log_path.parent.mkdir(parents=True, exist_ok=True)
     record = dataclasses.asdict(result)
-    with log_path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record) + "\n")
+    append_jsonl(log_path, record)

@@ -6,6 +6,8 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from openshard.history.jsonl_store import append_jsonl
+
 _APPLY_RECEIPTS_PATH = Path(".openshard") / "sandbox_apply_receipts.jsonl"
 
 
@@ -71,11 +73,9 @@ def _dict_to_receipt(d: dict) -> SandboxApplyReceipt:
 
 def log_sandbox_apply_receipt(receipt: SandboxApplyReceipt) -> None:
     path = Path.cwd() / _APPLY_RECEIPTS_PATH
-    path.parent.mkdir(parents=True, exist_ok=True)
     d = _receipt_to_dict(receipt)
     d["raw_content_stored"] = False
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(d) + "\n")
+    append_jsonl(path, d)
 
 
 def load_sandbox_apply_receipts() -> list[SandboxApplyReceipt]:

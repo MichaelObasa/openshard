@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
 import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+from openshard.history.jsonl_store import append_jsonl
 
 _EVENTS_FILE = Path(".openshard") / "session_events.jsonl"
 
@@ -51,8 +52,6 @@ class SessionEventWriter:
             "metadata": metadata or {},
         }
         try:
-            self._events_path.parent.mkdir(parents=True, exist_ok=True)
-            with self._events_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(event) + "\n")
+            append_jsonl(self._events_path, event)
         except OSError as exc:
             print(f"[session_events] write failed: {exc}", file=sys.stderr)
