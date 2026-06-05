@@ -206,6 +206,8 @@ This is the core OpenShard use case: let AI help with serious engineering work, 
 ## Shard receipts
 A Shard is the durable receipt for an AI engineering run.
 
+New here? Read [What is a Shard?](docs/what-is-a-shard.md).
+
 It can show:
 - Task and agent
 - Model used
