@@ -105,6 +105,27 @@ class TestLastJsonQuality(unittest.TestCase):
         self.assertNotIn("raw diff body", result.output)
 
 
+class TestLastJsonContentHash(unittest.TestCase):
+    def test_missing_hash_for_legacy_record(self):
+        # Raw entry (no content_hash) → legacy shape reports "missing".
+        result = _invoke(["last", "--json"], runs=[_STRONG_ENTRY])
+        payload = json.loads(result.output)
+        self.assertIsNone(payload["content_hash"])
+        self.assertEqual(payload["content_hash_status"], "missing")
+        self.assertTrue(payload["computed_content_hash"].startswith("sha256:"))
+
+    def test_valid_when_record_carries_matching_hash(self):
+        from openshard.history.shard_hash import compute_shard_hash
+
+        entry = dict(_STRONG_ENTRY)
+        entry["content_hash"] = compute_shard_hash(entry)
+        result = _invoke(["last", "--json"], runs=[entry])
+        payload = json.loads(result.output)
+        self.assertEqual(payload["content_hash"], entry["content_hash"])
+        self.assertEqual(payload["content_hash_status"], "valid")
+        self.assertNotIn("computed_content_hash", payload)
+
+
 class TestLastHumanProofLine(unittest.TestCase):
     def test_proof_line_shown(self):
         result = _invoke(["last"], runs=[_STRONG_ENTRY])

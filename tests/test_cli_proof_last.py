@@ -148,6 +148,39 @@ class TestProofLastJson(unittest.TestCase):
         _assert_no_unsafe(self, result.output)
 
 
+class TestProofLastContentHash(unittest.TestCase):
+    def test_missing_hash_for_legacy_record(self):
+        # The test harness writes raw entries (no content_hash) — legacy shape.
+        result = _invoke(["proof", "last", "--json"], runs=[_STRONG_ENTRY])
+        data = json.loads(result.output)
+        self.assertIsNone(data["content_hash"])
+        self.assertEqual(data["content_hash_status"], "missing")
+        self.assertTrue(data["computed_content_hash"].startswith("sha256:"))
+
+    def test_valid_when_record_carries_matching_hash(self):
+        from openshard.history.shard_hash import compute_shard_hash
+
+        entry = dict(_STRONG_ENTRY)
+        entry["content_hash"] = compute_shard_hash(entry)
+        result = _invoke(["proof", "last", "--json"], runs=[entry])
+        data = json.loads(result.output)
+        self.assertEqual(data["content_hash"], entry["content_hash"])
+        self.assertEqual(data["content_hash_status"], "valid")
+        # Compact: no redundant computed hash on the valid path.
+        self.assertNotIn("computed_content_hash", data)
+
+    def test_mismatch_when_content_edited_after_hash(self):
+        from openshard.history.shard_hash import compute_shard_hash
+
+        entry = dict(_STRONG_ENTRY)
+        entry["content_hash"] = compute_shard_hash(entry)
+        entry["task"] = "tampered after hashing"  # content drifts from stored hash
+        result = _invoke(["proof", "last", "--json"], runs=[entry])
+        data = json.loads(result.output)
+        self.assertEqual(data["content_hash_status"], "mismatch")
+        self.assertNotEqual(data["content_hash"], data["computed_content_hash"])
+
+
 class TestAliasParity(unittest.TestCase):
     def test_alias_human_matches(self):
         primary = _invoke(["proof", "last"], runs=[_STRONG_ENTRY])

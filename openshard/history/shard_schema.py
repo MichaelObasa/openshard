@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from openshard.history.shard_hash import SHARD_HASH_FIELD, compute_shard_hash
 from openshard.safety.sanitize import sanitize_metadata
 
 if TYPE_CHECKING:
@@ -156,6 +157,14 @@ def coerce_shard_entry(entry: object) -> dict:
         # structured sub-dicts (form_factor, osn_*, etc.) intact for consumers.
         if isinstance(result.get("metadata"), dict):
             result["metadata"] = sanitize_metadata(result["metadata"])
+
+        # Stamp the tamper-evidence content hash when missing. Compute-if-missing
+        # (never overwrite) keeps a write-time hash authoritative on read, so a
+        # later mismatch surfaces tampering instead of being silently re-stamped.
+        # Computed last so the hash covers the fully coerced (blocked-fields-
+        # stripped) content.
+        if SHARD_HASH_FIELD not in result:
+            result[SHARD_HASH_FIELD] = compute_shard_hash(result)
 
     except Exception:
         result["_coerce_warning"] = "coerce_failed"
