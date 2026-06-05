@@ -49,10 +49,7 @@ _MODEL_FRIENDLY_NAMES: dict[str, str] = {
     "claude-haiku-4-5": "Claude Haiku 4.5",
     "claude-haiku-4.5": "Claude Haiku 4.5",
     "openai/gpt-5.5": "GPT-5.5",
-    "openai/gpt-5.5-thinking": "GPT-5.5 Thinking",
     "z-ai/glm-5.1": "GLM-5.1",
-    "qwen/qwen-3.6-plus": "Qwen 3.6 Plus",
-    "google/gemini-3.1-pro": "Gemini 3.1 Pro",
 }
 
 # Words rendered in ALL CAPS in model names (abbreviations and well-known initialisms).
