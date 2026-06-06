@@ -4220,6 +4220,96 @@ def import_claude(
         click.echo("OpenShard did not control this run.")
 
 
+@cli.group("wrap")
+def wrap_group() -> None:
+    """Wrap an external AI coding command and record a Shard receipt automatically."""
+
+
+@wrap_group.command("claude")
+@click.option("--task", required=True, help="Task description given to Claude Code.")
+@click.option("--model", default=None, help="Model used (e.g. claude-sonnet-4-6). Default: unknown.")
+@click.option(
+    "--repo-path", "repo_path", default=None, type=click.Path(),
+    help="Repository path (default: current directory).",
+)
+@click.option("--dry-run", is_flag=True, default=False, help="Print the Shard without writing it. Does NOT run the subprocess.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output after run.")
+@click.argument("command", nargs=-1, required=True)
+def wrap_claude(
+    task: str,
+    model: str | None,
+    repo_path: str | None,
+    dry_run: bool,
+    as_json: bool,
+    command: tuple[str, ...],
+) -> None:
+    """Wrap a Claude Code command and record an OpenShard receipt automatically.
+
+    Captures git state before, runs the command with full passthrough, diffs
+    git state after, and creates the receipt automatically.
+    OpenShard did not control this run: verification, cost, and model
+    details are not recorded unless explicitly provided.
+
+    Example:
+
+      openshard wrap claude --task "Fix the auth service" -- claude "fix auth"
+    """
+    from openshard.adapters.wrap_exec import (
+        build_wrap_entry,
+        capture_pre_run_state,
+        run_wrapped_command,
+        write_wrap_entry,
+    )
+
+    cwd = Path(repo_path) if repo_path else Path.cwd()
+    cmd = list(command)
+
+    if dry_run:
+        # Build a fake pre-state without running the subprocess.
+        pre_state = {
+            "git_branch": None,
+            "git_head_commit_hash": None,
+            "git_dirty": False,
+            "captured_at": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        entry = build_wrap_entry(
+            task,
+            model=model,
+            pre_state=pre_state,
+            exit_code=0,
+            repo_path=cwd,
+        )
+        click.echo(json.dumps(entry, indent=2))
+        return
+
+    # Proactive wrap: capture → run → diff → record.
+    pre_state = capture_pre_run_state(cwd)
+    cmd_display = " ".join(cmd)
+    click.echo(f"Running: {cmd_display}")
+
+    exit_code = run_wrapped_command(cmd)
+
+    entry = build_wrap_entry(
+        task,
+        model=model,
+        pre_state=pre_state,
+        exit_code=exit_code,
+        repo_path=cwd,
+    )
+
+    write_wrap_entry(entry, cwd)
+
+    if as_json:
+        click.echo(json.dumps(entry, indent=2))
+    else:
+        shard_id = entry.get("shard_id") or entry.get("timestamp", "")
+        click.echo(f"Wrapped Claude Code receipt. Shard: {shard_id}")
+        click.echo("OpenShard did not control this run.")
+
+    if exit_code != 0:
+        sys.exit(exit_code)
+
+
 @cli.group()
 def session() -> None:
     """Local session utilities."""
