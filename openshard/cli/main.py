@@ -4162,7 +4162,7 @@ def import_group() -> None:
 @click.option("--task", required=True, help="Task description given to Claude Code.")
 @click.option("--model", default=None, help="Model used (e.g. claude-sonnet-4-6). Default: unknown.")
 @click.option(
-    "--from", "notes_file", default=None, type=click.Path(),
+    "--notes", "notes_file", default=None, type=click.Path(),
     help="Optional notes/summary file. First 300 chars stored (scrubbed); raw content not kept.",
 )
 @click.option(
@@ -4196,7 +4196,7 @@ def import_claude(
     if notes_path is not None and not notes_path.is_file():
         raise click.BadParameter(
             f"Notes file not found: {notes_file}",
-            param_hint="--from",
+            param_hint="--notes",
         )
 
     entry = build_claude_code_import_entry(
