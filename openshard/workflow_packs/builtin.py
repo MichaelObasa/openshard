@@ -115,4 +115,102 @@ _BUILTIN_PACKS: list[dict] = [
         "safety_notes": "Read-only analysis. No script changes applied.",
         "tags": ["powershell", "automation", "scripting", "deployment"],
     },
+    {
+        "id": "code-review",
+        "title": "Code review",
+        "category": "code_quality",
+        "summary": "Reviews recent code changes for bugs, logic errors, unclear naming, and missed edge cases.",
+        "prompt": (
+            "Review the recent code changes in this repository. Look for logic bugs, off-by-one errors, "
+            "unhandled edge cases, unclear variable or function names, and any code that is harder to read "
+            "than it needs to be. Call out specific lines or functions where the issue lives. Do not modify files."
+        ),
+        "recommended_context": "Run from the root of the repo after staging or committing changes you want reviewed.",
+        "expected_receipt_value": "A list of specific issues with file and line references, covering bugs, edge cases, and clarity problems.",
+        "safety_notes": "Read-only. Does not modify files.",
+        "tags": ["code", "review", "quality"],
+    },
+    {
+        "id": "test-coverage-gaps",
+        "title": "Test coverage gaps",
+        "category": "testing",
+        "summary": "Identifies untested code paths, missing edge cases, and weak assertions across the test suite.",
+        "prompt": (
+            "Analyse the test suite in this repository and identify code paths that have no test coverage, "
+            "edge cases that are not exercised (empty input, boundary values, error paths), and tests that "
+            "make weak or meaningless assertions. For each gap, name the untested function or branch and "
+            "explain what a good test would check. Do not modify files."
+        ),
+        "recommended_context": "Run from the root of the repo. Works best when the test directory is visible alongside source files.",
+        "expected_receipt_value": "A prioritised list of coverage gaps with the untested function or branch named and a suggested assertion for each.",
+        "safety_notes": "Read-only. Does not modify files.",
+        "tags": ["testing", "coverage", "quality"],
+    },
+    {
+        "id": "dependency-audit",
+        "title": "Dependency audit",
+        "category": "security",
+        "summary": "Audits project dependencies for known vulnerabilities, severely outdated packages, and supply chain risks.",
+        "prompt": (
+            "Audit the dependencies declared in this project (package.json, requirements.txt, go.mod, Gemfile, "
+            "or equivalent). Identify packages with known CVEs, packages that are more than two major versions "
+            "behind the current release, packages with unusual install scripts or broad filesystem access, and "
+            "any transitive dependencies that are pinned to a suspicious commit or mirror. Do not modify files."
+        ),
+        "recommended_context": "Run from the root of the repo containing the dependency manifest files.",
+        "expected_receipt_value": "A list of risky dependencies grouped by concern: known CVEs, severely outdated, and supply chain red flags.",
+        "safety_notes": "Read-only. Does not modify files or run install commands.",
+        "tags": ["dependencies", "security", "supply-chain"],
+    },
+    {
+        "id": "api-design-review",
+        "title": "API design review",
+        "category": "code_quality",
+        "summary": "Reviews REST, GraphQL, or gRPC API definitions for consistency, versioning strategy, error handling, and security gaps.",
+        "prompt": (
+            "Review the API definitions in this codebase—routes, schemas, proto files, or OpenAPI specs. "
+            "Identify inconsistent naming conventions (mixed snake_case and camelCase, inconsistent pluralisation), "
+            "missing or broken versioning strategy, error responses that leak internal details, endpoints that "
+            "lack authentication or authorisation checks, and any breaking changes made without a version bump. "
+            "Do not modify files."
+        ),
+        "recommended_context": "Run from the root of the repo. Works best when route definitions, schema files, or OpenAPI specs are present.",
+        "expected_receipt_value": "A list of API design issues grouped by type: consistency, versioning, error handling, and security.",
+        "safety_notes": "Read-only. Does not modify files.",
+        "tags": ["api", "design", "review"],
+    },
+    {
+        "id": "docker-security-review",
+        "title": "Docker security review",
+        "category": "infrastructure",
+        "summary": "Reviews Dockerfiles and docker-compose files for root user usage, exposed secrets, unpinned images, and unnecessary capabilities.",
+        "prompt": (
+            "Review all Dockerfiles and docker-compose files in this repository. Check for containers running "
+            "as root, image tags pinned to 'latest' or unpinned entirely, secrets or credentials passed via "
+            "ENV or ARG, unnecessary capabilities or privileged mode, ports exposed wider than needed, and "
+            "base images with known vulnerabilities or untrusted registries. Do not modify files."
+        ),
+        "execution_prompt_suffix": _EXECUTION_FINDINGS_SUFFIX,
+        "workflow": "native",
+        "recommended_context": "Run from the root of the repo containing Dockerfiles or docker-compose.yml.",
+        "expected_receipt_value": "A list of Docker security issues grouped by severity, covering image pinning, user context, secrets, and capabilities, plus a STRUCTURED_FINDINGS line.",
+        "safety_notes": "Read-only analysis. No Docker files modified.",
+        "tags": ["docker", "containers", "security", "infrastructure"],
+    },
+    {
+        "id": "readme-audit",
+        "title": "README audit",
+        "category": "documentation",
+        "summary": "Audits README and project docs for accuracy, missing setup steps, outdated commands, and onboarding gaps.",
+        "prompt": (
+            "Read the README and any other documentation files in this repository. Check for setup instructions "
+            "that are incomplete or reference commands that do not match the actual project structure, "
+            "prerequisites that are assumed but never stated, outdated dependency versions or tool names, "
+            "and sections that describe features no longer present in the code. Do not modify files."
+        ),
+        "recommended_context": "Run from the root of the repo. Works best when README.md and any docs/ directory are present.",
+        "expected_receipt_value": "A list of documentation issues covering missing steps, inaccurate commands, outdated content, and onboarding gaps.",
+        "safety_notes": "Read-only. Does not modify files.",
+        "tags": ["documentation", "readme", "onboarding"],
+    },
 ]
