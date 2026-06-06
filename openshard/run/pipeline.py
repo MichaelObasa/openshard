@@ -101,12 +101,16 @@ from openshard.run._pipeline_helpers import (
     _build_osn_verification_contract_with_loop,
     _build_retry_prompt,
     _copy_cwd_to_workspace,
+    _detect_command,  # noqa: F401
     _log_run,
     _parse_cost_hint,
     _populate_context_usage_metadata,
     _populate_execution_span_metadata,
     _pre_run_cost_hint,
     _promote_sandbox_git_metadata,
+    _run_verification,  # noqa: F401
+    _safe_git_info,  # noqa: F401
+    _serialize_verification_plan,  # noqa: F401
     _suggest_executor,
     _write_files,
 )

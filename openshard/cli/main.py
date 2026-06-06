@@ -2694,24 +2694,7 @@ def _warn_missing_github_env(
         click.echo("warning: GITHUB_OUTPUT is not set; outputs not written.", err=True)
 
 
-_ALLOWED_OUTCOMES_V1 = ["accepted", "rejected", "partial", "abandoned", "retried"]
-
-
-@cli.command()
-@click.option(
-    "--outcome",
-    type=click.Choice(_ALLOWED_OUTCOMES_V1, case_sensitive=False),
-    required=True,
-    help="Outcome: accepted, rejected, partial, abandoned, or retried.",
-)
-@click.option("--reason", default=None, help="Optional free-text reason.")
-@click.option("--edited", is_flag=True, default=False, help="You edited the output manually.")
-@click.option("--manual-fix-required", is_flag=True, default=False, help="A manual fix was required.")
-@click.option("--ci-passed", is_flag=True, default=False, help="CI passed after this run.")
-@click.option("--ci-failed", is_flag=True, default=False, help="CI failed after this run.")
-@click.option("--pr-created", is_flag=True, default=False, help="A PR was created from this run.")
-@click.option("--pr-merged", is_flag=True, default=False, help="The PR was merged.")
-def feedback(
+def _record_feedback(
     outcome: str,
     reason: str | None,
     edited: bool,
@@ -2721,7 +2704,6 @@ def feedback(
     pr_created: bool,
     pr_merged: bool,
 ) -> None:
-    """Record developer feedback for the most recent run."""
     log_path = Path.cwd() / _LOG_PATH
     if not log_path.exists():
         raise click.ClickException("No run history found. Run a task first with 'openshard run'.")
@@ -2730,7 +2712,7 @@ def feedback(
         raise click.ClickException("No run history found. Run a task first with 'openshard run'.")
     df: dict = {
         "schema_version": 1,
-        "outcome": outcome.lower(),
+        "outcome": outcome,
         "reason": reason or None,
         "edited": edited,
         "manual_fix_required": manual_fix_required,
@@ -2743,34 +2725,132 @@ def feedback(
     }
     entries[-1]["developer_feedback"] = df
     write_jsonl(log_path, entries)
-    click.echo(f"Feedback recorded: {outcome.lower()}")
     try:
         from openshard.history.interactions import DeveloperInteractionEvent, log_interaction_event
         _event_type_map = {
             "accepted": "feedback_accepted",
             "rejected": "feedback_rejected",
-            "partial": "feedback_partial",
-            "abandoned": "feedback_abandoned",
-            "retried": "feedback_retried",
+            "needs-retry": "feedback_retried",
+            "noted": "feedback_noted",
         }
-        _accepted_map = {
+        _accepted_map: dict[str, bool] = {
             "accepted": True,
-            "partial": True,
             "rejected": False,
-            "retried": False,
+            "needs-retry": False,
         }
         _run_id = entries[-1].get("timestamp") or ""
         _evt = DeveloperInteractionEvent(
             run_id=_run_id,
-            event_type=_event_type_map.get(outcome.lower(), "feedback_noted"),
-            summary=f"feedback outcome={outcome.lower()}",
+            event_type=_event_type_map.get(outcome, "feedback_noted"),
+            summary=f"feedback outcome={outcome}",
             correction_reason=reason,
-            accepted=_accepted_map.get(outcome.lower()),
+            accepted=_accepted_map.get(outcome),
             metadata={"edited": edited, "ci_passed": ci_passed, "ci_failed": ci_failed},
         )
         log_interaction_event(_evt)
     except Exception:
         pass
+
+
+@cli.group("feedback")
+def feedback_group() -> None:
+    """Record developer feedback for the most recent run."""
+
+
+@feedback_group.command("accept")
+@click.option("--edited", is_flag=True, default=False, help="You edited the output manually.")
+@click.option("--ci-passed", is_flag=True, default=False, help="CI passed after this run.")
+@click.option("--ci-failed", is_flag=True, default=False, help="CI failed after this run.")
+@click.option("--pr-created", is_flag=True, default=False, help="A PR was created from this run.")
+@click.option("--pr-merged", is_flag=True, default=False, help="The PR was merged.")
+def feedback_accept(
+    edited: bool,
+    ci_passed: bool,
+    ci_failed: bool,
+    pr_created: bool,
+    pr_merged: bool,
+) -> None:
+    """Mark the most recent run as accepted."""
+    _record_feedback(
+        outcome="accepted",
+        reason=None,
+        edited=edited,
+        manual_fix_required=False,
+        ci_passed=ci_passed,
+        ci_failed=ci_failed,
+        pr_created=pr_created,
+        pr_merged=pr_merged,
+    )
+    click.echo("Feedback recorded: accepted")
+
+
+@feedback_group.command("reject")
+@click.option("--reason", default=None, help="Why the run was rejected.")
+@click.option("--edited", is_flag=True, default=False, help="You edited the output manually.")
+@click.option("--manual-fix-required", is_flag=True, default=False, help="A manual fix was required.")
+@click.option("--ci-failed", is_flag=True, default=False, help="CI failed after this run.")
+def feedback_reject(
+    reason: str | None,
+    edited: bool,
+    manual_fix_required: bool,
+    ci_failed: bool,
+) -> None:
+    """Mark the most recent run as rejected."""
+    if not reason:
+        click.echo("Tip: add --reason to help improve future routing.")
+    _record_feedback(
+        outcome="rejected",
+        reason=reason,
+        edited=edited,
+        manual_fix_required=manual_fix_required,
+        ci_passed=False,
+        ci_failed=ci_failed,
+        pr_created=False,
+        pr_merged=False,
+    )
+    click.echo("Feedback recorded: rejected")
+
+
+@feedback_group.command("retry")
+@click.option("--reason", default=None, help="Why a retry was needed.")
+@click.option("--manual-fix-required", is_flag=True, default=False, help="A manual fix was required.")
+@click.option("--ci-failed", is_flag=True, default=False, help="CI failed after this run.")
+def feedback_retry(
+    reason: str | None,
+    manual_fix_required: bool,
+    ci_failed: bool,
+) -> None:
+    """Mark the most recent run as needing a retry."""
+    if not reason:
+        click.echo("Tip: add --reason to help improve future routing.")
+    _record_feedback(
+        outcome="needs-retry",
+        reason=reason,
+        edited=False,
+        manual_fix_required=manual_fix_required,
+        ci_passed=False,
+        ci_failed=ci_failed,
+        pr_created=False,
+        pr_merged=False,
+    )
+    click.echo("Feedback recorded: needs-retry")
+
+
+@feedback_group.command("note")
+@click.argument("text")
+def feedback_note(text: str) -> None:
+    """Add a free-text note to the most recent run."""
+    _record_feedback(
+        outcome="noted",
+        reason=text,
+        edited=False,
+        manual_fix_required=False,
+        ci_passed=False,
+        ci_failed=False,
+        pr_created=False,
+        pr_merged=False,
+    )
+    click.echo("Note recorded.")
 
 
 @cli.command("feedback-stats")
