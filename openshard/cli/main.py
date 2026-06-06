@@ -60,6 +60,7 @@ from openshard.config.settings import (
     get_api_key,
     get_onboarding,
     get_openai_api_key,
+    is_agent_environment,
     load_config,
     load_config_safe,
     save_config,
@@ -255,6 +256,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         config = load_config()
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         raise click.ClickException(str(exc))
+    if config.get("output_mode") == "agent_json":
+        click.echo("[openshard] agent mode: JSON output enabled", err=True)
     detail = "full" if full else ("more" if more else "default")
     pipeline = RunPipeline(
         config,
@@ -282,6 +285,67 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
     result = pipeline.run(task)
     if result.exit_code != 0:
         sys.exit(result.exit_code)
+
+
+@cli.command("env")
+def env_cmd() -> None:
+    """Show a short environment summary: agent mode, output mode, and API key status."""
+    _AGENT_VARS = (
+        "OPENSHARD_AGENT",
+        "CI",
+        "GITHUB_ACTIONS",
+        "GITLAB_CI",
+        "NO_COLOR",
+    )
+
+    # Determine which env var triggered agent mode (first match wins).
+    triggered_by: str | None = None
+    for _v in _AGENT_VARS:
+        if os.environ.get(_v, ""):
+            triggered_by = _v
+            break
+
+    agent_active = is_agent_environment()
+    agent_label = "yes" if agent_active else "no"
+    if agent_active and triggered_by:
+        agent_display = f"{agent_label}   ({triggered_by}={os.environ.get(triggered_by, '')})"
+    else:
+        agent_display = agent_label
+
+    try:
+        config = load_config()
+    except Exception:  # noqa: BLE001
+        config = {}
+
+    output_mode = config.get("output_mode", "human")
+
+    # Determine API key source without revealing the value.
+    _KEY_VARS = (
+        ("OPENROUTER_API_KEY", "openrouter"),
+        ("ANTHROPIC_API_KEY", "anthropic"),
+        ("OPENAI_API_KEY", "openai"),
+    )
+    key_label = "not set"
+    for _env_var, _provider_name in _KEY_VARS:
+        _env_val = os.environ.get(_env_var, "")
+        if _env_val:
+            key_label = f"{_provider_name} (from env)"
+            break
+    else:
+        # Check whether the config dict carries a key (injected from env by load_config).
+        for _cfg_key, _provider_name in (
+            ("openrouter_api_key", "openrouter"),
+            ("anthropic_api_key", "anthropic"),
+            ("openai_api_key", "openai"),
+        ):
+            if config.get(_cfg_key):
+                key_label = f"{_provider_name} (from config)"
+                break
+
+    click.echo("Environment")
+    click.echo(f"  Agent mode:    {agent_display}")
+    click.echo(f"  Output mode:   {output_mode}")
+    click.echo(f"  API key:       {key_label}")
 
 
 @cli.command()
