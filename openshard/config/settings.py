@@ -27,6 +27,27 @@ def _load_yaml(p: Path) -> dict[str, Any]:
         return yaml.safe_load(fh) or {}
 
 
+def _inject_api_keys(config: dict[str, Any]) -> dict[str, Any]:
+    """Inject API keys from environment variables into *config* (mutates and returns it).
+
+    Checks OPENROUTER_API_KEY, ANTHROPIC_API_KEY, and OPENAI_API_KEY.  All
+    keys found in the environment are stored so callers can inspect which
+    providers are available without re-reading the environment.
+    """
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+
+    if openrouter_key:
+        config["openrouter_api_key"] = openrouter_key
+    if anthropic_key:
+        config["anthropic_api_key"] = anthropic_key
+    if openai_key:
+        config["openai_api_key"] = openai_key
+
+    return config
+
+
 def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
     """Load and return the YAML configuration.
 
@@ -35,8 +56,14 @@ def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
     2. OPENSHARD_CONFIG environment variable — raises if set but absent
     3. .openshard/config.yml in the current working directory
     4. config.yml in the current working directory
-    5. Bundled openshard/config/default_config.yml (importlib.resources)
-    6. Built-in _DEFAULTS — never raises
+    5. Bundled openshard/config/default_config.yml (importlib.resources) — with
+       env-var API keys injected
+    6. Built-in _DEFAULTS with env-var API keys injected — never raises
+
+    When no user config is found (steps 5–6), API keys from the environment
+    (OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY) are injected into
+    the returned dict so the tool works immediately after installation without
+    running ``openshard init`` first.
     """
     if path:
         config_path = Path(path)
@@ -63,11 +90,12 @@ def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
         from importlib.resources import files
         pkg_cfg = files("openshard.config").joinpath("default_config.yml")
         with pkg_cfg.open("r", encoding="utf-8") as fh:
-            return yaml.safe_load(fh) or {}
+            bundled = yaml.safe_load(fh) or {}
+        return _inject_api_keys(bundled)
     except Exception:
         pass
 
-    return dict(_DEFAULTS)
+    return _inject_api_keys(dict(_DEFAULTS))
 
 
 def config_search_path(cwd: Path | None = None) -> Path:
@@ -157,8 +185,8 @@ def get_api_key() -> str:
     key = os.environ.get("OPENROUTER_API_KEY", "")
     if not key:
         raise ValueError(
-            "OPENROUTER_API_KEY environment variable is not set.\n"
-            "Export it before running:\n\n"
+            "No API key configured. Set OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or "
+            "OPENAI_API_KEY, or run 'openshard init' to configure.\n\n"
             "  export OPENROUTER_API_KEY=your_key_here\n\n"
             "Obtain a key from https://openrouter.ai/keys"
         )
