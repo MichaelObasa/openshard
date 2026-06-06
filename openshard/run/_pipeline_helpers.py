@@ -535,21 +535,22 @@ def _run_verification(
             click.echo(f"  {label} no test command detected")
         return (0, "") if capture else 0
 
-    if not capture:
-        click.echo(f"  {label} running: {' '.join(cmd)}")
-    proc = subprocess.run(
-        cmd,
-        cwd=cwd,
-        stdout=subprocess.PIPE if capture else None,
-        stderr=subprocess.STDOUT if capture else None,
-        text=capture,
-        **({"encoding": "utf-8", "errors": "replace"} if capture else {}),
-    )
     if capture:
+        proc = subprocess.run(
+            cmd,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
         return proc.returncode, proc.stdout or ""
 
-    if proc.returncode == 0:
+    click.echo(f"  {label} running: {' '.join(cmd)}")
+    live = subprocess.run(cmd, cwd=cwd)
+    if live.returncode == 0:
         click.echo(f"  {label} passed")
     else:
-        click.echo(f"  {label} failed (exit code {proc.returncode})")
-    return proc.returncode
+        click.echo(f"  {label} failed (exit code {live.returncode})")
+    return live.returncode
