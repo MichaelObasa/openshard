@@ -60,6 +60,7 @@ from openshard.config.settings import (
     get_api_key,
     get_onboarding,
     get_openai_api_key,
+    is_agent_environment,
     load_config,
     load_config_safe,
     save_config,
@@ -255,6 +256,8 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         config = load_config()
     except (FileNotFoundError, ValueError, RuntimeError) as exc:
         raise click.ClickException(str(exc))
+    if config.get("output_mode") == "agent_json":
+        click.echo("[openshard] agent mode: JSON output enabled", err=True)
     detail = "full" if full else ("more" if more else "default")
     pipeline = RunPipeline(
         config,
@@ -4663,6 +4666,47 @@ def doctor(as_json: bool) -> None:
         click.echo(f"    {prov:<12} {'yes' if present else 'no'}")
     _echo_warnings_next_steps(state)
     click.echo("")
+
+
+@cli.command("env")
+def env_cmd() -> None:
+    """Show environment summary: agent mode, output mode, and API key status."""
+    _AGENT_VARS = ("OPENSHARD_AGENT", "CI", "GITHUB_ACTIONS", "GITLAB_CI", "NO_COLOR")
+    _KEY_DISPLAY = (
+        ("OPENROUTER_API_KEY", "openrouter"),
+        ("ANTHROPIC_API_KEY", "anthropic"),
+        ("OPENAI_API_KEY", "openai"),
+    )
+
+    triggered_by: str | None = None
+    for _v in _AGENT_VARS:
+        if os.environ.get(_v, ""):
+            triggered_by = _v
+            break
+
+    agent_active = is_agent_environment()
+    if agent_active and triggered_by:
+        agent_display = f"yes   ({triggered_by}={os.environ.get(triggered_by, '')})"
+    else:
+        agent_display = "yes" if agent_active else "no"
+
+    try:
+        config = load_config()
+    except Exception:  # noqa: BLE001
+        config = {}
+
+    output_mode = config.get("output_mode", "human")
+
+    key_label = "not set"
+    for _env_var, _provider_name in _KEY_DISPLAY:
+        if os.environ.get(_env_var, ""):
+            key_label = f"{_provider_name} (from env)"
+            break
+
+    click.echo("Environment")
+    click.echo(f"  Agent mode:   {agent_display}")
+    click.echo(f"  Output mode:  {output_mode}")
+    click.echo(f"  API key:      {key_label}")
 
 
 @cli.group("config")
