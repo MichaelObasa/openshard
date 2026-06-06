@@ -394,10 +394,10 @@ def models(ctx: click.Context, provider: str | None, refresh: bool):
                     client = OpenRouterClient(get_api_key())
                 elif pname == "anthropic":
                     from openshard.providers.anthropic import AnthropicProvider
-                    client = AnthropicProvider(get_anthropic_api_key())
+                    client = AnthropicProvider(get_anthropic_api_key())  # type: ignore[assignment]  # client varies by provider branch; all share list_models()
                 else:
                     from openshard.providers.openai import OpenAIProvider
-                    client = OpenAIProvider(get_openai_api_key())
+                    client = OpenAIProvider(get_openai_api_key())  # type: ignore[assignment]  # client varies by provider branch; all share list_models()
                 model_list = client.list_models()
                 cache["models"].update(build_cache_entry(pname, model_list))
                 click.echo(f"  {pname}: {len(model_list)} models cached")
@@ -407,7 +407,7 @@ def models(ctx: click.Context, provider: str | None, refresh: bool):
         save_cache(cache)
         return
 
-    cache = load_cache()
+    cache = load_cache()  # type: ignore[assignment]  # load_cache() returns dict | None; None case handled immediately below
     if cache is None:
         click.echo("No model cache found. Run 'openshard models --refresh' to populate it.")
         return
@@ -928,7 +928,7 @@ def _compute_metrics(entries: list[dict]) -> dict:
 
     costs = [e["estimated_cost"] for e in entries if e.get("estimated_cost") is not None]
     total_cost = sum(costs) if costs else None
-    avg_cost = total_cost / len(costs) if costs else None
+    avg_cost = total_cost / len(costs) if costs else None  # type: ignore[operator]  # total_cost is float when costs is non-empty; guarded by same condition
 
     durations = [e["duration_seconds"] for e in entries if "duration_seconds" in e]
     avg_duration = sum(durations) / len(durations) if durations else 0.0
@@ -2694,24 +2694,7 @@ def _warn_missing_github_env(
         click.echo("warning: GITHUB_OUTPUT is not set; outputs not written.", err=True)
 
 
-_ALLOWED_OUTCOMES_V1 = ["accepted", "rejected", "partial", "abandoned", "retried"]
-
-
-@cli.command()
-@click.option(
-    "--outcome",
-    type=click.Choice(_ALLOWED_OUTCOMES_V1, case_sensitive=False),
-    required=True,
-    help="Outcome: accepted, rejected, partial, abandoned, or retried.",
-)
-@click.option("--reason", default=None, help="Optional free-text reason.")
-@click.option("--edited", is_flag=True, default=False, help="You edited the output manually.")
-@click.option("--manual-fix-required", is_flag=True, default=False, help="A manual fix was required.")
-@click.option("--ci-passed", is_flag=True, default=False, help="CI passed after this run.")
-@click.option("--ci-failed", is_flag=True, default=False, help="CI failed after this run.")
-@click.option("--pr-created", is_flag=True, default=False, help="A PR was created from this run.")
-@click.option("--pr-merged", is_flag=True, default=False, help="The PR was merged.")
-def feedback(
+def _record_feedback(
     outcome: str,
     reason: str | None,
     edited: bool,
@@ -2721,7 +2704,6 @@ def feedback(
     pr_created: bool,
     pr_merged: bool,
 ) -> None:
-    """Record developer feedback for the most recent run."""
     log_path = Path.cwd() / _LOG_PATH
     if not log_path.exists():
         raise click.ClickException("No run history found. Run a task first with 'openshard run'.")
@@ -2730,7 +2712,7 @@ def feedback(
         raise click.ClickException("No run history found. Run a task first with 'openshard run'.")
     df: dict = {
         "schema_version": 1,
-        "outcome": outcome.lower(),
+        "outcome": outcome,
         "reason": reason or None,
         "edited": edited,
         "manual_fix_required": manual_fix_required,
@@ -2743,34 +2725,132 @@ def feedback(
     }
     entries[-1]["developer_feedback"] = df
     write_jsonl(log_path, entries)
-    click.echo(f"Feedback recorded: {outcome.lower()}")
     try:
         from openshard.history.interactions import DeveloperInteractionEvent, log_interaction_event
         _event_type_map = {
             "accepted": "feedback_accepted",
             "rejected": "feedback_rejected",
-            "partial": "feedback_partial",
-            "abandoned": "feedback_abandoned",
-            "retried": "feedback_retried",
+            "needs-retry": "feedback_retried",
+            "noted": "feedback_noted",
         }
-        _accepted_map = {
+        _accepted_map: dict[str, bool] = {
             "accepted": True,
-            "partial": True,
             "rejected": False,
-            "retried": False,
+            "needs-retry": False,
         }
         _run_id = entries[-1].get("timestamp") or ""
         _evt = DeveloperInteractionEvent(
             run_id=_run_id,
-            event_type=_event_type_map.get(outcome.lower(), "feedback_noted"),
-            summary=f"feedback outcome={outcome.lower()}",
+            event_type=_event_type_map.get(outcome, "feedback_noted"),
+            summary=f"feedback outcome={outcome}",
             correction_reason=reason,
-            accepted=_accepted_map.get(outcome.lower()),
+            accepted=_accepted_map.get(outcome),
             metadata={"edited": edited, "ci_passed": ci_passed, "ci_failed": ci_failed},
         )
         log_interaction_event(_evt)
     except Exception:
         pass
+
+
+@cli.group("feedback")
+def feedback_group() -> None:
+    """Record developer feedback for the most recent run."""
+
+
+@feedback_group.command("accept")
+@click.option("--edited", is_flag=True, default=False, help="You edited the output manually.")
+@click.option("--ci-passed", is_flag=True, default=False, help="CI passed after this run.")
+@click.option("--ci-failed", is_flag=True, default=False, help="CI failed after this run.")
+@click.option("--pr-created", is_flag=True, default=False, help="A PR was created from this run.")
+@click.option("--pr-merged", is_flag=True, default=False, help="The PR was merged.")
+def feedback_accept(
+    edited: bool,
+    ci_passed: bool,
+    ci_failed: bool,
+    pr_created: bool,
+    pr_merged: bool,
+) -> None:
+    """Mark the most recent run as accepted."""
+    _record_feedback(
+        outcome="accepted",
+        reason=None,
+        edited=edited,
+        manual_fix_required=False,
+        ci_passed=ci_passed,
+        ci_failed=ci_failed,
+        pr_created=pr_created,
+        pr_merged=pr_merged,
+    )
+    click.echo("Feedback recorded: accepted")
+
+
+@feedback_group.command("reject")
+@click.option("--reason", default=None, help="Why the run was rejected.")
+@click.option("--edited", is_flag=True, default=False, help="You edited the output manually.")
+@click.option("--manual-fix-required", is_flag=True, default=False, help="A manual fix was required.")
+@click.option("--ci-failed", is_flag=True, default=False, help="CI failed after this run.")
+def feedback_reject(
+    reason: str | None,
+    edited: bool,
+    manual_fix_required: bool,
+    ci_failed: bool,
+) -> None:
+    """Mark the most recent run as rejected."""
+    if not reason:
+        click.echo("Tip: add --reason to help improve future routing.")
+    _record_feedback(
+        outcome="rejected",
+        reason=reason,
+        edited=edited,
+        manual_fix_required=manual_fix_required,
+        ci_passed=False,
+        ci_failed=ci_failed,
+        pr_created=False,
+        pr_merged=False,
+    )
+    click.echo("Feedback recorded: rejected")
+
+
+@feedback_group.command("retry")
+@click.option("--reason", default=None, help="Why a retry was needed.")
+@click.option("--manual-fix-required", is_flag=True, default=False, help="A manual fix was required.")
+@click.option("--ci-failed", is_flag=True, default=False, help="CI failed after this run.")
+def feedback_retry(
+    reason: str | None,
+    manual_fix_required: bool,
+    ci_failed: bool,
+) -> None:
+    """Mark the most recent run as needing a retry."""
+    if not reason:
+        click.echo("Tip: add --reason to help improve future routing.")
+    _record_feedback(
+        outcome="needs-retry",
+        reason=reason,
+        edited=False,
+        manual_fix_required=manual_fix_required,
+        ci_passed=False,
+        ci_failed=ci_failed,
+        pr_created=False,
+        pr_merged=False,
+    )
+    click.echo("Feedback recorded: needs-retry")
+
+
+@feedback_group.command("note")
+@click.argument("text")
+def feedback_note(text: str) -> None:
+    """Add a free-text note to the most recent run."""
+    _record_feedback(
+        outcome="noted",
+        reason=text,
+        edited=False,
+        manual_fix_required=False,
+        ci_passed=False,
+        ci_failed=False,
+        pr_created=False,
+        pr_merged=False,
+    )
+    click.echo("Note recorded.")
 
 
 @cli.command("feedback-stats")
@@ -3857,7 +3937,7 @@ def eval_stats(suite: str | None, model: str | None, task: str | None, by_catego
         click.echo(f"\n  total: {total_runs} runs  pass: {total_pass}  fail: {total_fail}  pass rate: {overall_rate:.0%}")
         return
 
-    rows = compute_eval_stats(records, suite=suite, model=model, task=task)
+    rows = compute_eval_stats(records, suite=suite, model=model, task=task)  # type: ignore[assignment]  # rows is list[EvalStats] here; earlier assignment was list[CategoryStats]
 
     if not rows:
         click.echo("No eval results found.")
@@ -3883,7 +3963,7 @@ def eval_stats(suite: str | None, model: str | None, task: str | None, by_catego
     for s in rows:
         tok = f"{s.avg_total_tokens:,.0f}" if s.avg_total_tokens is not None else "-"
         click.echo(
-            f"  {s.suite:<10}  {s.model:<44}  {s.task_id:<24}"
+            f"  {s.suite:<10}  {s.model:<44}  {s.task_id:<24}"  # type: ignore[attr-defined]  # s is EvalStats (has task_id); mypy infers CategoryStats from earlier rows assignment
             f"  {s.run_count:>5}  {s.pass_count:>5}  {s.fail_count:>5}  {s.pass_rate:>5.0%}"
             f"  {s.avg_duration:>7.1f}s  {tok:>11}  {s.unsafe_file_count:>7}"
         )
@@ -4218,6 +4298,96 @@ def import_claude(
         shard_id = entry.get("shard_id") or entry.get("timestamp", "")
         click.echo(f"Imported Claude Code receipt. Shard: {shard_id}")
         click.echo("OpenShard did not control this run.")
+
+
+@cli.group("wrap")
+def wrap_group() -> None:
+    """Wrap an external AI coding command and record a Shard receipt automatically."""
+
+
+@wrap_group.command("claude")
+@click.option("--task", required=True, help="Task description given to Claude Code.")
+@click.option("--model", default=None, help="Model used (e.g. claude-sonnet-4-6). Default: unknown.")
+@click.option(
+    "--repo-path", "repo_path", default=None, type=click.Path(),
+    help="Repository path (default: current directory).",
+)
+@click.option("--dry-run", is_flag=True, default=False, help="Print the Shard without writing it. Does NOT run the subprocess.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output after run.")
+@click.argument("command", nargs=-1, required=True)
+def wrap_claude(
+    task: str,
+    model: str | None,
+    repo_path: str | None,
+    dry_run: bool,
+    as_json: bool,
+    command: tuple[str, ...],
+) -> None:
+    """Wrap a Claude Code command and record an OpenShard receipt automatically.
+
+    Captures git state before, runs the command with full passthrough, diffs
+    git state after, and creates the receipt automatically.
+    OpenShard did not control this run: verification, cost, and model
+    details are not recorded unless explicitly provided.
+
+    Example:
+
+      openshard wrap claude --task "Fix the auth service" -- claude "fix auth"
+    """
+    from openshard.adapters.wrap_exec import (
+        build_wrap_entry,
+        capture_pre_run_state,
+        run_wrapped_command,
+        write_wrap_entry,
+    )
+
+    cwd = Path(repo_path) if repo_path else Path.cwd()
+    cmd = list(command)
+
+    if dry_run:
+        # Build a fake pre-state without running the subprocess.
+        pre_state = {
+            "git_branch": None,
+            "git_head_commit_hash": None,
+            "git_dirty": False,
+            "captured_at": datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        entry = build_wrap_entry(
+            task,
+            model=model,
+            pre_state=pre_state,
+            exit_code=0,
+            repo_path=cwd,
+        )
+        click.echo(json.dumps(entry, indent=2))
+        return
+
+    # Proactive wrap: capture → run → diff → record.
+    pre_state = capture_pre_run_state(cwd)
+    cmd_display = " ".join(cmd)
+    click.echo(f"Running: {cmd_display}")
+
+    exit_code = run_wrapped_command(cmd)
+
+    entry = build_wrap_entry(
+        task,
+        model=model,
+        pre_state=pre_state,
+        exit_code=exit_code,
+        repo_path=cwd,
+    )
+
+    write_wrap_entry(entry, cwd)
+
+    if as_json:
+        click.echo(json.dumps(entry, indent=2))
+    else:
+        shard_id = entry.get("shard_id") or entry.get("timestamp", "")
+        click.echo(f"Wrapped Claude Code receipt. Shard: {shard_id}")
+        click.echo("OpenShard did not control this run.")
+
+    if exit_code != 0:
+        sys.exit(exit_code)
 
 
 @cli.group()

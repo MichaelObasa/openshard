@@ -100,7 +100,9 @@ def _advisory_role_model(entry: dict, role: str) -> str | None:
 
     msd = entry.get("model_selection_decision")
     if msd is not None:
-        roles = _get(msd, "roles", []) or []
+        roles = _get(msd, "roles", None)
+        if not isinstance(roles, list):  # type: ignore[attr-defined]  # _get returns object; narrowed to list below
+            roles = []
         for r in roles:
             rname = _get(r, "role", "")
             if rname == role:

@@ -62,7 +62,7 @@ def run_verification_plan(
         click.echo(f"  {label} running: {' '.join(cmd.argv)}")
 
     try:
-        proc = subprocess.run(
+        proc = subprocess.run(  # type: ignore[call-overload]  # dynamic text/encoding kwargs via ** unpacking
             cmd.argv,
             cwd=cwd,
             stdout=subprocess.PIPE if capture else None,

@@ -40,29 +40,29 @@ def _invoke_and_read(args: list[str]) -> tuple[object, dict]:
 
 
 def test_feedback_writes_developer_feedback_to_entry():
-    _, entry = _invoke_and_read(["--outcome", "accepted"])
+    _, entry = _invoke_and_read(["accept"])
     assert "developer_feedback" in entry
     assert entry["developer_feedback"]["outcome"] == "accepted"
 
 
-def test_feedback_outcome_required():
-    result = _invoke([])
+def test_feedback_invalid_subcommand_rejected():
+    result = _invoke(["bogus"])
     assert result.exit_code != 0
 
 
 def test_feedback_invalid_outcome_rejected():
-    result = _invoke(["--outcome", "loved-it"])
+    result = _invoke(["loved-it"])
     assert result.exit_code != 0
 
 
 def test_feedback_reason_is_free_text():
     long_reason = "missed the IAM policy check on the S3 bucket in us-east-2"
-    _, entry = _invoke_and_read(["--outcome", "partial", "--reason", long_reason])
+    _, entry = _invoke_and_read(["reject", "--reason", long_reason])
     assert entry["developer_feedback"]["reason"] == long_reason
 
 
 def test_feedback_boolean_flags():
-    _, entry = _invoke_and_read(["--outcome", "accepted", "--edited", "--ci-passed"])
+    _, entry = _invoke_and_read(["accept", "--edited", "--ci-passed"])
     df = entry["developer_feedback"]
     assert df["edited"] is True
     assert df["ci_passed"] is True
@@ -70,26 +70,26 @@ def test_feedback_boolean_flags():
 
 
 def test_feedback_no_runs_file_exits_nonzero():
-    result = _invoke(["--outcome", "accepted"], runs_content=None)
+    result = _invoke(["accept"], runs_content=None)
     assert result.exit_code != 0
 
 
 def test_feedback_empty_runs_file_exits_nonzero():
-    result = _invoke(["--outcome", "accepted"], runs_content="")
+    result = _invoke(["accept"], runs_content="")
     assert result.exit_code != 0
 
 
 def test_feedback_schema_version_is_1():
-    _, entry = _invoke_and_read(["--outcome", "rejected"])
+    _, entry = _invoke_and_read(["reject"])
     assert entry["developer_feedback"]["schema_version"] == 1
 
 
 def test_feedback_source_is_cli():
-    _, entry = _invoke_and_read(["--outcome", "retried"])
+    _, entry = _invoke_and_read(["retry"])
     assert entry["developer_feedback"]["source"] == "cli"
 
 
 def test_feedback_recorded_at_is_iso8601():
-    _, entry = _invoke_and_read(["--outcome", "abandoned"])
+    _, entry = _invoke_and_read(["reject"])
     recorded_at = entry["developer_feedback"]["recorded_at"]
     datetime.datetime.fromisoformat(recorded_at)  # raises if not valid

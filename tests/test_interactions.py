@@ -272,7 +272,7 @@ class TestFeedbackCorrectionIntegration(unittest.TestCase):
             _write_runs([_make_run_entry(timestamp="2025-06-01T12:00:00Z")])
             result = runner.invoke(
                 cli,
-                ["feedback", "--outcome", "rejected", "--reason", "wrong file targeted"],
+                ["feedback", "reject", "--reason", "wrong file targeted"],
             )
             self.assertEqual(result.exit_code, 0)
             events = load_interaction_events()
@@ -288,32 +288,32 @@ class TestFeedbackCorrectionIntegration(unittest.TestCase):
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_runs([_make_run_entry(timestamp="2025-06-01T12:00:00Z")])
-            result = runner.invoke(cli, ["feedback", "--outcome", "accepted"])
+            result = runner.invoke(cli, ["feedback", "accept"])
             self.assertEqual(result.exit_code, 0)
             events = load_interaction_events()
             self.assertEqual(len(events), 1)
             self.assertIs(events[0].accepted, True)
             self.assertEqual(events[0].event_type, "feedback_accepted")
 
-    def test_feedback_abandoned_logs_event(self):
+    def test_feedback_retry_logs_event(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_runs([_make_run_entry()])
-            result = runner.invoke(cli, ["feedback", "--outcome", "abandoned"])
+            result = runner.invoke(cli, ["feedback", "retry"])
             self.assertEqual(result.exit_code, 0)
             events = load_interaction_events()
             self.assertEqual(len(events), 1)
-            self.assertEqual(events[0].event_type, "feedback_abandoned")
+            self.assertEqual(events[0].event_type, "feedback_retried")
 
-    def test_feedback_partial_logs_accepted_true(self):
+    def test_feedback_accept_logs_accepted_true(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             _write_runs([_make_run_entry()])
-            result = runner.invoke(cli, ["feedback", "--outcome", "partial"])
+            result = runner.invoke(cli, ["feedback", "accept"])
             self.assertEqual(result.exit_code, 0)
             events = load_interaction_events()
             self.assertIs(events[0].accepted, True)
-            self.assertEqual(events[0].event_type, "feedback_partial")
+            self.assertEqual(events[0].event_type, "feedback_accepted")
 
 
 class TestRawContentStoredRemainsFalse(unittest.TestCase):
