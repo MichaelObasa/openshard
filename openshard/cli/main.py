@@ -1301,6 +1301,17 @@ def _render_log_entry(entry: dict, detail: str, index: int | None = None) -> Non
         if _dev_feedback.get("reason"):
             click.echo(f"  {'Reason':<12}{_dev_feedback['reason']}")
 
+    # User notes (--more / --full)
+    _user_notes = [n for n in entry.get("notes", []) if isinstance(n, dict)]
+    if detail in ("more", "full") and _user_notes:
+        click.echo("\n  NOTES")
+        for _un in _user_notes:
+            _un_text = _un.get("text", "")
+            _un_at = _un.get("recorded_at", "")
+            click.echo(f"  {_un_text}")
+            if _un_at:
+                click.echo(f"  {'recorded':<12}{_un_at}")
+
     # Token / model detail (--full only)
     if detail == "full":
         full_model = entry.get("execution_model", "")
@@ -2850,6 +2861,36 @@ def feedback_note(text: str) -> None:
         pr_created=False,
         pr_merged=False,
     )
+    click.echo("Note recorded.")
+
+
+@cli.command("note")
+@click.argument("text")
+def note_cmd(text: str) -> None:
+    """Attach a note to the most recent run."""
+    from openshard.security.secret_scan import scrub_text_for_secrets
+
+    log_path = Path.cwd() / _LOG_PATH
+    if not log_path.exists():
+        click.echo("No run history found.")
+        raise SystemExit(1)
+    entries = _load_run_entries(log_path)
+    if not entries:
+        click.echo("No run history found.")
+        raise SystemExit(1)
+    scrubbed, _ = scrub_text_for_secrets(text[:500], source_label="<note>")
+    note_item = {
+        "text": scrubbed,
+        "recorded_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        "schema_version": 1,
+    }
+    existing = entries[-1].get("notes")
+    if isinstance(existing, list) and all(isinstance(n, dict) for n in existing):
+        existing.append(note_item)
+        entries[-1]["notes"] = existing
+    else:
+        entries[-1]["notes"] = [note_item]
+    write_jsonl(log_path, entries)
     click.echo("Note recorded.")
 
 
