@@ -4205,6 +4205,48 @@ def packs_prompt(pack_id: str):
     )
 
 
+@packs.command("run")
+@click.argument("pack_id")
+@click.option("--context", "extra_context", default=None, metavar="TEXT", help="Additional context appended to the pack prompt.")
+@click.option("--write", is_flag=True, default=False, help="Write generated files to disk.")
+@click.option("--verify", is_flag=True, default=False, help="Run verification after writing (requires --write).")
+@click.option("--dry-run", "dry_run", is_flag=True, default=False, help="Preview without executing.")
+@click.option(
+    "--workflow",
+    type=click.Choice(["auto", "direct", "staged", "native", "opencode", "claude-code", "codex"], case_sensitive=False),
+    default=None,
+    help="Override the pack's recommended workflow.",
+)
+@click.pass_context
+def packs_run(ctx: click.Context, pack_id: str, extra_context: str | None, write: bool, verify: bool, dry_run: bool, workflow: str | None) -> None:
+    """Run workflow pack PACK_ID."""
+    from openshard.workflow_packs.packs import get_pack, load_packs
+
+    try:
+        p = get_pack(pack_id)
+    except KeyError:
+        available = ", ".join(pk.id for pk in load_packs())
+        raise click.ClickException(f"Unknown pack {pack_id!r}. Available: {available}")
+
+    task = p.prompt
+    if p.execution_prompt_suffix:
+        task = task + p.execution_prompt_suffix
+    if extra_context:
+        task = f"{task}\n\nContext: {extra_context}"
+
+    resolved_workflow: str | None = workflow or (p.workflow if p.workflow else None)
+
+    click.echo(f"\nPack:     {p.title}")
+    click.echo(f"Category: {p.category}")
+    if p.safety_notes:
+        click.echo(f"Safety:   {p.safety_notes}")
+    if resolved_workflow:
+        click.echo(f"Workflow: {resolved_workflow}")
+    click.echo("")
+
+    ctx.invoke(run, task=task, write=write, verify=verify, dry_run=dry_run, workflow=resolved_workflow)
+
+
 @cli.group()
 def adapters() -> None:
     """External adapter utilities."""
