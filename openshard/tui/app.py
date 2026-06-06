@@ -417,7 +417,7 @@ class OpenShardTui(App):
             _pw = self._pack_workflow
             self._pack_suffix = ""
             self._pack_workflow = ""
-            _effective_task = parsed.task + _suffix if _suffix else parsed.task
+            _effective_task = (parsed.task or "") + _suffix if _suffix else parsed.task  # type: ignore[operator]  # parsed.task may be None; guarded by _suffix check
             _args = ["run", "--workflow", _pw, _effective_task] if _pw else ["run", _effective_task]
             self._run_cli_async(_args, refresh_after=True, is_run=True)
         elif parsed.cmd == TuiCommand.PACKS:

@@ -1514,7 +1514,7 @@ def build_native_verification_plan(
         "blocked commands require approval",
         "shell metacharacters require approval",
     ]
-    if change_budget is not None and getattr(change_budget, "max_files", 0):
+    if change_budget is not None and getattr(change_budget, "max_files", 0):  # type: ignore[arg-type]  # getattr default is int, not bool
         approval_rules.insert(0, f"changes exceeding {change_budget.max_files} file(s) require approval")
 
     success_criteria = list(_SUCCESS_CRITERIA_BY_TYPE.get(task_type, _SUCCESS_CRITERIA_BY_TYPE["unknown"]))
@@ -3327,8 +3327,8 @@ def render_native_failure_memory_routing_advisory(
     if advisory is None:
         return ""
     _is_dict = isinstance(advisory, dict)
-    _warnings = (advisory.get("warnings", []) if _is_dict else getattr(advisory, "warnings", [])) or []
-    _scanned = advisory.get("events_scanned", 0) if _is_dict else getattr(advisory, "events_scanned", 0)
+    _warnings = (advisory.get("warnings", []) if _is_dict else getattr(advisory, "warnings", [])) or []  # type: ignore[union-attr]  # narrowed by _is_dict flag
+    _scanned = advisory.get("events_scanned", 0) if _is_dict else getattr(advisory, "events_scanned", 0)  # type: ignore[union-attr]  # narrowed by _is_dict flag
     if not _warnings:
         if detail == "full":
             return (
@@ -3341,8 +3341,8 @@ def render_native_failure_memory_routing_advisory(
     _wword = "warning" if _wc == 1 else "warnings"
     if detail != "full":
         return f"failure memory advisory: {_wc} {_wword}"
-    _summaries = (advisory.get("model_retry_summaries", []) if _is_dict else getattr(advisory, "model_retry_summaries", [])) or []
-    _hot_files = (advisory.get("hot_file_paths", []) if _is_dict else getattr(advisory, "hot_file_paths", [])) or []
+    _summaries = (advisory.get("model_retry_summaries", []) if _is_dict else getattr(advisory, "model_retry_summaries", [])) or []  # type: ignore[union-attr]  # narrowed by _is_dict flag
+    _hot_files = (advisory.get("hot_file_paths", []) if _is_dict else getattr(advisory, "hot_file_paths", [])) or []  # type: ignore[union-attr]  # narrowed by _is_dict flag
     lines = [
         "[failure memory routing advisory]",
         f"events_scanned: {_scanned}",

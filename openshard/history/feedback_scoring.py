@@ -59,7 +59,7 @@ def _feedback_signal(feedback: dict, verification_passed: bool | None = None) ->
             return -0.20
         return -0.10
 
-    base = _ACTION_SIGNALS.get(action, 0.0)
+    base = _ACTION_SIGNALS.get(action, 0.0)  # type: ignore[arg-type]  # action may be None; treated as missing key
     rsig = _reason_signal(reason)
     return min(base, rsig) if rsig < 0 else base
 
