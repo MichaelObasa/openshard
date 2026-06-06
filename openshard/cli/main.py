@@ -2979,6 +2979,9 @@ def _export_run_entry(entry: dict, include_notes: bool = False, include_timeline
         "tier_dispatch_work_model":  tdr.get("executor_model"),
         "routing_truth":             _routing_truth_export(entry),
         "summary":                   entry.get("summary"),
+        "import_source":             entry.get("import_source"),
+        "import_method":             entry.get("import_method"),
+        "executor":                  entry.get("executor"),
         **_baseline_export_fields(
             entry.get("prompt_tokens") or 0,
             entry.get("completion_tokens") or 0,
@@ -4148,6 +4151,73 @@ def adapters_doctor() -> None:
         click.echo("    opencode --version")
         click.echo("    openshard adapters doctor")
     click.echo("")
+
+
+@cli.group("import")
+def import_group() -> None:
+    """Import an external AI coding session as an OpenShard receipt."""
+
+
+@import_group.command("claude")
+@click.option("--task", required=True, help="Task description given to Claude Code.")
+@click.option("--model", default=None, help="Model used (e.g. claude-sonnet-4-6). Default: unknown.")
+@click.option(
+    "--from", "notes_file", default=None, type=click.Path(),
+    help="Optional notes/summary file. First 300 chars stored (scrubbed); raw content not kept.",
+)
+@click.option(
+    "--repo-path", "repo_path", default=None, type=click.Path(),
+    help="Repository path (default: current directory).",
+)
+@click.option("--dry-run", is_flag=True, default=False, help="Print the Shard without writing it.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Machine-readable output.")
+def import_claude(
+    task: str,
+    model: str | None,
+    notes_file: str | None,
+    repo_path: str | None,
+    dry_run: bool,
+    as_json: bool,
+) -> None:
+    """Import a Claude Code session as an OpenShard receipt.
+
+    Creates a Shard from the task description and current git state.
+    OpenShard did not control this run: verification, cost, and model
+    details are not recorded unless explicitly provided.
+    """
+    from openshard.adapters.claude_code_import import (
+        build_claude_code_import_entry,
+        write_import_entry,
+    )
+
+    cwd = Path(repo_path) if repo_path else Path.cwd()
+    notes_path = Path(notes_file) if notes_file else None
+
+    if notes_path is not None and not notes_path.is_file():
+        raise click.BadParameter(
+            f"Notes file not found: {notes_file}",
+            param_hint="--from",
+        )
+
+    entry = build_claude_code_import_entry(
+        task,
+        model=model,
+        notes_file=notes_path,
+        repo_path=cwd,
+    )
+
+    if dry_run or as_json:
+        click.echo(json.dumps(entry, indent=2))
+        if dry_run:
+            return
+
+    if not dry_run:
+        write_import_entry(entry, cwd)
+
+    if not as_json:
+        shard_id = entry.get("shard_id") or entry.get("timestamp", "")
+        click.echo(f"Imported Claude Code receipt. Shard: {shard_id}")
+        click.echo("OpenShard did not control this run.")
 
 
 @cli.group()
