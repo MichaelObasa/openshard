@@ -240,13 +240,13 @@ class TestErrorHandling(unittest.TestCase):
     def test_invalid_notes_file_exits_nonzero(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
-            result = runner.invoke(cli, ["import", "claude", "--task", "Fix bug", "--from", "nonexistent.md"])
+            result = runner.invoke(cli, ["import", "claude", "--task", "Fix bug", "--notes", "nonexistent.md"])
             self.assertNotEqual(result.exit_code, 0)
 
     def test_invalid_notes_file_has_clear_message(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
-            result = runner.invoke(cli, ["import", "claude", "--task", "Fix bug", "--from", "nonexistent.md"])
+            result = runner.invoke(cli, ["import", "claude", "--task", "Fix bug", "--notes", "nonexistent.md"])
             combined = (result.output or "") + (str(result.exception) if result.exception else "")
             self.assertTrue(
                 "nonexistent.md" in combined or "not found" in combined.lower(),
@@ -280,10 +280,10 @@ class TestHelp(unittest.TestCase):
         result = runner.invoke(cli, ["import", "claude", "--help"])
         self.assertIn("--task", result.output)
 
-    def test_import_claude_help_shows_from_option(self):
+    def test_import_claude_help_shows_notes_option(self):
         runner = CliRunner()
         result = runner.invoke(cli, ["import", "claude", "--help"])
-        self.assertIn("--from", result.output)
+        self.assertIn("--notes", result.output)
 
 
 # ---------------------------------------------------------------------------
@@ -296,14 +296,14 @@ class TestNotesFile(unittest.TestCase):
         runner = CliRunner()
         with runner.isolated_filesystem():
             Path("notes.md").write_text("Session notes here.", encoding="utf-8")
-            result = runner.invoke(cli, ["import", "claude", "--task", "Fix bug", "--from", "notes.md"])
+            result = runner.invoke(cli, ["import", "claude", "--task", "Fix bug", "--notes", "notes.md"])
             self.assertEqual(result.exit_code, 0, msg=result.output)
 
     def test_notes_summary_stored_in_entry(self):
         runner = CliRunner()
         with runner.isolated_filesystem():
             Path("notes.md").write_text("Refactored the payment module.", encoding="utf-8")
-            runner.invoke(cli, ["import", "claude", "--task", "Fix bug", "--from", "notes.md"])
+            runner.invoke(cli, ["import", "claude", "--task", "Fix bug", "--notes", "notes.md"])
             entry = _load_jsonl(Path(".openshard/runs.jsonl"))[0]
             self.assertIn("payment module", entry.get("summary", ""))
 
@@ -314,7 +314,7 @@ class TestNotesFile(unittest.TestCase):
                 "Used sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890 in test",
                 encoding="utf-8",
             )
-            runner.invoke(cli, ["import", "claude", "--task", "Fix bug", "--from", "notes.md"])
+            runner.invoke(cli, ["import", "claude", "--task", "Fix bug", "--notes", "notes.md"])
             entry = _load_jsonl(Path(".openshard/runs.jsonl"))[0]
             raw_summary = json.dumps(entry)
             self.assertNotIn("sk-ant-api03-abcdefghijklmnopqrstuvwxyz1234567890", raw_summary)
