@@ -4,6 +4,31 @@ All notable changes to OpenShard are documented here.
 
 ## Unreleased
 
+## 0.3.0 - 2026-06-06
+
+First-class Claude Code session receipt import, skills list command, and tooling hardening.
+
+### Added
+
+- `openshard import claude` — import Claude Code session receipts directly into OpenShard history (PR #262)
+- `openshard skills list` command to enumerate available skills (#257)
+
+### Changed
+
+- Import sorting and pyupgrade rules added to Ruff linting (#261)
+- README revised for clarity on OpenShard's role
+
+### Fixed
+
+- `--from` flag renamed to `--notes` in `openshard import claude` for clearer UX
+- Sandbox tests failing in environments with git commit signing (#259)
+- Stale `claude-opus-4.6` reference in `config.yml` (#258)
+- Added `pipx install` prerequisite to install docs and README (#260)
+
+### Docs
+
+- Updated `docs/what-is-a-shard.md`
+
 ## 0.2.0 - 2026-06-05
 
 The proof, receipts, safety, and local history hardening release.
