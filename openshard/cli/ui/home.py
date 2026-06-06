@@ -242,10 +242,10 @@ def _git_state(path: Path, facts: RepoFacts | None) -> str:
         return "Git unavailable"
 
     lines = [line for line in result.stdout.splitlines() if line.strip()]
-    changed = [line for line in lines if not line.startswith("##")]
+    changed = [line for line in lines if not line.startswith("##")]  # type: ignore[assignment]  # reuses name from early-return branch where changed was int
     branch = lines[0].removeprefix("## ").strip() if lines else "unknown branch"
     if changed:
-        return f"{branch} · {len(changed)} changed"
+        return f"{branch} · {len(changed)} changed"  # type: ignore[arg-type]  # changed is list[str] here; mypy infers int from earlier branch
     return f"{branch} · clean"
 
 

@@ -116,7 +116,7 @@ def build_shard_quality_summary(entry: dict, receipt: object | None = None) -> d
 
         if receipt is None:
             receipt = build_shard_receipt(entry, index=None)
-        verification = verification_status_from_receipt(receipt)
+        verification = verification_status_from_receipt(receipt)  # type: ignore[arg-type]  # receipt is ShardReceipt after build or assignment above
         raw_output_stored = bool(getattr(receipt, "verification_raw_output_stored", False))
 
         return {

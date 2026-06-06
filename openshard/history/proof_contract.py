@@ -496,7 +496,7 @@ def _blocked_fields_present(entry: object, depth: int = 0) -> list[str]:
             found.extend(_blocked_fields_present(item, depth + 1))
     # De-duplicate while preserving order; cap to keep output bounded.
     seen: set[str] = set()
-    ordered = [f for f in found if not (f in seen or seen.add(f))]
+    ordered = [f for f in found if not (f in seen or seen.add(f))]  # type: ignore[func-returns-value]  # set.add() returning None is intentional dedup idiom
     return ordered[:10]
 
 

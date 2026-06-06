@@ -344,7 +344,7 @@ def _exec_run_verification(
         )
 
     t0 = time.monotonic()
-    exit_code, raw_output = run_verification_plan(plan, repo_root, capture=True)
+    exit_code, raw_output = run_verification_plan(plan, repo_root, capture=True)  # type: ignore[misc]  # capture=True always returns tuple; return type is int | tuple
     duration_ms = int((time.monotonic() - t0) * 1000)
 
     output = compact_tool_result(raw_output, limit)

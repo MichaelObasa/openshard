@@ -241,7 +241,7 @@ def rank_models(results_by_model: dict[str, list[EvalResult]]) -> list[ModelRank
         if not passing or any(getattr(r, "cost", None) is None for r in passing):
             cost_per_pass = None
         else:
-            cost_per_pass = sum(r.cost for r in passing) / pass_count  # type: ignore[union-attr]
+            cost_per_pass = sum(r.cost for r in passing) / pass_count  # type: ignore[misc]  # cost is float | None but None already excluded above
 
         entries.append(ModelRanking(
             rank=0,
