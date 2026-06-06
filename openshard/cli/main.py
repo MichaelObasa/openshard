@@ -394,10 +394,10 @@ def models(ctx: click.Context, provider: str | None, refresh: bool):
                     client = OpenRouterClient(get_api_key())
                 elif pname == "anthropic":
                     from openshard.providers.anthropic import AnthropicProvider
-                    client = AnthropicProvider(get_anthropic_api_key())
+                    client = AnthropicProvider(get_anthropic_api_key())  # type: ignore[assignment]  # client varies by provider branch; all share list_models()
                 else:
                     from openshard.providers.openai import OpenAIProvider
-                    client = OpenAIProvider(get_openai_api_key())
+                    client = OpenAIProvider(get_openai_api_key())  # type: ignore[assignment]  # client varies by provider branch; all share list_models()
                 model_list = client.list_models()
                 cache["models"].update(build_cache_entry(pname, model_list))
                 click.echo(f"  {pname}: {len(model_list)} models cached")
@@ -407,7 +407,7 @@ def models(ctx: click.Context, provider: str | None, refresh: bool):
         save_cache(cache)
         return
 
-    cache = load_cache()
+    cache = load_cache()  # type: ignore[assignment]  # load_cache() returns dict | None; None case handled immediately below
     if cache is None:
         click.echo("No model cache found. Run 'openshard models --refresh' to populate it.")
         return
@@ -928,7 +928,7 @@ def _compute_metrics(entries: list[dict]) -> dict:
 
     costs = [e["estimated_cost"] for e in entries if e.get("estimated_cost") is not None]
     total_cost = sum(costs) if costs else None
-    avg_cost = total_cost / len(costs) if costs else None
+    avg_cost = total_cost / len(costs) if costs else None  # type: ignore[operator]  # total_cost is float when costs is non-empty; guarded by same condition
 
     durations = [e["duration_seconds"] for e in entries if "duration_seconds" in e]
     avg_duration = sum(durations) / len(durations) if durations else 0.0
@@ -3857,7 +3857,7 @@ def eval_stats(suite: str | None, model: str | None, task: str | None, by_catego
         click.echo(f"\n  total: {total_runs} runs  pass: {total_pass}  fail: {total_fail}  pass rate: {overall_rate:.0%}")
         return
 
-    rows = compute_eval_stats(records, suite=suite, model=model, task=task)
+    rows = compute_eval_stats(records, suite=suite, model=model, task=task)  # type: ignore[assignment]  # rows is list[EvalStats] here; earlier assignment was list[CategoryStats]
 
     if not rows:
         click.echo("No eval results found.")
@@ -3883,7 +3883,7 @@ def eval_stats(suite: str | None, model: str | None, task: str | None, by_catego
     for s in rows:
         tok = f"{s.avg_total_tokens:,.0f}" if s.avg_total_tokens is not None else "-"
         click.echo(
-            f"  {s.suite:<10}  {s.model:<44}  {s.task_id:<24}"
+            f"  {s.suite:<10}  {s.model:<44}  {s.task_id:<24}"  # type: ignore[attr-defined]  # s is EvalStats (has task_id); mypy infers CategoryStats from earlier rows assignment
             f"  {s.run_count:>5}  {s.pass_count:>5}  {s.fail_count:>5}  {s.pass_rate:>5.0%}"
             f"  {s.avg_duration:>7.1f}s  {tok:>11}  {s.unsafe_file_count:>7}"
         )

@@ -28,6 +28,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.4",
+    "mypy>=1.0",
 ]
 
 [project.urls]
@@ -56,6 +57,16 @@ ignore = [
     "UP035",  # deprecated-import: deferred to separate cleanup
     "UP042",  # replace-str-enum: deferred to separate cleanup
 ]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+exclude = ["tests/", "openshard/run/pipeline\\.py"]
+
+[[tool.mypy.overrides]]
+module = "openshard.run.pipeline"
+ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

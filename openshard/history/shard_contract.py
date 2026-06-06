@@ -1009,7 +1009,7 @@ def build_shard_receipt(entry: dict, index: int | None = None) -> ShardReceipt:
         policy_decisions=_policy_decisions,
         adapter=entry.get("adapter") or None,
         adapter_available=entry.get("adapter_available") if isinstance(entry.get("adapter_available"), bool) else None,
-        adapter_command=entry.get("adapter_command") if isinstance(entry.get("adapter_command"), list) else [],
+        adapter_command=entry.get("adapter_command") if isinstance(entry.get("adapter_command"), list) else [],  # type: ignore[arg-type]  # value guarded by isinstance; Any from dict.get
         adapter_exit_code=entry.get("adapter_exit_code") if isinstance(entry.get("adapter_exit_code"), int) else None,
         adapter_stdout_summary=entry.get("adapter_stdout_summary") or None,
         adapter_stderr_summary=entry.get("adapter_stderr_summary") or None,
@@ -1504,8 +1504,8 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
         for _es in receipt.execution_spans[:_es_cap]:
             _dur = f"  {_es.duration_ms}ms" if _es.duration_ms is not None else ""
             _st = f"  {_es.status}" if _es.status else ""
-            _ec = f"  [{_es.error_class}]" if _es.error_class else ""
-            lines.append(f"{_INDENT}  {_es.kind}  {_es.name}{_st}{_dur}{_ec}")
+            _ec_str = f"  [{_es.error_class}]" if _es.error_class else ""
+            lines.append(f"{_INDENT}  {_es.kind}  {_es.name}{_st}{_dur}{_ec_str}")
         if len(receipt.execution_spans) > _es_cap:
             lines.append(f"{_INDENT}  +{len(receipt.execution_spans) - _es_cap} more")
         lines.append("")
@@ -1594,9 +1594,9 @@ def render_full_shard_receipt(receipt: ShardReceipt, detail: str = "full") -> st
     elif receipt.files_changed > 0:
         file_str += " changed"
     lines.append(f"{_INDENT}{file_str}")
-    for f in receipt.files_detail[:10]:
-        if isinstance(f, dict) and "path" in f:
-            lines.append(f"{_INDENT}  {f['path']}")
+    for _fd in receipt.files_detail[:10]:
+        if isinstance(_fd, dict) and "path" in _fd:
+            lines.append(f"{_INDENT}  {_fd['path']}")
     if len(receipt.files_detail) > 10:
         lines.append(f"{_INDENT}  (+{len(receipt.files_detail) - 10} more)")
     lines.append("")

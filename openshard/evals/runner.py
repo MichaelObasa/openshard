@@ -90,7 +90,7 @@ def run_eval_task(
             plan = build_verification_plan(
                 {"verification_command": task.verification_command}, None
             )
-            returncode, output = run_verification_plan(
+            returncode, output = run_verification_plan(  # type: ignore[misc]  # capture=True always returns tuple; return type is int | tuple
                 plan, cwd=workspace_root, gate=None, capture=True
             )
             verification_returncode = returncode
