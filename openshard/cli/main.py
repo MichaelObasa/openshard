@@ -2761,6 +2761,12 @@ def _record_feedback(
         log_interaction_event(_evt)
     except Exception:
         pass
+    try:
+        from openshard.history.memory import build_memory_entry, log_memory_entry
+        _mem = build_memory_entry(entries[-1], outcome, reason)
+        log_memory_entry(_mem)
+    except Exception:
+        pass
 
 
 @cli.group("feedback")
@@ -2862,6 +2868,50 @@ def feedback_note(text: str) -> None:
         pr_merged=False,
     )
     click.echo("Note recorded.")
+
+
+@cli.group("memory", invoke_without_command=True)
+@click.pass_context
+def memory_group(ctx: click.Context) -> None:
+    """Browse what OpenShard has learned from your feedback."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@memory_group.command("list")
+@click.option("--last", "last_n", default=10, show_default=True, type=int, help="Number of entries to show.")
+def memory_list(last_n: int) -> None:
+    """Show the most recent memory entries."""
+    from openshard.history.memory import load_memory_entries
+
+    entries = load_memory_entries()
+    if not entries:
+        click.echo("No memory entries yet. Give feedback after runs to start building memory.")
+        return
+    for entry in entries[-last_n:][::-1]:
+        click.echo(f"{entry.recorded_at}  {entry.outcome:<12}  {entry.task_short}")
+
+
+@memory_group.command("stats")
+def memory_stats() -> None:
+    """Show counts of memory entries by outcome."""
+    from collections import Counter
+
+    from openshard.history.memory import load_memory_entries
+
+    entries = load_memory_entries()
+    if not entries:
+        click.echo("No memory entries yet.")
+        return
+    counts: Counter[str] = Counter(e.outcome for e in entries)
+    click.echo(f"Total entries: {len(entries)}")
+    click.echo(f"Accepted:      {counts.get('accepted', 0)}")
+    click.echo(f"Rejected:      {counts.get('rejected', 0)}")
+    click.echo(f"Needs-retry:   {counts.get('needs-retry', 0)}")
+    rejected_reasons = [e.reason for e in entries if e.outcome == "rejected" and e.reason]
+    if rejected_reasons:
+        most_common_reason = Counter(rejected_reasons).most_common(1)[0][0]
+        click.echo(f"Top rejection reason: {most_common_reason}")
 
 
 @cli.command("note")
