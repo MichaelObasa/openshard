@@ -287,6 +287,67 @@ def run(task: str, write: bool, verify: bool, dry_run: bool, more: bool, full: b
         sys.exit(result.exit_code)
 
 
+@cli.command("env")
+def env_cmd() -> None:
+    """Show a short environment summary: agent mode, output mode, and API key status."""
+    _AGENT_VARS = (
+        "OPENSHARD_AGENT",
+        "CI",
+        "GITHUB_ACTIONS",
+        "GITLAB_CI",
+        "NO_COLOR",
+    )
+
+    # Determine which env var triggered agent mode (first match wins).
+    triggered_by: str | None = None
+    for _v in _AGENT_VARS:
+        if os.environ.get(_v, ""):
+            triggered_by = _v
+            break
+
+    agent_active = is_agent_environment()
+    agent_label = "yes" if agent_active else "no"
+    if agent_active and triggered_by:
+        agent_display = f"{agent_label}   ({triggered_by}={os.environ.get(triggered_by, '')})"
+    else:
+        agent_display = agent_label
+
+    try:
+        config = load_config()
+    except Exception:  # noqa: BLE001
+        config = {}
+
+    output_mode = config.get("output_mode", "human")
+
+    # Determine API key source without revealing the value.
+    _KEY_VARS = (
+        ("OPENROUTER_API_KEY", "openrouter"),
+        ("ANTHROPIC_API_KEY", "anthropic"),
+        ("OPENAI_API_KEY", "openai"),
+    )
+    key_label = "not set"
+    for _env_var, _provider_name in _KEY_VARS:
+        _env_val = os.environ.get(_env_var, "")
+        if _env_val:
+            key_label = f"{_provider_name} (from env)"
+            break
+    else:
+        # Check whether the config dict carries a key (injected from env by load_config).
+        for _cfg_key, _provider_name in (
+            ("openrouter_api_key", "openrouter"),
+            ("anthropic_api_key", "anthropic"),
+            ("openai_api_key", "openai"),
+        ):
+            if config.get(_cfg_key):
+                key_label = f"{_provider_name} (from config)"
+                break
+
+    click.echo("Environment")
+    click.echo(f"  Agent mode:    {agent_display}")
+    click.echo(f"  Output mode:   {output_mode}")
+    click.echo(f"  API key:       {key_label}")
+
+
 @cli.command()
 @click.argument("task")
 def explain(task: str):
@@ -4722,47 +4783,6 @@ def doctor(as_json: bool) -> None:
         click.echo(f"    {prov:<12} {'yes' if present else 'no'}")
     _echo_warnings_next_steps(state)
     click.echo("")
-
-
-@cli.command("env")
-def env_cmd() -> None:
-    """Show environment summary: agent mode, output mode, and API key status."""
-    _AGENT_VARS = ("OPENSHARD_AGENT", "CI", "GITHUB_ACTIONS", "GITLAB_CI", "NO_COLOR")
-    _KEY_DISPLAY = (
-        ("OPENROUTER_API_KEY", "openrouter"),
-        ("ANTHROPIC_API_KEY", "anthropic"),
-        ("OPENAI_API_KEY", "openai"),
-    )
-
-    triggered_by: str | None = None
-    for _v in _AGENT_VARS:
-        if os.environ.get(_v, ""):
-            triggered_by = _v
-            break
-
-    agent_active = is_agent_environment()
-    if agent_active and triggered_by:
-        agent_display = f"yes   ({triggered_by}={os.environ.get(triggered_by, '')})"
-    else:
-        agent_display = "yes" if agent_active else "no"
-
-    try:
-        config = load_config()
-    except Exception:  # noqa: BLE001
-        config = {}
-
-    output_mode = config.get("output_mode", "human")
-
-    key_label = "not set"
-    for _env_var, _provider_name in _KEY_DISPLAY:
-        if os.environ.get(_env_var, ""):
-            key_label = f"{_provider_name} (from env)"
-            break
-
-    click.echo("Environment")
-    click.echo(f"  Agent mode:   {agent_display}")
-    click.echo(f"  Output mode:  {output_mode}")
-    click.echo(f"  API key:      {key_label}")
 
 
 @cli.group("config")
