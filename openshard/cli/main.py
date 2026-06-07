@@ -4379,9 +4379,15 @@ def import_claude(
 
     if not dry_run:
         write_import_entry(entry, cwd)
+        runs_path = cwd / ".openshard" / "runs.jsonl"
+        try:
+            line_count = sum(1 for _ in runs_path.open(encoding="utf-8"))
+        except Exception:
+            line_count = 1
+        from openshard.history.shard_contract import _make_shard_id
+        shard_id = _make_shard_id(entry.get("timestamp", ""), line_count - 1)
 
     if not as_json:
-        shard_id = entry.get("shard_id") or entry.get("timestamp", "")
         click.echo(f"Imported Claude Code receipt. Shard: {shard_id}")
         click.echo("OpenShard did not control this run.")
 
