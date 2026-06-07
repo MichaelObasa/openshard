@@ -27,6 +27,56 @@ def _load_yaml(p: Path) -> dict[str, Any]:
         return yaml.safe_load(fh) or {}
 
 
+_NO_KEY_MESSAGE = """\
+No API key found. Set one of:
+
+  export OPENROUTER_API_KEY=your_key   # recommended - access to all models
+  export ANTHROPIC_API_KEY=your_key    # Claude models direct
+  export OPENAI_API_KEY=your_key       # GPT models direct
+
+Or run 'openshard init' to configure interactively.\
+"""
+
+_KEY_VARS = (
+    ("OPENROUTER_API_KEY", "openrouter"),
+    ("ANTHROPIC_API_KEY", "anthropic"),
+    ("OPENAI_API_KEY", "openai"),
+)
+
+_AGENT_VARS = (
+    "OPENSHARD_AGENT",
+    "CI",
+    "GITHUB_ACTIONS",
+    "GITLAB_CI",
+    "NO_COLOR",
+)
+
+
+def detect_provider() -> str:
+    """Return the provider name to use based on available API keys.
+
+    Priority: openrouter > anthropic > openai.  Raises ``ValueError`` with
+    an actionable message if no recognised key is set.  Never raises for
+    any other reason.
+    """
+    for env_var, provider_name in _KEY_VARS:
+        if os.environ.get(env_var, ""):
+            return provider_name
+    raise ValueError(_NO_KEY_MESSAGE)
+
+
+def is_agent_environment() -> bool:
+    """Return True if any recognised CI or agent env var is set and truthy.
+
+    Checks OPENSHARD_AGENT (explicit opt-in), CI, GITHUB_ACTIONS, GITLAB_CI,
+    and NO_COLOR (conventional headless/agent signal).  Never raises.
+    """
+    try:
+        return any(os.environ.get(v, "") for v in _AGENT_VARS)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _inject_api_keys(config: dict[str, Any]) -> dict[str, Any]:
     """Inject API keys from environment variables into *config* (mutates and returns it).
 
@@ -34,17 +84,21 @@ def _inject_api_keys(config: dict[str, Any]) -> dict[str, Any]:
     keys found in the environment are stored so callers can inspect which
     providers are available without re-reading the environment.
     """
-    openrouter_key = os.environ.get("OPENROUTER_API_KEY", "")
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    for env_var, provider_name in _KEY_VARS:
+        val = os.environ.get(env_var, "")
+        if val:
+            config[f"{provider_name}_api_key"] = val
+    return config
 
-    if openrouter_key:
-        config["openrouter_api_key"] = openrouter_key
-    if anthropic_key:
-        config["anthropic_api_key"] = anthropic_key
-    if openai_key:
-        config["openai_api_key"] = openai_key
 
+def _inject_agent_mode(config: dict[str, Any]) -> dict[str, Any]:
+    """Set output_mode to agent_json when a CI/agent environment is detected.
+
+    Only mutates *config* when ``is_agent_environment()`` returns True and
+    ``output_mode`` has not already been set (respects explicit config files).
+    """
+    if is_agent_environment() and "output_mode" not in config:
+        config["output_mode"] = "agent_json"
     return config
 
 
@@ -91,11 +145,11 @@ def load_config(path: str | os.PathLike | None = None) -> dict[str, Any]:
         pkg_cfg = files("openshard.config").joinpath("default_config.yml")
         with pkg_cfg.open("r", encoding="utf-8") as fh:
             bundled = yaml.safe_load(fh) or {}
-        return _inject_api_keys(bundled)
+        return _inject_agent_mode(_inject_api_keys(bundled))
     except Exception:
         pass
 
-    return _inject_api_keys(dict(_DEFAULTS))
+    return _inject_agent_mode(_inject_api_keys(dict(_DEFAULTS)))
 
 
 def config_search_path(cwd: Path | None = None) -> Path:
@@ -184,12 +238,7 @@ def get_api_key() -> str:
     """
     key = os.environ.get("OPENROUTER_API_KEY", "")
     if not key:
-        raise ValueError(
-            "No API key configured. Set OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or "
-            "OPENAI_API_KEY, or run 'openshard init' to configure.\n\n"
-            "  export OPENROUTER_API_KEY=your_key_here\n\n"
-            "Obtain a key from https://openrouter.ai/keys"
-        )
+        raise ValueError(_NO_KEY_MESSAGE)
     return key
 
 

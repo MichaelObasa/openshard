@@ -24,7 +24,11 @@ from openshard.cli.run_output import (
     _Spinner,
     render_post_run,
 )
-from openshard.config.settings import get_anthropic_api_key, get_openai_api_key
+from openshard.config.settings import (
+    detect_provider,
+    get_anthropic_api_key,
+    get_openai_api_key,
+)
 from openshard.execution.gates import VALID_APPROVAL_MODES, GateEvaluator, resolve_gate_decisions
 from openshard.execution.generator import (
     ExecutionGenerator,
@@ -418,9 +422,13 @@ class RunPipeline:
                 # Fallback (shouldn't reach here after earlier validation)
                 effective_executor = "direct"
 
-            # Resolve provider (only applies to direct executor)
+            # Resolve provider (only applies to direct executor).
+            # detect_provider() raises ValueError (caught below) when no key is set,
+            # giving a clean error message instead of a traceback later.
+            # For openrouter the client is still created lazily inside ExecutionGenerator;
+            # the key existence is already confirmed here so the lazy path will succeed.
             _provider_instance = None
-            _provider_name = (provider or "openrouter").lower()
+            _provider_name = (provider or detect_provider()).lower()
             if effective_executor != "opencode":
                 if _provider_name == "anthropic":
                     from openshard.providers.anthropic import AnthropicProvider
