@@ -213,4 +213,125 @@ _BUILTIN_PACKS: list[dict] = [
         "safety_notes": "Read-only. Does not modify files.",
         "tags": ["documentation", "readme", "onboarding"],
     },
+    {
+        "id": "database-migration-review",
+        "title": "Database migration review",
+        "category": "delivery",
+        "summary": "Reviews SQL migration files for irreversible operations, missing transactions, table-locking risks, data-loss hazards, and missing index coverage.",
+        "prompt": (
+            "Review all database migration files in this directory (SQL files, Alembic versions, Flyway scripts, "
+            "Liquibase changelogs, or similar). For each migration, identify: operations that cannot be rolled back "
+            "(DROP COLUMN, DROP TABLE, destructive ALTER) without a corresponding down migration; statements that run "
+            "outside an explicit transaction and could leave the schema in a partial state on failure; DDL operations "
+            "on large tables that will take an exclusive lock and block production traffic; direct data deletions or "
+            "type-narrowing conversions that risk data loss; and new foreign keys or query patterns that will hit "
+            "unindexed columns. Do not modify files."
+        ),
+        "execution_prompt_suffix": _EXECUTION_FINDINGS_SUFFIX,
+        "recommended_context": "Run from the directory containing migration files (.sql, Alembic versions/, Flyway sql/, Liquibase changelogs/, or similar).",
+        "expected_receipt_value": "A list of migration risks grouped by severity: irreversible operations, transaction safety, locking hazards, data loss, and missing indexes, plus a STRUCTURED_FINDINGS line.",
+        "safety_notes": "Read-only analysis. No migration files modified.",
+        "tags": ["database", "migrations", "sql", "safety"],
+    },
+    {
+        "id": "accessibility-audit",
+        "title": "Accessibility audit",
+        "category": "code_quality",
+        "summary": "Reviews frontend source files for accessibility issues including missing alt text, keyboard navigation gaps, missing ARIA roles, and form labelling problems.",
+        "prompt": (
+            "Review the frontend source files in this directory (HTML, JSX, TSX, Vue, Svelte, or similar). "
+            "Identify: images and icon buttons missing meaningful alt text or aria-label; interactive elements "
+            "that are not reachable or activatable via keyboard alone (missing tabIndex, no focus styles, click "
+            "handlers on non-interactive elements); missing or incorrect ARIA roles, aria-expanded, aria-controls, "
+            "and aria-live regions where dynamic content changes; form inputs that lack an associated label element "
+            "or aria-labelledby; and colour-contrast issues where text or interactive elements use foreground/background "
+            "combinations below WCAG AA thresholds. Do not modify files."
+        ),
+        "execution_prompt_suffix": _EXECUTION_FINDINGS_SUFFIX,
+        "recommended_context": "Run from the frontend source directory containing HTML, JSX, TSX, Vue, or Svelte files.",
+        "expected_receipt_value": "A list of accessibility violations grouped by type: alt text, keyboard access, ARIA, form labels, and colour contrast, plus a STRUCTURED_FINDINGS line.",
+        "safety_notes": "Read-only analysis. No source files modified.",
+        "tags": ["accessibility", "a11y", "frontend", "html"],
+    },
+    {
+        "id": "kubernetes-security-review",
+        "title": "Kubernetes security review",
+        "category": "infrastructure",
+        "summary": "Reviews Kubernetes manifests for containers running as root, missing resource limits, overly broad RBAC, exposed secrets, and missing network policies.",
+        "prompt": (
+            "Review all Kubernetes manifest files in this directory (Deployment, StatefulSet, DaemonSet, Job, "
+            "CronJob, Role, ClusterRole, RoleBinding, NetworkPolicy, and related resources). Identify: containers "
+            "that run as root or do not set securityContext.runAsNonRoot; containers or pods missing CPU and memory "
+            "resource limits; containers with privileged: true or allowPrivilegeEscalation: true; Role and "
+            "ClusterRole bindings that grant wildcard verbs or resources, or bind to system:masters; environment "
+            "variables or volume mounts that expose Kubernetes Secrets in plaintext; and namespaces or workloads "
+            "with no NetworkPolicy restricting ingress or egress. Do not modify files."
+        ),
+        "execution_prompt_suffix": _EXECUTION_FINDINGS_SUFFIX,
+        "workflow": "native",
+        "recommended_context": "Run from the directory containing Kubernetes YAML manifests.",
+        "expected_receipt_value": "A list of Kubernetes security issues grouped by severity: root containers, missing limits, privilege escalation, RBAC, secret exposure, and network policies, plus a STRUCTURED_FINDINGS line.",
+        "safety_notes": "Read-only analysis. No manifest files modified.",
+        "tags": ["kubernetes", "k8s", "security", "infrastructure"],
+    },
+    {
+        "id": "openapi-spec-review",
+        "title": "OpenAPI spec review",
+        "category": "code_quality",
+        "summary": "Reviews OpenAPI/Swagger specs for missing response codes, undocumented errors, inconsistent naming, missing authentication schemes, and fields without descriptions.",
+        "prompt": (
+            "Review the OpenAPI or Swagger specification files in this directory (openapi.yaml, swagger.json, "
+            "or similar). Identify: operations missing standard HTTP error response codes (400, 401, 403, 404, "
+            "500); error responses that do not document their schema or response body; path and parameter names "
+            "that mix naming conventions (camelCase vs snake_case, inconsistent plural/singular resources); "
+            "operations that are accessible without any securityScheme or security requirement defined; and "
+            "schema properties, parameters, or request body fields that lack a description or at least one example. "
+            "Do not modify files."
+        ),
+        "execution_prompt_suffix": _EXECUTION_FINDINGS_SUFFIX,
+        "recommended_context": "Run from the directory containing openapi.yaml, swagger.json, or similar spec files.",
+        "expected_receipt_value": "A list of spec issues grouped by type: missing response codes, undocumented errors, naming inconsistencies, auth gaps, and missing descriptions, plus a STRUCTURED_FINDINGS line.",
+        "safety_notes": "Read-only analysis. No spec files modified.",
+        "tags": ["openapi", "swagger", "api", "documentation"],
+    },
+    {
+        "id": "github-actions-review",
+        "title": "GitHub Actions review",
+        "category": "delivery",
+        "summary": "Reviews GitHub Actions workflows for unpinned action versions, overly broad permissions, unsafe secret handling, unguarded production deploys, and missing timeouts.",
+        "prompt": (
+            "Review all workflow files in the .github/workflows directory. Identify: actions referenced by a "
+            "mutable tag (v1, main, latest) rather than a pinned commit SHA; workflows or jobs that set "
+            "permissions: write-all or inherit broad default permissions without restricting to only what is "
+            "needed; steps that print, log, or expose secret values via run: echo or set-output; deploy jobs "
+            "that push to production environments without a required approval gate or environment protection rule; "
+            "and jobs or steps that have no timeout-minutes set and could run indefinitely on a hung process. "
+            "Do not modify files."
+        ),
+        "execution_prompt_suffix": _EXECUTION_FINDINGS_SUFFIX,
+        "recommended_context": "Run from the .github/workflows directory.",
+        "expected_receipt_value": "A list of workflow risks grouped by type: unpinned actions, permissions, secret handling, deploy gates, and missing timeouts, plus a STRUCTURED_FINDINGS line.",
+        "safety_notes": "Read-only analysis. No workflow files modified.",
+        "tags": ["github-actions", "ci", "delivery", "security"],
+    },
+    {
+        "id": "performance-hotspots",
+        "title": "Performance hotspots",
+        "category": "code_quality",
+        "summary": "Identifies performance hotspots including N+1 query patterns, missing database indexes, unnecessary re-renders, synchronous I/O in async contexts, and unbounded data fetches.",
+        "prompt": (
+            "Analyse the source code in this directory for performance hotspots. Look for: ORM query patterns "
+            "inside loops that produce N+1 database queries, especially in list views or serialisers; model "
+            "relationships or filter conditions that traverse columns with no database index; React or Vue "
+            "components that trigger expensive re-renders on every parent update due to inline object or function "
+            "creation in render; synchronous file or network I/O calls made inside async route handlers or "
+            "event loops where a non-blocking equivalent exists; and query or API call sites that fetch all rows "
+            "or all fields with no pagination, limit clause, or field selection. For each hotspot, name the "
+            "file and function where the issue lives and describe the specific fix. Do not modify files."
+        ),
+        "recommended_context": "Run from the source directory of the application.",
+        "expected_receipt_value": "A list of performance hotspots by type: N+1 queries, missing indexes, unnecessary re-renders, blocking I/O, and unbounded fetches, each with file and function references.",
+        "safety_notes": "Read-only. Does not modify files.",
+        "tags": ["performance", "optimisation", "database", "frontend"],
+    },
 ]
