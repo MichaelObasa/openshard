@@ -3,7 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from openshard.providers.manager import InventoryEntry
-from openshard.scoring.filter import _parse_cost, filter_inventory, prefilter_coding
+from openshard.scoring.filter import (
+    _parse_cost,
+    filter_deprecated,
+    filter_inventory,
+    lifecycle_adjustments_for_entries,
+    prefilter_coding,
+)
 from openshard.scoring.policy import policy_bonus
 from openshard.scoring.requirements import TaskRequirements
 from openshard.scoring.shortlist import build_shortlist
@@ -94,6 +100,8 @@ def select_with_info(
     candidates = prefilter_coding(entries)
     candidates = build_shortlist(candidates)
     candidates = filter_inventory(candidates, requirements)
+    # Hard-exclude deprecated models. Unknown models pass through (0.0 adjustment).
+    candidates = filter_deprecated(candidates)
     if not candidates:
         return ScoredRoutingResult(
             category=category,
@@ -106,10 +114,22 @@ def select_with_info(
     raw_scored = [(e, score_model(e, requirements, category)) for e in candidates]
     raw_scores = {e.model.id: round(s, 3) for e, s in raw_scored}
 
+    # Merge lifecycle penalties with caller-supplied history adjustments.
+    # Lifecycle penalties are additive so a combination of both signals
+    # cannot push a score below a reasonable floor (clamped at -20.0).
+    _lc_adj = lifecycle_adjustments_for_entries(candidates)
+    _merged: dict[str, float] = {}
+    for mid in raw_scores:
+        _ha = history_adjustments.get(mid, 0.0) if history_adjustments else 0.0
+        _lc = _lc_adj.get(mid, 0.0)
+        _combined = max(_ha + _lc, -20.0)
+        if _combined != 0.0:
+            _merged[mid] = _combined
+
     applied_adjustments: dict[str, float] = {}
-    if history_adjustments:
+    if _merged:
         applied_adjustments = {
-            mid: round(history_adjustments.get(mid, 0.0), 3)
+            mid: round(_merged.get(mid, 0.0), 3)
             for mid in raw_scores
         }
 

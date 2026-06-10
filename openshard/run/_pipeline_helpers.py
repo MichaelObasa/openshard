@@ -50,20 +50,53 @@ _SYSTEM_OVERHEAD_TOKENS = 500   # execution system-prompt is substantial
 # ---------------------------------------------------------------------------
 
 
-def _suggest_executor(task: str) -> tuple[str, str]:
-    """Return ``(executor, reason)`` recommendation for *task*.
+def _suggest_executor(
+    task: str,
+    *,
+    category: str = "standard",
+    read_only: bool = False,
+    opencode_available: bool = False,
+    opencode_preference: bool = False,
+    risky_paths: list[str] | None = None,
+    _for_dispatch: bool = False,
+) -> tuple[str, str, object | None]:
+    """Return ``(executor, reason, advisory_result)`` for *task*.
 
-    - Defaults to ``"direct"`` for short, focused tasks.
-    - Returns ``"native"`` for large, multi-file, or complex tasks.
-    - ``"opencode"`` is never returned here; it requires explicit ``--workflow opencode``.
+    When ``_for_dispatch=True`` the function calls ``rank_executors()`` and
+    uses its top recommendation as the executor choice, setting
+    ``advisory_result.advisory_only=False``. Falls back to the original
+    heuristic on any error.
+
+    When ``_for_dispatch=False`` (default — backward-compatible) only the
+    heuristic runs and ``advisory_result`` is ``None``.
+
+    ``"opencode"`` is never returned unless ``opencode_preference=True`` and
+    ``opencode_available=True``.
     """
+    if _for_dispatch:
+        try:
+            from openshard.routing.executor_advisory import rank_executors as _rank
+            _ea = _rank(
+                task,
+                category=category,
+                read_only=read_only,
+                opencode_available=opencode_available,
+                opencode_preference=opencode_preference,
+                risky_paths=risky_paths or [],
+                _for_dispatch=True,
+            )
+            _reason = _ea.recommended.reasons[0] if _ea.recommended.reasons else "advisory ranked"
+            return _ea.recommended.executor, _reason, _ea
+        except Exception:
+            pass  # fall through to heuristic
+
     lower = task.lower()
     if len(task.split()) > 60:
-        return "native", "large or complex task"
+        return "native", "large or complex task", None
     for keywords, label in _NATIVE_SIGNALS:
         if any(kw in lower for kw in keywords):
-            return "native", label
-    return "direct", "focused task"
+            return "native", label, None
+    return "direct", "focused task", None
 
 
 def _pre_run_cost_hint(model: str, task: str) -> str | None:
@@ -261,6 +294,9 @@ def _log_run(
     run_id: str | None = None,
     run_timeline: list | None = None,
     run_index: int | None = None,
+    executor_advisory_result=None,
+    executor_source: str = "unknown",
+    fra_result: dict | None = None,
 ) -> None:
     entry: dict = {
         "schema_version": SHARD_SCHEMA_VERSION,
@@ -297,6 +333,28 @@ def _log_run(
     if routing_decision is not None:
         entry["routing_model"] = routing_decision.model
         entry["routing_rationale"] = routing_decision.rationale
+        try:
+            # Determine which symbolic role maps to this model and check its source
+            from openshard.routing.model_resolver import (
+                MODEL_CHEAP,
+                MODEL_COMPLEX,
+                MODEL_ESCALATE,
+                MODEL_MAIN,
+                MODEL_STRONG,
+                MODEL_VISUAL,
+            )
+            from openshard.routing.model_resolver import resolution_source as _res_src
+            _role_map = {
+                MODEL_CHEAP: "cheap", MODEL_MAIN: "main", MODEL_STRONG: "strong",
+                MODEL_ESCALATE: "escalate", MODEL_VISUAL: "visual", MODEL_COMPLEX: "complex",
+            }
+            _role = _role_map.get(routing_decision.model)
+            if _role is not None:
+                entry["model_resolution"] = _res_src(_role)
+            else:
+                entry["model_resolution"] = "unknown"
+        except Exception:
+            pass
     if _scored is not None:
         entry["routing_category"] = _scored.category
         entry["routing_candidate_count"] = _scored.candidate_count
@@ -360,6 +418,25 @@ def _log_run(
     if verification_plan is not None and verification_plan.has_commands:
         entry["verification_plan"] = _serialize_verification_plan(verification_plan)
 
+    # Record executor advisory result and source when available.
+    if executor_source and executor_source != "unknown":
+        entry["executor_source"] = executor_source
+    if executor_advisory_result is not None:
+        try:
+            _ea = executor_advisory_result
+            entry["executor_advisory"] = {
+                "recommended": _ea.recommended.executor,
+                "score": _ea.recommended.score,
+                "top_reasons": _ea.recommended.reasons[:2],
+                "advisory_only": _ea.advisory_only,
+                "alternatives": [
+                    {"executor": a.executor, "score": a.score}
+                    for a in (_ea.alternatives or [])[:3]
+                ],
+            }
+        except Exception:
+            pass
+
     # Generate model advisory from risk signal — stored for display, never affects routing.
     _advisory_risk: str | None = None
     if form_factor_decision is not None:
@@ -375,20 +452,28 @@ def _log_run(
         if _adv_candidates:
             entry["model_advisory"] = _adv_candidates
 
-    try:
-        from openshard.models.feedback_advisory import (
-            _load_recent_session_signals as _load_sigs,
-        )
-        from openshard.models.feedback_advisory import (
-            build_feedback_routing_advisory as _build_fra,
-        )
-        _sig_path = Path.cwd() / ".openshard" / "session_signals.jsonl"
-        _recent_sigs = _load_sigs(_sig_path)
-        _fra = _build_fra(_recent_sigs)
-        if _fra is not None:
-            entry["feedback_routing_advisory"] = _fra
-    except Exception:
-        pass
+    # Store FRA result passed from pipeline (already computed before scoring).
+    # Falls back to re-computation for backward compatibility when not provided.
+    if fra_result is not None:
+        entry["feedback_routing_advisory"] = fra_result
+        # Record whether FRA actually influenced scoring (recommendation present)
+        if fra_result.get("recommendation") == "consider_stronger_review":
+            entry["feedback_routing_applied"] = True
+    else:
+        try:
+            from openshard.models.feedback_advisory import (
+                _load_recent_session_signals as _load_sigs,
+            )
+            from openshard.models.feedback_advisory import (
+                build_feedback_routing_advisory as _build_fra,
+            )
+            _sig_path = Path.cwd() / ".openshard" / "session_signals.jsonl"
+            _recent_sigs = _load_sigs(_sig_path)
+            _fra = _build_fra(_recent_sigs)
+            if _fra is not None:
+                entry["feedback_routing_advisory"] = _fra
+        except Exception:
+            pass
 
     if extra_metadata:
         entry.update(extra_metadata)

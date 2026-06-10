@@ -58,8 +58,9 @@ class TestModeModePolicy(unittest.TestCase):
             with self.subTest(model_id=mid):
                 self.assertIsNotNone(get_model(mid), f"{mid} not in registry")
 
-    def test_plan_advisory_only_true(self) -> None:
-        self.assertTrue(model_policy_for_mode("plan").advisory_only)
+    def test_plan_advisory_only_false(self) -> None:
+        # Plan mode is now wired — advisory_only must be False.
+        self.assertFalse(model_policy_for_mode("plan").advisory_only)
 
     def test_plan_includes_kimi_k2_6(self) -> None:
         policy = model_policy_for_mode("plan")

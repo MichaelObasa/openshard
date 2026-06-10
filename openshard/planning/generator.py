@@ -67,9 +67,35 @@ class PlanGenerator:
     def __init__(self, provider: BaseProvider | None = None) -> None:
         config = load_config()
         tiers: list[dict] = config.get("model_tiers", [])
-        if not tiers:
-            raise RuntimeError("No model_tiers defined in config.yml")
-        self.model: str = config.get("planning_model") or tiers[0]["model"]
+
+        # Priority: config.planning_model > mode_policy > model_tiers[0]
+        self.model: str
+        self._model_source: str
+
+        if config.get("planning_model"):
+            self.model = config["planning_model"]
+            self._model_source = "config"
+        else:
+            _policy_model: str | None = None
+            try:
+                from openshard.models.mode_policy import model_policy_for_mode as _mpm
+                _policy = _mpm("plan")
+                if _policy is not None:
+                    _policy_model = _policy.default_model_id
+            except Exception:
+                pass
+
+            if _policy_model:
+                self.model = _policy_model
+                self._model_source = "mode_policy"
+            elif tiers:
+                self.model = tiers[0]["model"]
+                self._model_source = "model_tiers"
+            else:
+                raise RuntimeError(
+                    "No model_tiers defined in config.yml and no mode policy available"
+                )
+
         self.client: BaseProvider = (
             provider if provider is not None else OpenRouterClient(get_api_key())
         )

@@ -4,20 +4,27 @@ import re
 from dataclasses import dataclass
 
 # ---------------------------------------------------------------------------
-# Models
+# Models — resolved from the registry; hardcoded IDs are fallback only.
 # ---------------------------------------------------------------------------
+from openshard.routing.model_resolver import (
+    ESCALATION_CHAIN,
+    MODEL_CHEAP,
+    MODEL_COMPLEX,
+    MODEL_ESCALATE,
+    MODEL_MAIN,
+    MODEL_STRONG,
+    MODEL_VISUAL,
+)
 
-MODEL_CHEAP    = "deepseek/deepseek-v4-flash"  # low-risk boilerplate
-MODEL_MAIN     = "z-ai/glm-5.1"             # standard coding (default worker)
-MODEL_STRONG   = "anthropic/claude-sonnet-4.6"  # security / careful reasoning
-MODEL_ESCALATE = "anthropic/claude-opus-4.7"    # escalation only
-MODEL_VISUAL   = "moonshotai/kimi-k2.5"    # UI / visual / multimodal
-MODEL_COMPLEX  = "minimax/m2.7"            # long-horizon / multi-file
-
-# Escalation chain used when verification fails.
-# First retry: STRONG; second retry: ESCALATE.
-ESCALATION_CHAIN: list[str] = [MODEL_STRONG, MODEL_ESCALATE]
-
+__all__ = [
+    "ESCALATION_CHAIN",
+    "MODEL_CHEAP",
+    "MODEL_COMPLEX",
+    "MODEL_ESCALATE",
+    "MODEL_MAIN",
+    "MODEL_STRONG",
+    "MODEL_VISUAL",
+]
 
 # ---------------------------------------------------------------------------
 # Routing decision

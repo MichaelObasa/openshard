@@ -74,6 +74,12 @@ class RoutingTruth:
     executor_dispatched: bool
     validator_dispatched: bool
     routing_truth_summary: str
+    # 3. Advisory wiring provenance (added by PRs 1, 3, 4, 5).
+    #    All fields have safe defaults so legacy Shards degrade gracefully.
+    model_resolution: str = "unknown"       # "registry" | "hardcoded" | "unknown"
+    feedback_routing_applied: bool = False
+    mode_policy_applied: bool = False
+    executor_source: str = "unknown"        # "advisory" | "override" | "heuristic" | "unknown"
 
 
 def _get(obj: object, key: str, default: object = None) -> object:
@@ -209,6 +215,12 @@ def build_routing_truth(entry: object) -> RoutingTruth:
         validator_model,
     )
 
+    # --- Advisory wiring provenance ----------------------------------------
+    model_resolution = str(entry.get("model_resolution") or "unknown")
+    feedback_routing_applied = bool(entry.get("feedback_routing_applied", False))
+    mode_policy_applied = bool(entry.get("mode_policy_applied", False))
+    executor_source = str(entry.get("executor_source") or "unknown")
+
     return RoutingTruth(
         runtime_model=runtime_model,
         routing_mode=routing_mode,
@@ -222,6 +234,10 @@ def build_routing_truth(entry: object) -> RoutingTruth:
         executor_dispatched=executor_dispatched,
         validator_dispatched=validator_dispatched,
         routing_truth_summary=summary,
+        model_resolution=model_resolution,
+        feedback_routing_applied=feedback_routing_applied,
+        mode_policy_applied=mode_policy_applied,
+        executor_source=executor_source,
     )
 
 
@@ -263,7 +279,8 @@ def render_routing_truth_lines(rt: RoutingTruth, detail: str) -> list[str]:
 
     * ``default`` - the always-visible anti-overclaim line(s); empty when there
       is no per-role metadata to overclaim.
-    * ``more`` / ``full`` - adds the explicit ``Model used`` line.
+    * ``more`` / ``full`` - adds the explicit ``Model used`` line plus advisory
+      wiring provenance when non-default values are present.
     """
     role_line = _role_line(rt)
     if detail == "default":
@@ -274,6 +291,21 @@ def render_routing_truth_lines(rt: RoutingTruth, detail: str) -> list[str]:
         lines.append(f"Model used: {rt.runtime_model}")
     if role_line:
         lines.append(role_line)
+
+    # Emit wiring provenance at more/full detail — only when values differ
+    # from defaults so legacy Shards stay clean.
+    _provenance_parts: list[str] = []
+    if rt.model_resolution not in ("unknown", "hardcoded"):
+        _provenance_parts.append(f"model={rt.model_resolution}")
+    if rt.executor_source not in ("unknown", "heuristic"):
+        _provenance_parts.append(f"executor={rt.executor_source}")
+    if rt.feedback_routing_applied:
+        _provenance_parts.append("feedback=applied")
+    if rt.mode_policy_applied:
+        _provenance_parts.append("mode_policy=applied")
+    if _provenance_parts:
+        lines.append(f"  Routing: {' | '.join(_provenance_parts)}")
+
     return lines
 
 

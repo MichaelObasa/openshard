@@ -1252,22 +1252,22 @@ class TestExecutorAutoSelection(unittest.TestCase):
 
     def test_long_task_routes_to_native_not_opencode(self):
         long_task = "word " * 65  # 65 words, well above 60-word threshold
-        executor, _ = self._suggest(long_task)
+        executor, _, _ = self._suggest(long_task)
         self.assertEqual(executor, "native")
         self.assertNotEqual(executor, "opencode")
 
     def test_short_task_routes_to_direct(self):
         short_task = "Fix the typo in README"
-        executor, _ = self._suggest(short_task)
+        executor, _, _ = self._suggest(short_task)
         self.assertEqual(executor, "direct")
 
     def test_multifile_keyword_routes_to_native(self):
-        executor, _ = self._suggest("Update all files to use the new API")
+        executor, _, _ = self._suggest("Update all files to use the new API")
         self.assertEqual(executor, "native")
         self.assertNotEqual(executor, "opencode")
 
     def test_codebase_keyword_routes_to_native(self):
-        executor, _ = self._suggest("Refactor across the codebase to remove deprecated calls")
+        executor, _, _ = self._suggest("Refactor across the codebase to remove deprecated calls")
         self.assertEqual(executor, "native")
         self.assertNotEqual(executor, "opencode")
 
@@ -1283,7 +1283,7 @@ class TestExecutorAutoSelection(unittest.TestCase):
             "Add a test",
         ]
         for s in samples:
-            executor, _ = _suggest_executor(s)
+            executor, _, _ = _suggest_executor(s)
             self.assertNotEqual(executor, "opencode", f"opencode returned for: {s!r}")
 
     def test_production_iac_hardening_full_prompt_routes_to_native(self):
@@ -1296,7 +1296,7 @@ class TestExecutorAutoSelection(unittest.TestCase):
             "Do not apply changes directly without review."
         )
         full_prompt = base_prompt + _EXECUTION_FINDINGS_SUFFIX
-        executor, reason = self._suggest(full_prompt)
+        executor, reason, _ = self._suggest(full_prompt)
         self.assertEqual(executor, "native", f"expected native, got {executor!r} (reason={reason!r})")
         self.assertNotEqual(executor, "opencode")
 
