@@ -40,6 +40,7 @@ _PLAN_POLICY = ModeModelPolicy(
         "Value-tier models provide sufficient planning capability.",
         "Frontier models remain reserved for Run mode high-risk tasks.",
     ),
+    advisory_only=False,  # wired: PlanGenerator uses this model
 )
 
 

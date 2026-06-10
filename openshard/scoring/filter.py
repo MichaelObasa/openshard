@@ -1,7 +1,32 @@
 from __future__ import annotations
 
+from typing import Callable
+
 from openshard.providers.manager import InventoryEntry
 from openshard.scoring.requirements import TaskRequirements
+
+# ---------------------------------------------------------------------------
+# Lifecycle-based score adjustments.
+#
+# active_default    → no penalty (eligible for default routing)
+# active_specialist → moderate penalty; still usable when task needs it
+# fallback/open_weight → same moderate penalty
+# experimental/watchlist → heavy penalty; not production-safe by default
+# deprecated        → hard exclude (sentinel value None)
+#
+# Unknown model IDs (not in registry) get 0.0 — pass-through so unknown
+# models in provider inventory still compete normally.
+# ---------------------------------------------------------------------------
+
+_LIFECYCLE_SCORE_ADJUSTMENTS: dict[str, float | None] = {
+    "active_default":    0.0,
+    "active_specialist": -3.0,
+    "fallback":          -3.0,
+    "open_weight":       -3.0,
+    "experimental":      -10.0,
+    "watchlist":         -10.0,
+    "deprecated":        None,   # sentinel: hard exclude
+}
 
 _NONCODING_SUBSTRINGS = (
     "embed",
@@ -15,6 +40,76 @@ _NONCODING_SUBSTRINGS = (
     "image",
     "vision",
 )
+
+
+def lifecycle_adjustments_for_entries(
+    entries: list[InventoryEntry],
+    *,
+    registry_fn: Callable[[str], str | None] | None = None,
+) -> dict[str, float]:
+    """Return a score-adjustment dict keyed by model_id based on lifecycle.
+
+    Values:
+    * ``0.0`` — active_default or unknown model (pass-through)
+    * negative float — non-default lifecycle (see ``_LIFECYCLE_SCORE_ADJUSTMENTS``)
+    * ``float("-inf")`` — deprecated; callers must exclude these entries
+
+    Args:
+        entries: candidate inventory entries to evaluate
+        registry_fn: optional override for ``lifecycle_for`` (injectable for tests)
+    """
+    try:
+        from openshard.models.registry import lifecycle_for as _default_lc_fn
+    except Exception:
+        return {e.model.id: 0.0 for e in entries}
+
+    _lc_fn = registry_fn if registry_fn is not None else _default_lc_fn
+    result: dict[str, float] = {}
+    for entry in entries:
+        mid = entry.model.id
+        try:
+            lc = _lc_fn(mid)
+        except Exception:
+            lc = None
+        if lc is None:
+            result[mid] = 0.0  # unknown model: pass-through
+            continue
+        adj = _LIFECYCLE_SCORE_ADJUSTMENTS.get(lc, 0.0)
+        if adj is None:
+            result[mid] = float("-inf")  # deprecated sentinel
+        else:
+            result[mid] = adj
+    return result
+
+
+def filter_deprecated(
+    entries: list[InventoryEntry],
+    *,
+    registry_fn: Callable[[str], str | None] | None = None,
+) -> list[InventoryEntry]:
+    """Hard-remove deprecated models from the candidate list.
+
+    Models not present in the registry are kept (conservative pass-through).
+
+    Args:
+        entries: candidate inventory entries
+        registry_fn: optional override for ``lifecycle_for`` (injectable for tests)
+    """
+    try:
+        from openshard.models.registry import lifecycle_for as _default_lc_fn
+    except Exception:
+        return list(entries)
+
+    _lc_fn = registry_fn if registry_fn is not None else _default_lc_fn
+    result = []
+    for entry in entries:
+        try:
+            lc = _lc_fn(entry.model.id)
+        except Exception:
+            lc = None
+        if lc != "deprecated":
+            result.append(entry)
+    return result
 
 
 def prefilter_coding(entries: list[InventoryEntry]) -> list[InventoryEntry]:

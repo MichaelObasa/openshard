@@ -208,8 +208,18 @@ def rank_executors(
     opencode_available: bool = False,
     opencode_preference: bool = False,
     risky_paths: list[str] | None = None,
+    _for_dispatch: bool = False,
 ) -> ExecutorAdvisoryResult:
-    """Return a deterministic executor ranking. Pure — no I/O, no external calls."""
+    """Return a deterministic executor ranking. Pure — no I/O, no external calls.
+
+    Args:
+        _for_dispatch: when ``True``, the caller intends to apply the
+            recommended executor to actual dispatch. The returned
+            ``advisory_only`` flag is set to ``False`` in that case,
+            accurately reflecting that this ranking drove a real decision.
+            Callers that only want the ranking for display should leave
+            this ``False`` (default).
+    """
     paths = risky_paths or []
     write_task = not read_only
     global_warnings: list[str] = []
@@ -262,6 +272,7 @@ def rank_executors(
         recommended=recommended,
         alternatives=alternatives,
         warnings=deduped,
+        advisory_only=not _for_dispatch,
     )
 
 

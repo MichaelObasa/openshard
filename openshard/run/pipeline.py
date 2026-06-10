@@ -351,7 +351,9 @@ class RunPipeline:
             _use_history_scoring = history_scoring or bool(_cfg.get("history_scoring", False))
             _use_eval_scoring = eval_scoring or bool(_cfg.get("eval_scoring", False))
             _use_feedback_scoring = feedback_scoring or bool(_cfg.get("feedback_scoring", False))
-            _policy_executor, _policy_reason = _suggest_executor(task)
+            _policy_executor, _policy_reason, _executor_advisory_result = _suggest_executor(task)
+            _executor_source: str = "heuristic"
+            _fra_result: dict | None = None
 
             # --workflow > --executor (deprecated) > config.workflow > config.executor > auto
             _show_executor_deprecation = False
@@ -365,6 +367,7 @@ class RunPipeline:
                     )
                 effective_workflow = _wf
                 _policy_reason = ""
+                _executor_source = "override"
                 _timeline.append(make_timeline_event("workflow_pack_loaded", "Loaded workflow pack", kind="workflow", target=_wf))
                 try:
                     from openshard.workflow_packs.packs import load_packs as _load_packs_fn
@@ -378,6 +381,7 @@ class RunPipeline:
                 _show_executor_deprecation = True
                 effective_workflow = executor.lower()
                 _policy_reason = ""
+                _executor_source = "override"
             elif _cfg_workflow:
                 if _cfg_workflow in ("claude-code", "codex"):
                     raise click.ClickException(
@@ -402,25 +406,67 @@ class RunPipeline:
             # _force_stages=True → always stage; False → never stage; None → auto (routing-driven).
             _force_stages: bool | None = None
             if effective_workflow == "auto":
-                effective_executor = _policy_executor
+                import shutil as _shutil_exec
+                _oc_avail = bool(_shutil_exec.which("opencode"))
+                _oc_pref = False  # opencode preference requires explicit --workflow opencode
+                # Run advisory with _for_dispatch=True so advisory_only=False on
+                # the result (records that advisory was consulted for dispatch).
+                # Effective executor: advisory recommendation is applied only when
+                # the heuristic also selects "native" (complex/multi-file tasks).
+                # For simple tasks the heuristic "direct" is preserved so existing
+                # direct-path pipeline behaviour is unchanged.
+                _adv_executor, _adv_reason, _adv_result = _suggest_executor(
+                    task,
+                    category="standard",  # routing_decision not yet computed at this point
+                    read_only=is_readonly_task(task),
+                    opencode_available=_oc_avail,
+                    opencode_preference=_oc_pref,
+                    _for_dispatch=True,
+                )
+                # _policy_executor comes from the simple heuristic (no _for_dispatch).
+                # Use advisory recommendation when both heuristic and advisory agree
+                # on "native", or when advisory has a non-default reason.
+                if _policy_executor == "native" or _adv_executor == "native" and (
+                    len(task.split()) > 60 or any(
+                        kw in task.lower() for kw in (
+                            "all files", "every file", "multiple files", "across the",
+                            "throughout the", "codebase",
+                        )
+                    )
+                ):
+                    effective_executor = _adv_executor
+                    _policy_reason = _adv_reason
+                    _executor_source = "advisory"
+                    # Native executor manages its own multi-step workflow.
+                    if effective_executor == "native":
+                        _force_stages = False
+                else:
+                    effective_executor = _policy_executor
+                    _executor_source = "heuristic"
+                _executor_advisory_result = _adv_result
             elif effective_workflow == "direct":
                 effective_executor = "direct"
                 _force_stages = False
+                _executor_source = "override"
             elif effective_workflow == "staged":
                 effective_executor = "direct"
                 _force_stages = True
                 _policy_reason = ""
+                _executor_source = "override"
             elif effective_workflow == "opencode":
                 effective_executor = "opencode"
                 _force_stages = False
                 _policy_reason = ""
+                _executor_source = "override"
             elif effective_workflow == "native":
                 effective_executor = "native"
                 _force_stages = False
                 _policy_reason = ""
+                _executor_source = "override"
             else:
                 # Fallback (shouldn't reach here after earlier validation)
                 effective_executor = "direct"
+                _executor_source = "heuristic"
 
             # Resolve provider (only applies to direct executor).
             # detect_provider() raises ValueError (caught below) when no key is set,
@@ -609,8 +655,34 @@ class RunPipeline:
                         }
                     except Exception:
                         pass
+                # Feedback Routing Advisory (FRA) — session signal-based
+                # penalties applied before scoring. Soft signal only; never
+                # raises. Stored for Shard recording via _log_run.
+                _fra_result: dict | None = None
+                _fra_adjustments: dict[str, float] = {}
+                try:
+                    from openshard.models.feedback_advisory import (
+                        _load_recent_session_signals as _fra_load_sigs,
+                    )
+                    from openshard.models.feedback_advisory import (
+                        build_feedback_routing_advisory as _build_fra,
+                    )
+                    from openshard.models.registry import get_model as _fra_get_model
+                    _fra_sig_path = Path(".openshard") / "session_signals.jsonl"
+                    _fra_sigs = _fra_load_sigs(_fra_sig_path)
+                    _fra_result = _build_fra(_fra_sigs)
+                    if _fra_result is not None and _fra_result.get("recommendation") == "consider_stronger_review":
+                        _fra_confidence = _fra_result.get("confidence", "low")
+                        _fra_penalty = -1.5 if _fra_confidence == "medium" else -0.5
+                        for _fe in _entries:
+                            _freg = _fra_get_model(_fe.model.id)
+                            if _freg is not None and _freg.cost_class == "cheap":
+                                _fra_adjustments[_fe.model.id] = _fra_penalty
+                except Exception:
+                    pass
+
                 _merged_adjustments: dict[str, float] | None = None
-                if _hist_adjustments is not None or _eval_adjustments or _cat_adjustments or _feedback_adjustments:
+                if _hist_adjustments is not None or _eval_adjustments or _cat_adjustments or _feedback_adjustments or _fra_adjustments:
                     _merged_adjustments = dict(_hist_adjustments or {})
                     _all_eval_models = set(_eval_adjustments) | set(_cat_adjustments)
                     for _em in _all_eval_models:
@@ -623,6 +695,10 @@ class RunPipeline:
                     for _fm, _fval in _feedback_adjustments.items():
                         _merged_adjustments[_fm] = max(
                             _merged_clamp_min, min(_merged_clamp_max, _merged_adjustments.get(_fm, 0.0) + _fval)
+                        )
+                    for _frm, _frval in _fra_adjustments.items():
+                        _merged_adjustments[_frm] = max(
+                            _merged_clamp_min, min(_merged_clamp_max, _merged_adjustments.get(_frm, 0.0) + _frval)
                         )
                 _scored = select_with_info(_entries, _reqs, routing_decision.category, history_adjustments=_merged_adjustments)
                 if (
@@ -2443,7 +2519,10 @@ class RunPipeline:
                      extra_metadata=_extra_metadata,
                      run_id=_run_id,
                      run_index=_receipt_index,
-                     run_timeline=[e.to_dict() for e in _timeline])
+                     run_timeline=[e.to_dict() for e in _timeline],
+                     executor_advisory_result=_executor_advisory_result,
+                     executor_source=_executor_source,
+                     fra_result=_fra_result)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
 
