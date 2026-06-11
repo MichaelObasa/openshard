@@ -29,7 +29,7 @@ Design constraints (mirrors ``proof_contract.py``):
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 # Runtime routing modes - how the real runtime model was chosen.
 ROUTING_KEYWORD = "keyword"
@@ -80,6 +80,10 @@ class RoutingTruth:
     feedback_routing_applied: bool = False
     mode_policy_applied: bool = False
     executor_source: str = "unknown"        # "advisory" | "override" | "heuristic" | "unknown"
+    # 4. Provider-aware eligibility (recorded, not enforced). Safe defaults
+    #    so legacy Shards degrade gracefully.
+    available_providers: list[str] = field(default_factory=list)
+    routing_constraints: dict | None = None
 
 
 def _get(obj: object, key: str, default: object = None) -> object:
@@ -221,6 +225,14 @@ def build_routing_truth(entry: object) -> RoutingTruth:
     mode_policy_applied = bool(entry.get("mode_policy_applied", False))
     executor_source = str(entry.get("executor_source") or "unknown")
 
+    # --- Provider-aware eligibility (recorded, not enforced) ----------------
+    _ap_raw = entry.get("available_providers")
+    available_providers = (
+        [str(p) for p in _ap_raw] if isinstance(_ap_raw, (list, tuple)) else []
+    )
+    _rc_raw = entry.get("routing_constraints")
+    routing_constraints = _rc_raw if isinstance(_rc_raw, dict) else None
+
     return RoutingTruth(
         runtime_model=runtime_model,
         routing_mode=routing_mode,
@@ -238,6 +250,8 @@ def build_routing_truth(entry: object) -> RoutingTruth:
         feedback_routing_applied=feedback_routing_applied,
         mode_policy_applied=mode_policy_applied,
         executor_source=executor_source,
+        available_providers=available_providers,
+        routing_constraints=routing_constraints,
     )
 
 
