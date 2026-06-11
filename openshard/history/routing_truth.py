@@ -84,6 +84,13 @@ class RoutingTruth:
     #    so legacy Shards degrade gracefully.
     available_providers: list[str] = field(default_factory=list)
     routing_constraints: dict | None = None
+    # 5. Provider-aware enforcement result. Safe defaults so legacy Shards
+    #    degrade gracefully. All None/False/0 when enforcement did not run.
+    provider_enforcement_applied: bool = False
+    provider_enforcement_source: str | None = None
+    provider_enforcement_selected_model: str | None = None
+    provider_enforcement_rejected_model: str | None = None
+    provider_enforcement_routable_size: int = 0
 
 
 def _get(obj: object, key: str, default: object = None) -> object:
@@ -233,6 +240,19 @@ def build_routing_truth(entry: object) -> RoutingTruth:
     _rc_raw = entry.get("routing_constraints")
     routing_constraints = _rc_raw if isinstance(_rc_raw, dict) else None
 
+    # --- Provider-aware enforcement result ----------------------------------
+    _pe_raw = entry.get("provider_enforcement")
+    _pe: dict = _pe_raw if isinstance(_pe_raw, dict) else {}
+    provider_enforcement_applied = bool(_pe.get("applied", False))
+    _pe_src = _pe.get("source")
+    provider_enforcement_source = str(_pe_src) if _pe_src is not None else None
+    _pe_sel = _pe.get("selected_model")
+    provider_enforcement_selected_model = str(_pe_sel) if _pe_sel is not None else None
+    _pe_rej = _pe.get("rejected_model")
+    provider_enforcement_rejected_model = str(_pe_rej) if _pe_rej is not None else None
+    _pe_sz = _pe.get("routable_pool_size", 0)
+    provider_enforcement_routable_size = int(_pe_sz) if isinstance(_pe_sz, int) else 0
+
     return RoutingTruth(
         runtime_model=runtime_model,
         routing_mode=routing_mode,
@@ -252,6 +272,11 @@ def build_routing_truth(entry: object) -> RoutingTruth:
         executor_source=executor_source,
         available_providers=available_providers,
         routing_constraints=routing_constraints,
+        provider_enforcement_applied=provider_enforcement_applied,
+        provider_enforcement_source=provider_enforcement_source,
+        provider_enforcement_selected_model=provider_enforcement_selected_model,
+        provider_enforcement_rejected_model=provider_enforcement_rejected_model,
+        provider_enforcement_routable_size=provider_enforcement_routable_size,
     )
 
 
