@@ -379,6 +379,61 @@ _REGISTRY: list[ModelEntry] = [
         latency_class="normal",
         cost_class="expensive",
     ),
+    # ------------------------------------------------------------------
+    # Claude Fable 5 — generally available (2026-06).
+    # active_specialist: production-grade but not default-routable.
+    # roles intentionally excludes "escalation" so the resolver's
+    # escalate path continues to select Opus 4.8 (hint-score wins over
+    # alphabetical tie-break; "fable" < "opus" would otherwise flip it).
+    # ------------------------------------------------------------------
+    ModelEntry(
+        id="anthropic/claude-fable-5",
+        lifecycle="active_specialist",
+        display_name="Anthropic: Claude Fable 5",
+        provider="Anthropic",
+        tier="frontier",
+        roles=("planner", "reviewer", "frontier_alternative"),
+        experimental=False,
+        context_length=1_000_000,
+        input_modalities=("text", "image"),
+        supports_tools=True,
+        supports_structured_outputs=True,
+        supports_reasoning=False,
+        supports_multimodal=True,
+        latency_class="slow",
+        cost_class="expensive",
+        notes=(
+            "Adaptive thinking always on; does not expose extended thinking as a "
+            "user-invokable feature. Max output 128k tokens. Safeguards may fall "
+            "back to Opus 4.8."
+        ),
+    ),
+    # ------------------------------------------------------------------
+    # Claude Mythos 5 — limited availability / Project Glasswing (2026-06).
+    # watchlist: access-restricted; never queried by any resolver path.
+    # ------------------------------------------------------------------
+    ModelEntry(
+        id="anthropic/claude-mythos-5",
+        lifecycle="watchlist",
+        display_name="Anthropic: Claude Mythos 5",
+        provider="Anthropic",
+        tier="frontier",
+        roles=(),
+        experimental=False,
+        context_length=1_000_000,
+        input_modalities=("text", "image"),
+        supports_tools=True,
+        supports_structured_outputs=True,
+        supports_reasoning=False,
+        supports_multimodal=True,
+        latency_class="unknown",
+        cost_class="expensive",
+        notes=(
+            "Limited availability — Project Glasswing, approved customers only. "
+            "Max output 128k tokens. Mythos-class traffic has 30-day retention. "
+            "Not evaluated for routing."
+        ),
+    ),
     ModelEntry(
         id="minimax/minimax-m3",
         lifecycle="active_default",

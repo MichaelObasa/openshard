@@ -33,8 +33,8 @@ class TestLifecycleValues(unittest.TestCase):
                 self.assertIsInstance(entry.lifecycle, str)
 
     def test_registry_size_unchanged(self) -> None:
-        # Lifecycle tags v1 adds metadata only. No models added or removed.
-        self.assertEqual(len(_REGISTRY), 41)
+        # Fable 5 + Mythos 5 added in this branch (+2).
+        self.assertEqual(len(_REGISTRY), 43)
 
 
 class TestRoutingDefaultEligibility(unittest.TestCase):
@@ -103,10 +103,36 @@ class TestLifecycleClassifications(unittest.TestCase):
             "openai/gpt-oss-120b": "open_weight",
             "minimax/minimax-m2.7": "watchlist",
             "x-ai/grok-build-0.1": "experimental",
+            "anthropic/claude-fable-5": "active_specialist",
+            "anthropic/claude-mythos-5": "watchlist",
         }
         for model_id, expected in cases.items():
             with self.subTest(model_id=model_id):
                 self.assertEqual(lifecycle_for(model_id), expected)
+
+
+class TestNewAnthropicModelsRoutingSafety(unittest.TestCase):
+    """Prove Fable 5 and Mythos 5 cannot enter any default routing path."""
+
+    def test_fable5_not_default_eligible(self) -> None:
+        self.assertFalse(is_routing_default_eligible("anthropic/claude-fable-5"))
+
+    def test_mythos5_not_default_eligible(self) -> None:
+        self.assertFalse(is_routing_default_eligible("anthropic/claude-mythos-5"))
+
+    def test_fable5_lifecycle_is_active_specialist(self) -> None:
+        self.assertEqual(lifecycle_for("anthropic/claude-fable-5"), "active_specialist")
+
+    def test_mythos5_lifecycle_is_watchlist(self) -> None:
+        self.assertEqual(lifecycle_for("anthropic/claude-mythos-5"), "watchlist")
+
+    def test_mythos5_not_in_active_default_pool(self) -> None:
+        ids = {e.id for e in models_by_lifecycle("active_default")}
+        self.assertNotIn("anthropic/claude-mythos-5", ids)
+
+    def test_mythos5_not_in_active_specialist_pool(self) -> None:
+        ids = {e.id for e in models_by_lifecycle("active_specialist")}
+        self.assertNotIn("anthropic/claude-mythos-5", ids)
 
 
 if __name__ == "__main__":

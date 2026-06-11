@@ -277,3 +277,36 @@ class TestEngineImportsResolver:
         assert engine.MODEL_VISUAL == MODEL_VISUAL
         assert engine.MODEL_COMPLEX == MODEL_COMPLEX
         assert engine.ESCALATION_CHAIN == ESCALATION_CHAIN
+
+
+# ---------------------------------------------------------------------------
+# Roster safety — Fable 5 and Mythos 5 must not shift any resolver selection
+# ---------------------------------------------------------------------------
+
+class TestResolverUnaffectedByNewModels:
+    """Prove that adding Fable 5 and Mythos 5 to the registry does not change
+    which model wins any resolver role path."""
+
+    def test_escalate_not_fable5(self):
+        from openshard.routing.model_resolver import resolve_routing_model
+        assert resolve_routing_model("escalate") != "anthropic/claude-fable-5"
+
+    def test_escalate_not_mythos5(self):
+        from openshard.routing.model_resolver import resolve_routing_model
+        assert resolve_routing_model("escalate") != "anthropic/claude-mythos-5"
+
+    def test_default_roles_not_new_models(self):
+        from openshard.routing.model_resolver import resolve_routing_model
+        new_ids = {"anthropic/claude-fable-5", "anthropic/claude-mythos-5"}
+        for role in ("cheap", "main", "strong"):
+            assert resolve_routing_model(role) not in new_ids, (
+                f"resolve_routing_model({role!r}) unexpectedly returned a new model"
+            )
+
+    def test_specialist_roles_not_new_models(self):
+        from openshard.routing.model_resolver import resolve_routing_model
+        new_ids = {"anthropic/claude-fable-5", "anthropic/claude-mythos-5"}
+        for role in ("visual", "complex"):
+            assert resolve_routing_model(role) not in new_ids, (
+                f"resolve_routing_model({role!r}) unexpectedly returned a new model"
+            )
