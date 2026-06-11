@@ -297,6 +297,7 @@ def _log_run(
     executor_advisory_result=None,
     executor_source: str = "unknown",
     fra_result: dict | None = None,
+    effective_executor: str | None = None,
 ) -> None:
     entry: dict = {
         "schema_version": SHARD_SCHEMA_VERSION,
@@ -474,6 +475,25 @@ def _log_run(
                 entry["feedback_routing_advisory"] = _fra
         except Exception:
             pass
+
+    # Record provider-aware eligibility (recorded, not enforced): which
+    # providers had keys present and how the routable pool narrowed. Presence
+    # booleans and counts only - never key material or model lists.
+    try:
+        from openshard.routing.provider_availability import (
+            build_routable_pool as _brp,
+        )
+        from openshard.routing.provider_availability import (
+            detect_provider_availability as _dpa,
+        )
+        from openshard.routing.provider_availability import (
+            routing_constraints_metadata as _rcm,
+        )
+        _avail = _dpa()
+        entry["available_providers"] = list(_avail.detected)
+        entry["routing_constraints"] = _rcm(_brp(_avail, executor=effective_executor))
+    except Exception:
+        pass
 
     if extra_metadata:
         entry.update(extra_metadata)

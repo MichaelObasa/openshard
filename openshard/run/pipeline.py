@@ -1589,7 +1589,8 @@ class RunPipeline:
                          form_factor_decision=_form_factor_decision,
                          extra_metadata=_dr_extra,
                          run_index=_receipt_index,
-                         run_timeline=[e.to_dict() for e in _timeline])
+                         run_timeline=[e.to_dict() for e in _timeline],
+                         effective_executor=effective_executor)
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
             result_obj.exit_code = 0
@@ -1933,7 +1934,8 @@ class RunPipeline:
                              form_factor_decision=_form_factor_decision,
                              extra_metadata=_vf_extra,
                              run_index=_receipt_index,
-                             run_timeline=[e.to_dict() for e in _timeline])
+                             run_timeline=[e.to_dict() for e in _timeline],
+                             effective_executor=effective_executor)
                 except Exception as exc:
                     click.echo(f"  [log] warning: {exc}")
                 result_obj.exit_code = code
@@ -2522,7 +2524,8 @@ class RunPipeline:
                      run_timeline=[e.to_dict() for e in _timeline],
                      executor_advisory_result=_executor_advisory_result,
                      executor_source=_executor_source,
-                     fra_result=_fra_result)
+                     fra_result=_fra_result,
+                     effective_executor=effective_executor)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
 

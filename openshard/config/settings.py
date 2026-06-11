@@ -37,11 +37,15 @@ No API key found. Set one of:
 Or run 'openshard init' to configure interactively.\
 """
 
-_KEY_VARS = (
+# Canonical (env var, provider) pairs for key detection, in priority order.
+# Public: routing/provider_availability.py reads this so the supported
+# provider list is defined exactly once.
+KEY_VARS = (
     ("OPENROUTER_API_KEY", "openrouter"),
     ("ANTHROPIC_API_KEY", "anthropic"),
     ("OPENAI_API_KEY", "openai"),
 )
+_KEY_VARS = KEY_VARS  # backward-compatible private alias
 
 _AGENT_VARS = (
     "OPENSHARD_AGENT",
