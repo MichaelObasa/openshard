@@ -275,3 +275,29 @@ class TestShardRoutingTruthRecordsEnforcement:
         assert truth.provider_enforcement_selected_model is None
         assert truth.provider_enforcement_rejected_model is None
         assert truth.provider_enforcement_routable_size == 0
+
+
+# ---------------------------------------------------------------------------
+# Policy integration: blocked model is never selected by resolver
+# ---------------------------------------------------------------------------
+
+class TestPolicyWithEnforcement:
+    def test_blocked_model_never_selected(self):
+        """A model in blocked_models should never come out of resolve_routing_model_for_context."""
+        from openshard.routing.model_policy import ModelPolicyConfig
+
+        avail = detect_provider_availability(OPENROUTER_ONLY)
+        # Find what the resolver would select for 'cheap' without policy.
+        base_pool = build_routable_pool(avail)
+        base_result = resolve_routing_model_for_context("cheap", base_pool)
+        if base_result.model is None:
+            return  # nothing to block
+
+        blocked_id = base_result.model
+        policy = ModelPolicyConfig(blocked_models=frozenset({blocked_id}))
+        policy_pool = build_routable_pool(avail, policy=policy)
+
+        result = resolve_routing_model_for_context("cheap", policy_pool)
+        assert result.model != blocked_id, (
+            f"{blocked_id} should be blocked by policy but was selected"
+        )

@@ -217,6 +217,23 @@ class TestRoutingConstraintsMetadata:
         non_default = len(all_models()) - len(models_by_lifecycle("active_default")) - 1
         assert meta["excluded_counts"]["lifecycle"] == non_default
 
+
+# ---------------------------------------------------------------------------
+# Model policy integration smoke test
+# ---------------------------------------------------------------------------
+
+class TestPolicyIntegrationSmoke:
+    def test_default_policy_same_as_no_policy(self):
+        """Default ModelPolicyConfig must not change the routable pool."""
+        from openshard.routing.model_policy import ModelPolicyConfig
+
+        avail = detect_provider_availability(OPENROUTER_ONLY)
+        without_policy = build_routable_pool(avail)
+        with_policy = build_routable_pool(avail, policy=ModelPolicyConfig())
+        assert set(m.id for m in with_policy.routable) == set(
+            m.id for m in without_policy.routable
+        )
+
     def test_metadata_never_contains_model_lists_or_keys(self):
         pool = build_routable_pool(detect_provider_availability(ALL_KEYS))
         meta = routing_constraints_metadata(pool)

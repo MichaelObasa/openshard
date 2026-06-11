@@ -300,6 +300,7 @@ def _log_run(
     effective_executor: str | None = None,
     provider_enforcement_result=None,
     routable_pool=None,
+    model_policy_summary: dict | None = None,
 ) -> None:
     entry: dict = {
         "schema_version": SHARD_SCHEMA_VERSION,
@@ -532,6 +533,13 @@ def _log_run(
 
     from openshard.history.shard_contract import _make_shard_id as _msi
     entry["shard_id"] = _msi(entry["timestamp"], run_index)
+
+    # Record model policy summary when policy was active this run.
+    if model_policy_summary is not None:
+        try:
+            entry["model_policy_summary"] = model_policy_summary
+        except Exception:
+            pass
 
     # Stamp an honest routing-truth block for forward records. Read surfaces
     # recompute this from the same fields, so it is belt-and-suspenders, not
