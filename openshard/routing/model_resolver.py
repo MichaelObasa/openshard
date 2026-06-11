@@ -20,7 +20,10 @@ Usage in engine.py and anywhere else that needs routing model IDs::
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import cache
+
+from openshard.routing.provider_availability import RoutablePool
 
 # ---------------------------------------------------------------------------
 # Hardcoded fallbacks — exact IDs that were previously in engine.py.
@@ -183,3 +186,123 @@ except Exception:  # pragma: no cover — pathological registry failure
     MODEL_COMPLEX  = _FALLBACKS["complex"]
 
 ESCALATION_CHAIN: list[str] = [MODEL_STRONG, MODEL_ESCALATE]
+
+
+# ---------------------------------------------------------------------------
+# Provider-aware (context-aware) resolver.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ProviderAwareResolution:
+    """Result of a provider-constrained model resolution."""
+
+    model: str | None
+    role: str
+    source: str              # "routable_pool" | "no_eligible_model"
+    enforcement_applied: bool
+    rejected_model: str | None   # unconstrained choice, when it differs from model
+    selected_model: str | None   # alias for model; explicit in metadata
+    routable_pool_size: int
+
+
+def resolve_routing_model_for_context(
+    role: str,
+    pool: RoutablePool,
+) -> ProviderAwareResolution:
+    """Context-aware resolver: select from pool-eligible entries only.
+
+    Applies the same scoring/hint logic as ``resolve_routing_model`` but
+    filters candidates to those present in ``pool.routable``.  Uses the
+    pool entries directly (they are full ``ModelEntry`` objects) so no
+    additional registry import is needed.
+
+    Resolution order:
+    1. Lifecycle + cost/tier filtered candidates from pool.
+    2. If none: relax cost/tier (active_default roles only), or try all pool
+       entries (specialist roles whose lifecycle is absent from the pool).
+    3. If pool is completely empty: return ``model=None`` with
+       ``source="no_eligible_model"``.
+
+    Never raises.
+    """
+    pool_size = len(pool.routable)
+    unconstrained = resolve_routing_model(role)
+
+    def _make(chosen: str | None, src: str) -> ProviderAwareResolution:
+        enforced = chosen != unconstrained
+        return ProviderAwareResolution(
+            model=chosen,
+            role=role,
+            source=src,
+            enforcement_applied=enforced,
+            rejected_model=(unconstrained if enforced and chosen is not None else None),
+            selected_model=chosen,
+            routable_pool_size=pool_size,
+        )
+
+    if not pool.routable:
+        return ProviderAwareResolution(
+            model=None,
+            role=role,
+            source="no_eligible_model",
+            enforcement_applied=True,
+            rejected_model=unconstrained,
+            selected_model=None,
+            routable_pool_size=0,
+        )
+
+    spec = _ROLE_QUERY.get(role)
+    if spec is None:
+        # Unknown role: pick any routable model alphabetically.
+        chosen = sorted(pool.routable, key=lambda m: m.id)[0].id
+        return _make(chosen, "routable_pool")
+
+    lifecycle: str = spec["lifecycle"]
+    cost_classes: set = spec["cost_classes"]
+    tiers: set = spec["tiers"]
+    roles_hint: tuple = spec["roles_hint"]
+
+    def _hint_score(m) -> int:
+        return sum(1 for h in roles_hint if h in m.roles)
+
+    def _apply_filters(entries):
+        result = []
+        for m in entries:
+            if cost_classes and m.cost_class not in cost_classes:
+                continue
+            if tiers and m.tier not in tiers:
+                continue
+            result.append(m)
+        return result
+
+    # Step 1: lifecycle-matched candidates from pool.
+    lc_candidates = [m for m in pool.routable if m.lifecycle == lifecycle]
+    filtered = _apply_filters(lc_candidates)
+
+    # Step 2a: relax cost/tier for active_default roles.
+    if not filtered and lifecycle == "active_default":
+        filtered = lc_candidates
+
+    # Step 2b: specialist roles (visual, complex, escalate) have lifecycle
+    # active_specialist, which is excluded from the default-routable pool.
+    # For these roles, check whether the unconstrained model is accessible
+    # via the available providers before falling through to pool models.
+    # If openrouter is available, all registry models are reachable, so the
+    # specialist model is correct and enforcement should not override it.
+    # For direct providers, check if the unconstrained model's vendor matches.
+    if not filtered and lifecycle != "active_default":
+        available_providers = pool.available_providers  # ('openrouter',) etc.
+        if "openrouter" in available_providers:
+            # OpenRouter reaches every registry model — no enforcement needed.
+            return _make(unconstrained, "routable_pool")
+        vendor = unconstrained.lstrip("~").split("/", 1)[0] if unconstrained else ""
+        if vendor and vendor in available_providers:
+            return _make(unconstrained, "routable_pool")
+        # Specialist model not reachable — fall through to any pool model.
+
+    if not filtered:
+        filtered = list(pool.routable)
+
+    filtered.sort(key=lambda m: (-_hint_score(m), m.id))
+    chosen = filtered[0].id
+    return _make(chosen, "routable_pool")

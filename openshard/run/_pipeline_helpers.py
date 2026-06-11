@@ -298,6 +298,8 @@ def _log_run(
     executor_source: str = "unknown",
     fra_result: dict | None = None,
     effective_executor: str | None = None,
+    provider_enforcement_result=None,
+    routable_pool=None,
 ) -> None:
     entry: dict = {
         "schema_version": SHARD_SCHEMA_VERSION,
@@ -476,9 +478,9 @@ def _log_run(
         except Exception:
             pass
 
-    # Record provider-aware eligibility (recorded, not enforced): which
-    # providers had keys present and how the routable pool narrowed. Presence
-    # booleans and counts only - never key material or model lists.
+    # Record provider-aware eligibility (v1): which providers had keys present
+    # and how the routable pool narrowed. Uses the pool built during enforcement
+    # when available, otherwise builds it fresh. Counts only — no key material.
     try:
         from openshard.routing.provider_availability import (
             build_routable_pool as _brp,
@@ -489,11 +491,36 @@ def _log_run(
         from openshard.routing.provider_availability import (
             routing_constraints_metadata as _rcm,
         )
-        _avail = _dpa()
-        entry["available_providers"] = list(_avail.detected)
-        entry["routing_constraints"] = _rcm(_brp(_avail, executor=effective_executor))
+        _pool_for_meta = routable_pool
+        if _pool_for_meta is None:
+            _avail_meta = _dpa()
+            _pool_for_meta = _brp(_avail_meta, executor=effective_executor)
+        else:
+            _avail_meta = None
+        if _avail_meta is None:
+            # Reconstruct availability from the pool's recorded providers tuple.
+            _prov_list = list(_pool_for_meta.available_providers)
+        else:
+            _prov_list = list(_avail_meta.detected)
+        entry["available_providers"] = _prov_list
+        entry["routing_constraints"] = _rcm(_pool_for_meta)
     except Exception:
         pass
+
+    # Record provider-aware enforcement result (v2): what enforcement selected
+    # or rejected. Both layers (v1 routing_constraints + v2 provider_enforcement)
+    # are kept so receipts can show availability shape AND enforcement decision.
+    if provider_enforcement_result is not None:
+        try:
+            entry["provider_enforcement"] = {
+                "applied": provider_enforcement_result.enforcement_applied,
+                "source": provider_enforcement_result.source,
+                "selected_model": provider_enforcement_result.selected_model,
+                "rejected_model": provider_enforcement_result.rejected_model,
+                "routable_pool_size": provider_enforcement_result.routable_pool_size,
+            }
+        except Exception:
+            pass
 
     if extra_metadata:
         entry.update(extra_metadata)

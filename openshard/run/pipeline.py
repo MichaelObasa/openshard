@@ -89,11 +89,19 @@ from openshard.routing.engine import (
     route,
 )
 from openshard.routing.form_factor_policy import ExecutionFormFactorDecision, select_form_factor
+from openshard.routing.model_resolver import (
+    ProviderAwareResolution,
+    resolve_routing_model_for_context,
+)
 from openshard.routing.profiles import (
     ProfileDecision,
     ProfileHistorySummary,
     build_profile_history_summary,
     select_profile,
+)
+from openshard.routing.provider_availability import (
+    build_routable_pool,
+    detect_provider_availability,
 )
 from openshard.routing.workflow_selector import (
     WorkflowHistorySummary,
@@ -505,26 +513,44 @@ class RunPipeline:
         routing_decision: RoutingDecision | None = route(task) if not opencode_mode else None
         if routing_decision is not None and (is_readonly_task(task) or has_inline_readonly_instruction(task)):
             routing_decision.rationale = "read-only analysis"
-        # When using a third-party provider, non-native routed models are not available.
-        # Fall back to a sensible default for each provider.
-        if (
-            _provider_name == "anthropic"
-            and routing_decision is not None
-            and not routing_decision.model.startswith("anthropic/")
-        ):
-            routing_decision = RoutingDecision(
-                model=generator.model,
-                category=routing_decision.category,
-                rationale=routing_decision.rationale,
+
+        # Build the routable pool once; used for both enforcement and Shard logging.
+        # Skipped silently if provider detection fails (degraded gracefully).
+        _routable_pool_cache = None
+        _provider_enforcement_result: ProviderAwareResolution | None = None
+        _pa_detected: tuple = ()
+        try:
+            _pa = detect_provider_availability()
+            _pa_detected = _pa.detected
+            _routable_pool_cache = build_routable_pool(_pa, executor=effective_executor)
+        except Exception:
+            pass
+
+        # Enforce provider-aware routing: replace the keyword-routed model with
+        # the best model the user can actually call given their API keys and executor.
+        # Enforcement only applies when at least one provider key is present; when no
+        # keys are detected the pipeline will already have raised at detect_provider().
+        _CATEGORY_TO_ROLE: dict[str, str] = {
+            "boilerplate": "cheap",
+            "standard":    "main",
+            "security":    "strong",
+            "visual":      "visual",
+            "complex":     "complex",
+        }
+        if routing_decision is not None and _routable_pool_cache is not None and _pa_detected:
+            _role = _CATEGORY_TO_ROLE.get(routing_decision.category, "main")
+            _provider_enforcement_result = resolve_routing_model_for_context(
+                _role, _routable_pool_cache
             )
-        elif (
-            _provider_name == "openai"
-            and routing_decision is not None
-            and not routing_decision.model.startswith("openai/")
-        ):
-            from openshard.providers.openai import DEFAULT_MODEL as _OPENAI_DEFAULT
+            if _provider_enforcement_result.model is None:
+                _providers_str = ", ".join(_pa_detected)
+                raise click.ClickException(
+                    f"No routable model for role '{_role}' — "
+                    f"available providers: {_providers_str}. "
+                    "Check your API keys or executor configuration."
+                )
             routing_decision = RoutingDecision(
-                model=_OPENAI_DEFAULT,
+                model=_provider_enforcement_result.model,
                 category=routing_decision.category,
                 rationale=routing_decision.rationale,
             )
@@ -1590,7 +1616,9 @@ class RunPipeline:
                          extra_metadata=_dr_extra,
                          run_index=_receipt_index,
                          run_timeline=[e.to_dict() for e in _timeline],
-                         effective_executor=effective_executor)
+                         effective_executor=effective_executor,
+                         provider_enforcement_result=_provider_enforcement_result,
+                         routable_pool=_routable_pool_cache)
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
             result_obj.exit_code = 0
@@ -1935,7 +1963,9 @@ class RunPipeline:
                              extra_metadata=_vf_extra,
                              run_index=_receipt_index,
                              run_timeline=[e.to_dict() for e in _timeline],
-                             effective_executor=effective_executor)
+                             effective_executor=effective_executor,
+                             provider_enforcement_result=_provider_enforcement_result,
+                             routable_pool=_routable_pool_cache)
                 except Exception as exc:
                     click.echo(f"  [log] warning: {exc}")
                 result_obj.exit_code = code
@@ -2525,7 +2555,9 @@ class RunPipeline:
                      executor_advisory_result=_executor_advisory_result,
                      executor_source=_executor_source,
                      fra_result=_fra_result,
-                     effective_executor=effective_executor)
+                     effective_executor=effective_executor,
+                     provider_enforcement_result=_provider_enforcement_result,
+                     routable_pool=_routable_pool_cache)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
 
