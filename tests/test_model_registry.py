@@ -72,6 +72,11 @@ class TestRegistryCompleteness(unittest.TestCase):
         for model_id in (MODEL_CHEAP, MODEL_MAIN, MODEL_STRONG):
             self.assertIn(model_id, self._ids(), f"Routing model missing: {model_id}")
 
+    def test_fable5_and_mythos5_in_registry(self) -> None:
+        ids = self._ids()
+        self.assertIn("anthropic/claude-fable-5", ids)
+        self.assertIn("anthropic/claude-mythos-5", ids)
+
     def test_no_duplicate_model_ids(self) -> None:
         seen: set[str] = set()
         duplicates: set[str] = set()
