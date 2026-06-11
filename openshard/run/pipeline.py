@@ -99,6 +99,10 @@ from openshard.routing.profiles import (
     build_profile_history_summary,
     select_profile,
 )
+from openshard.routing.model_policy import (
+    model_policy_from_config,
+    policy_summary as _policy_summary,
+)
 from openshard.routing.provider_availability import (
     build_routable_pool,
     detect_provider_availability,
@@ -519,10 +523,19 @@ class RunPipeline:
         _routable_pool_cache = None
         _provider_enforcement_result: ProviderAwareResolution | None = None
         _pa_detected: tuple = ()
+        _model_policy = None
+        _model_policy_summary: dict | None = None
+        try:
+            _model_policy = model_policy_from_config(self._config)
+            _model_policy_summary = _policy_summary(_model_policy)
+        except Exception:
+            pass
         try:
             _pa = detect_provider_availability()
             _pa_detected = _pa.detected
-            _routable_pool_cache = build_routable_pool(_pa, executor=effective_executor)
+            _routable_pool_cache = build_routable_pool(
+                _pa, executor=effective_executor, policy=_model_policy
+            )
         except Exception:
             pass
 
@@ -537,7 +550,22 @@ class RunPipeline:
             "visual":      "visual",
             "complex":     "complex",
         }
-        if routing_decision is not None and _routable_pool_cache is not None and _pa_detected:
+        if (
+            routing_decision is not None
+            and _routable_pool_cache is not None
+            and _pa_detected
+        ):
+            # Fail clearly if model policy has removed all routable models
+            # before we attempt enforcement.
+            if not _routable_pool_cache.routable:
+                _providers_str = ", ".join(_pa_detected)
+                _excluded_sample = list(_routable_pool_cache.excluded[:5])
+                raise click.ClickException(
+                    "Model policy filtered out all routable models. "
+                    "Check your [models] config section. "
+                    f"Available providers: {_providers_str}. "
+                    f"Excluded (sample): {_excluded_sample}"
+                )
             _role = _CATEGORY_TO_ROLE.get(routing_decision.category, "main")
             _provider_enforcement_result = resolve_routing_model_for_context(
                 _role, _routable_pool_cache
@@ -1618,7 +1646,8 @@ class RunPipeline:
                          run_timeline=[e.to_dict() for e in _timeline],
                          effective_executor=effective_executor,
                          provider_enforcement_result=_provider_enforcement_result,
-                         routable_pool=_routable_pool_cache)
+                         routable_pool=_routable_pool_cache,
+                         model_policy_summary=_model_policy_summary)
             except Exception as exc:
                 click.echo(f"  [log] warning: {exc}")
             result_obj.exit_code = 0
@@ -1965,7 +1994,8 @@ class RunPipeline:
                              run_timeline=[e.to_dict() for e in _timeline],
                              effective_executor=effective_executor,
                              provider_enforcement_result=_provider_enforcement_result,
-                             routable_pool=_routable_pool_cache)
+                             routable_pool=_routable_pool_cache,
+                             model_policy_summary=_model_policy_summary)
                 except Exception as exc:
                     click.echo(f"  [log] warning: {exc}")
                 result_obj.exit_code = code
@@ -2557,7 +2587,8 @@ class RunPipeline:
                      fra_result=_fra_result,
                      effective_executor=effective_executor,
                      provider_enforcement_result=_provider_enforcement_result,
-                     routable_pool=_routable_pool_cache)
+                     routable_pool=_routable_pool_cache,
+                     model_policy_summary=_model_policy_summary)
         except Exception as exc:
             click.echo(f"  [log] warning: {exc}")
 

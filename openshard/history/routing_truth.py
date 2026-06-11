@@ -91,6 +91,9 @@ class RoutingTruth:
     provider_enforcement_selected_model: str | None = None
     provider_enforcement_rejected_model: str | None = None
     provider_enforcement_routable_size: int = 0
+    # 6. Model policy summary (v1). None when no policy was configured or
+    #    policy was default (all flags off, no allow/block lists).
+    policy_summary: dict | None = None
 
 
 def _get(obj: object, key: str, default: object = None) -> object:
@@ -253,6 +256,9 @@ def build_routing_truth(entry: object) -> RoutingTruth:
     _pe_sz = _pe.get("routable_pool_size", 0)
     provider_enforcement_routable_size = int(_pe_sz) if isinstance(_pe_sz, int) else 0
 
+    _ps_raw = entry.get("model_policy_summary")
+    policy_summary = _ps_raw if isinstance(_ps_raw, dict) else None
+
     return RoutingTruth(
         runtime_model=runtime_model,
         routing_mode=routing_mode,
@@ -277,6 +283,7 @@ def build_routing_truth(entry: object) -> RoutingTruth:
         provider_enforcement_selected_model=provider_enforcement_selected_model,
         provider_enforcement_rejected_model=provider_enforcement_rejected_model,
         provider_enforcement_routable_size=provider_enforcement_routable_size,
+        policy_summary=policy_summary,
     )
 
 

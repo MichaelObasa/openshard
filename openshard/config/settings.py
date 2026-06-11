@@ -19,6 +19,22 @@ _DEFAULTS: dict[str, Any] = {
     "approval_mode":       "smart",
     "cost_gate_threshold": 0.10,
     "executor":            "direct",
+    "models": {
+        "mode":                 "auto",
+        "allowed_models":       [],
+        "blocked_models":       [],
+        "allowed_providers":    [],
+        "blocked_providers":    [],
+        "max_cost_class":       None,
+        "allow_specialist":     False,
+        "allow_experimental":   False,
+        "allow_watchlist":      False,
+        "allow_deprecated":     False,
+        "allow_open_weight":    False,
+        "allow_fallback":       False,
+        "allow_openrouter_wide": True,
+        "custom_roster":        {"name": "default", "models": []},
+    },
 }
 
 

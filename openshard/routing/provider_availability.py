@@ -217,25 +217,48 @@ def build_routable_pool(
     executor: str | None = None,
     blocked_model_ids: frozenset[str] = frozenset(),
     registry: list[ModelEntry] | None = None,
+    policy=None,  # ModelPolicyConfig | None — imported lazily to avoid circularity
 ) -> RoutablePool:
     """Narrow available models to the default-routable pool. Never raises.
 
     Filter chain, each step recording an exclusion reason:
-    availability -> lifecycle eligibility -> executor constraint -> user block.
-    Restricted, deprecated, watchlist, experimental, specialist, open-weight
-    and fallback models are never routable by default; they stay in the
-    registry and remain individually addressable.
+    availability -> [policy] -> lifecycle eligibility -> executor constraint
+    -> user block.
+
+    When *policy* is None the behaviour is identical to the pre-policy
+    implementation: only ``active_default`` lifecycle models are eligible
+    and no model/provider/cost filtering is applied.
+
+    When *policy* is provided:
+    - ``apply_model_policy()`` runs on the available pool before the
+      lifecycle gate, so policy can expand or restrict the candidate set
+      (e.g. ``allow_specialist=True`` admits ``active_specialist`` models).
+    - The eligible lifecycle set is derived from *policy* via
+      ``eligible_lifecycles(policy)`` rather than the static
+      ``ROUTING_DEFAULT_ELIGIBLE_LIFECYCLES``.
+
+    Restricted models (RESTRICTED_MODEL_IDS) are excluded inside
+    ``build_available_pool()`` before policy runs and cannot be re-admitted
+    by policy.
     """
+    from openshard.routing.model_policy import apply_model_policy, eligible_lifecycles
+
     constraint = EXECUTOR_CONSTRAINTS.get(executor) if executor else None
+    eligible = eligible_lifecycles(policy)
+
+    available = build_available_pool(avail, registry=registry)
+    if policy is not None:
+        available = apply_model_policy(available, policy)
+
     routable: list[ModelEntry] = []
     excluded: list[tuple[str, str]] = []
 
-    for ma in build_available_pool(avail, registry=registry):
+    for ma in available:
         entry = ma.entry
         if not ma.available:
             excluded.append((entry.id, ma.reason or REASON_NO_API_KEY))
             continue
-        if entry.lifecycle not in ROUTING_DEFAULT_ELIGIBLE_LIFECYCLES:
+        if entry.lifecycle not in eligible:
             excluded.append((entry.id, f"{REASON_LIFECYCLE_PREFIX}{entry.lifecycle}"))
             continue
         if constraint is not None and not set(ma.via) & constraint.allowed_providers:

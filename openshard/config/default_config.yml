@@ -24,3 +24,25 @@ approval_mode: smart
 cost_gate_threshold: 0.10
 
 executor: direct
+
+# Model policy: controls which models are routable beyond what provider
+# availability and executor constraints determine. All defaults preserve
+# existing routing behaviour. See docs for field descriptions.
+models:
+  mode: auto                   # auto | custom_roster (provider_family: reserved)
+  allowed_models: []           # empty = allow all available models
+  blocked_models: []           # always wins over allowed_models
+  allowed_providers: []        # empty = allow all providers
+  blocked_providers: []        # always wins over allowed_providers
+  max_cost_class: null         # null = no cap; cheap | mid | expensive | unknown
+  allow_specialist: false      # active_specialist lifecycle (visual, complex roles)
+  allow_experimental: false    # experimental lifecycle
+  allow_watchlist: false       # watchlist lifecycle (Mythos stays blocked regardless)
+  allow_deprecated: false      # deprecated lifecycle
+  allow_open_weight: false     # open_weight lifecycle
+  allow_fallback: false        # fallback lifecycle
+  allow_openrouter_wide: true  # OpenRouter-wide routing (reaches all registry models)
+
+  custom_roster:
+    name: default
+    models: []                 # model IDs to route within when mode=custom_roster
