@@ -89,6 +89,12 @@ from openshard.routing.engine import (
     route,
 )
 from openshard.routing.form_factor_policy import ExecutionFormFactorDecision, select_form_factor
+from openshard.routing.model_policy import (
+    model_policy_from_config,
+)
+from openshard.routing.model_policy import (
+    policy_summary as _policy_summary,
+)
 from openshard.routing.model_resolver import (
     ProviderAwareResolution,
     resolve_routing_model_for_context,
@@ -98,10 +104,6 @@ from openshard.routing.profiles import (
     ProfileHistorySummary,
     build_profile_history_summary,
     select_profile,
-)
-from openshard.routing.model_policy import (
-    model_policy_from_config,
-    policy_summary as _policy_summary,
 )
 from openshard.routing.provider_availability import (
     build_routable_pool,
