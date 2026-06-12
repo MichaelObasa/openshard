@@ -36,7 +36,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from openshard.models.registry import (
-    ROUTING_DEFAULT_ELIGIBLE_LIFECYCLES,
     ModelEntry,
     all_models,
 )
