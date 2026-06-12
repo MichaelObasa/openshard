@@ -464,13 +464,20 @@ class TestReceiptMutation(unittest.TestCase):
 
 def test_routing_does_not_import_openrouter_cache_module():
     """provider_availability must not pull in OpenRouter cache/metadata/sync at import time."""
-    import openshard.routing.provider_availability  # noqa: F401 — ensure it is imported
+    import importlib
 
-    cache_modules = [
-        k for k in sys.modules
-        if "openrouter" in k and any(w in k for w in ("cache", "metadata", "sync"))
+    sys.modules.pop("openshard.routing.provider_availability", None)
+    before = set(sys.modules)
+    importlib.import_module("openshard.routing.provider_availability")
+    newly_loaded = set(sys.modules) - before
+
+    forbidden = [
+        name for name in newly_loaded
+        if name.startswith("openshard.")
+        and "openrouter" in name
+        and any(word in name for word in ("cache", "metadata", "sync", "fetcher"))
     ]
-    assert not cache_modules, (
+    assert not forbidden, (
         "openshard.routing.provider_availability must not transitively import "
-        f"OpenRouter cache/metadata/sync modules at import time; found: {cache_modules}"
+        f"OpenRouter cache/metadata/sync/fetcher modules at import time; found: {forbidden}"
     )
