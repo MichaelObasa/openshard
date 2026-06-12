@@ -4810,5 +4810,208 @@ def config_show(as_json: bool) -> None:
     click.echo(yaml.safe_dump(safe, sort_keys=False, default_flow_style=False).rstrip())
 
 
+# ---------------------------------------------------------------------------
+# roster command group
+# ---------------------------------------------------------------------------
+
+@cli.group("roster")
+def roster_cmd() -> None:
+    """Inspect and manage the custom model roster."""
+
+
+def _roster_models_section(config: dict) -> dict:
+    """Return a reference to config['models'], ensuring the custom_roster sub-key exists."""
+    models = config.setdefault("models", {})
+    roster = models.setdefault("custom_roster", {"name": "default", "models": []})
+    if not isinstance(roster.get("models"), list):
+        roster["models"] = []
+    return models
+
+
+@roster_cmd.command("list")
+def roster_list() -> None:
+    """Show current roster name, models, mode status, and valid/invalid counts."""
+    from openshard.models.registry import is_known_model, lifecycle_for
+
+    config, valid, _ = load_config_safe()
+    if not valid:
+        raise click.ClickException("Config file is malformed — fix or delete it first.")
+
+    models_cfg = config.get("models", {})
+    mode = models_cfg.get("mode", "auto")
+    roster_cfg = models_cfg.get("custom_roster", {})
+    roster_name = roster_cfg.get("name", "default")
+    roster_models: list[str] = roster_cfg.get("models") or []
+
+    active = mode == "custom_roster"
+    valid_ids = [m for m in roster_models if is_known_model(m)]
+    invalid_ids = [m for m in roster_models if not is_known_model(m)]
+
+    click.echo(f"Roster name : {roster_name}")
+    click.echo(f"Mode        : {mode}{'  (active)' if active else ''}")
+    click.echo(f"Models      : {len(roster_models)}  ({len(valid_ids)} known to registry, {len(invalid_ids)} unknown)")
+
+    if roster_models:
+        click.echo("")
+        for mid in roster_models:
+            lc = lifecycle_for(mid) if is_known_model(mid) else None
+            status = f"[{lc}]" if lc else "[unknown]"
+            click.echo(f"  {mid:<55} {status}")
+    else:
+        click.echo("  (empty)")
+
+
+@roster_cmd.command("show")
+def roster_show() -> None:
+    """Print the current models config block in a compact, secret-free format."""
+    import yaml
+
+    config, valid, _ = load_config_safe()
+    if not valid:
+        raise click.ClickException("Config file is malformed — fix or delete it first.")
+
+    models_cfg = config.get("models", {})
+    # Drop any accidentally injected secret fields before printing
+    safe = {k: v for k, v in models_cfg.items() if not k.endswith("_api_key") and not k.endswith("_key")}
+    click.echo(yaml.safe_dump({"models": safe}, sort_keys=False, default_flow_style=False).rstrip())
+
+
+@roster_cmd.command("add")
+@click.argument("model_id")
+def roster_add(model_id: str) -> None:
+    """Add MODEL_ID to the custom roster after validating it against the registry."""
+    from openshard.config.settings import config_search_path
+    from openshard.models.registry import is_known_model
+
+    if not is_known_model(model_id):
+        raise click.ClickException(
+            f"Unknown model ID: {model_id!r}. Run 'openshard models list' to see available models."
+        )
+
+    config, valid, path = load_config_safe()
+    if not valid:
+        raise click.ClickException("Config file is malformed — fix or delete it first.")
+
+    models_cfg = _roster_models_section(config)
+    current: list[str] = models_cfg["custom_roster"]["models"]
+
+    if model_id in current:
+        click.echo(f"{model_id} is already in the roster — no change.")
+        return
+
+    current.append(model_id)
+    save_config(config)
+    click.echo(f"Added {model_id}. Roster now has {len(current)} model(s).")
+    click.echo(f"Saved to {path or config_search_path()}")
+
+
+@roster_cmd.command("remove")
+@click.argument("model_id")
+def roster_remove(model_id: str) -> None:
+    """Remove MODEL_ID from the custom roster (no error if absent)."""
+    from openshard.config.settings import config_search_path
+
+    config, valid, path = load_config_safe()
+    if not valid:
+        raise click.ClickException("Config file is malformed — fix or delete it first.")
+
+    models_cfg = _roster_models_section(config)
+    current: list[str] = models_cfg["custom_roster"]["models"]
+
+    if model_id not in current:
+        click.echo(f"{model_id!r} is not in the roster — nothing to remove.")
+        return
+
+    current.remove(model_id)
+    save_config(config)
+    click.echo(f"Removed {model_id}. Roster now has {len(current)} model(s).")
+    click.echo(f"Saved to {path or config_search_path()}")
+
+
+@roster_cmd.command("use")
+@click.argument("name")
+def roster_use(name: str) -> None:
+    """Set custom roster mode and assign NAME as the roster label.
+
+    This sets models.mode to 'custom_roster' and records NAME as the roster
+    label.  In v1, there is a single local roster list — NAME is a label,
+    not a selector for multiple stored rosters.
+    """
+    from openshard.config.settings import config_search_path
+
+    config, valid, path = load_config_safe()
+    if not valid:
+        raise click.ClickException("Config file is malformed — fix or delete it first.")
+
+    models_cfg = _roster_models_section(config)
+    models_cfg["mode"] = "custom_roster"
+    models_cfg["custom_roster"]["name"] = name
+    save_config(config)
+    click.echo(f"Mode set to 'custom_roster', roster name set to {name!r}.")
+    click.echo("Note: v1 has a single local roster list — the name is a label only.")
+    click.echo(f"Saved to {path or config_search_path()}")
+
+
+@roster_cmd.command("validate")
+def roster_validate() -> None:
+    """Validate all custom roster model IDs against the registry.
+
+    Exits with code 1 if any IDs are not known to the registry.
+    Does not call external APIs — validation is registry-only.
+    """
+    from openshard.models.registry import is_known_model, lifecycle_for
+
+    config, valid, _ = load_config_safe()
+    if not valid:
+        raise click.ClickException("Config file is malformed — fix or delete it first.")
+
+    roster_cfg = config.get("models", {}).get("custom_roster", {})
+    roster_models: list[str] = roster_cfg.get("models") or []
+
+    if not roster_models:
+        click.echo("Roster is empty — nothing to validate.")
+        return
+
+    unknown: list[str] = []
+    warned: list[tuple[str, str]] = []
+
+    for mid in roster_models:
+        if not is_known_model(mid):
+            unknown.append(mid)
+        else:
+            lc = lifecycle_for(mid) or "active_default"
+            if lc != "active_default":
+                warned.append((mid, lc))
+
+    for mid, lc in warned:
+        click.echo(f"[WARN] {mid}  lifecycle={lc} — known to registry but not routing-default")
+
+    for mid in unknown:
+        click.echo(f"[INVALID] {mid}  — not known to registry")
+
+    valid_count = len(roster_models) - len(unknown)
+    click.echo(f"\n{valid_count}/{len(roster_models)} model(s) known to registry.")
+
+    if unknown:
+        raise SystemExit(1)
+
+
+@roster_cmd.command("reset")
+def roster_reset() -> None:
+    """Clear the custom roster and return to auto routing mode."""
+    from openshard.config.settings import config_search_path
+
+    config, valid, path = load_config_safe()
+    if not valid:
+        raise click.ClickException("Config file is malformed — fix or delete it first.")
+
+    models_cfg = _roster_models_section(config)
+    models_cfg["mode"] = "auto"
+    models_cfg["custom_roster"]["models"] = []
+    save_config(config)
+    click.echo("Roster cleared. Mode reset to 'auto'.")
+    click.echo(f"Saved to {path or config_search_path()}")
+
+
 if __name__ == "__main__":
     cli()
