@@ -400,5 +400,71 @@ class TestDispatchedRoleLists(unittest.TestCase):
             self.assertIsInstance(roundtripped["advisory_only_roles"], list)
 
 
+# ---------------------------------------------------------------------------
+# 5. render_routing_truth_lines — role truth block at more/full detail
+# ---------------------------------------------------------------------------
+
+
+class TestRenderRoleTruthBlock(unittest.TestCase):
+    """The Dispatched roles / Advisory only lines at more/full detail level."""
+
+    def _lines(self, entry: dict, detail: str = "more") -> list[str]:
+        return render_routing_truth_lines(build_routing_truth(entry), detail)
+
+    def test_more_shows_dispatched_roles_executor_validator(self) -> None:
+        entry = _receipt_entry(
+            executor_model_actual="z-ai/glm-5.1",
+            validator_dispatch_status="applied",
+        )
+        lines = self._lines(entry)
+        self.assertTrue(any("Dispatched roles: executor, validator" in ln for ln in lines))
+
+    def test_more_shows_advisory_only_planner(self) -> None:
+        entry = _receipt_entry(
+            executor_model_actual="z-ai/glm-5.1",
+            validator_dispatch_status="applied",
+        )
+        lines = self._lines(entry)
+        self.assertTrue(any("Advisory only: planner" in ln for ln in lines))
+
+    def test_more_no_dispatch_shows_none(self) -> None:
+        # advisory-only entry: executor and validator not dispatched
+        lines = self._lines(_keyword_entry())
+        self.assertTrue(any("Dispatched roles: none" in ln for ln in lines))
+
+    def test_more_planner_always_advisory(self) -> None:
+        # Even with executor+validator dispatched, planner is advisory-only.
+        entry = _receipt_entry(
+            executor_model_actual="z-ai/glm-5.1",
+            validator_dispatch_status="applied",
+        )
+        lines = self._lines(entry)
+        combined = "\n".join(lines)
+        self.assertIn("Advisory only: planner", combined)
+        self.assertNotIn("Dispatched roles: planner", combined)
+
+    def test_default_detail_no_role_truth_block(self) -> None:
+        # The new block must NOT appear at default detail.
+        lines = self._lines(_keyword_entry(), detail="default")
+        combined = "\n".join(lines)
+        self.assertNotIn("Dispatched roles:", combined)
+        self.assertNotIn("Advisory only:", combined)
+
+    def test_legacy_shard_role_unavailable_renders_safely(self) -> None:
+        # Minimal entry has no tier dispatch and no advisory metadata →
+        # ROLE_UNAVAILABLE → role-truth block must not appear.
+        entry = {"task": "x", "timestamp": "2024-01-01T00:00:00Z"}
+        lines = self._lines(entry)
+        combined = "\n".join(lines)
+        self.assertNotIn("Dispatched roles:", combined)
+        self.assertNotIn("Advisory only:", combined)
+
+    def test_full_detail_same_as_more(self) -> None:
+        entry = _receipt_entry(executor_model_actual="z-ai/glm-5.1")
+        more_lines = self._lines(entry, detail="more")
+        full_lines = self._lines(entry, detail="full")
+        self.assertEqual(more_lines, full_lines)
+
+
 if __name__ == "__main__":
     unittest.main()
