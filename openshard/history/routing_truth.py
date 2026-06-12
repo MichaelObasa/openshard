@@ -366,6 +366,15 @@ def render_routing_truth_lines(rt: RoutingTruth, detail: str) -> list[str]:
     if _provenance_parts:
         lines.append(f"  Routing: {' | '.join(_provenance_parts)}")
 
+    # Role dispatch truth — only when role metadata exists (ROLE_ADVISORY_ONLY
+    # or ROLE_DISPATCHED). _role_line() returns "" for ROLE_UNAVAILABLE, so
+    # legacy Shards with no tier dispatch / advisory data are skipped cleanly.
+    if role_line:
+        dispatched_str = ", ".join(rt.dispatched_roles) if rt.dispatched_roles else "none"
+        advisory_str = ", ".join(rt.advisory_only_roles) if rt.advisory_only_roles else "none"
+        lines.append(f"Dispatched roles: {dispatched_str}")
+        lines.append(f"Advisory only: {advisory_str}")
+
     return lines
 
 

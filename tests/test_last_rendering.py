@@ -5364,5 +5364,84 @@ class TestSafeWorkspaceReceipt(unittest.TestCase):
         self.assertFalse(bool(re.match(r"[A-Za-z]:\\", name)), f"display name looks like Windows path: {name}")
 
 
+class TestLastMoreRoleTruthDisplay(unittest.TestCase):
+    """_render_log_entry at more/full detail shows the Dispatched/Advisory block."""
+
+    # Minimal entry that has tier dispatch applied so role_selection_mode=DISPATCHED.
+    _DISPATCH_ENTRY = {
+        "task": "refactor auth",
+        "timestamp": "2025-01-01T00:00:00Z",
+        "execution_model": "z-ai/glm-5.1",
+        "tier_dispatch_receipt": {
+            "enabled": True,
+            "applied": True,
+            "tier_source": "category",
+            "planner_tier": "frontier-reasoning-model",
+            "planner_model": MODEL_STRONG,
+            "executor_tier": "balanced-coding-model",
+            "executor_model": MODEL_MAIN,
+            "executor_model_actual": MODEL_MAIN,
+            "validator_tier": "independent-validator-model",
+            "validator_model": MODEL_STRONG,
+            "validator_dispatch_status": "applied",
+            "fallback_used": False,
+            "fallback_reason": "",
+            "warnings": [],
+        },
+    }
+
+    # Advisory-only entry (no tier dispatch applied).
+    _ADVISORY_ENTRY = {
+        "task": "add tests",
+        "timestamp": "2025-01-01T00:00:00Z",
+        "execution_model": "z-ai/glm-5.1",
+        "model_selection_decision": {
+            "strategy": "cost-balanced",
+            "roles": [
+                {"role": "planner", "model_tier": "frontier-reasoning-model"},
+                {"role": "executor", "model_tier": "balanced-coding-model"},
+                {"role": "validator", "model_tier": "independent-validator-model"},
+            ],
+        },
+    }
+
+    # Legacy entry — no role metadata at all.
+    _LEGACY_ENTRY = {
+        "task": "fix bug",
+        "timestamp": "2024-01-01T00:00:00Z",
+        "execution_model": "z-ai/glm-5.1",
+    }
+
+    def test_last_more_shows_dispatched_roles_line(self) -> None:
+        output = _render(self._DISPATCH_ENTRY, "more")
+        self.assertIn("Dispatched roles:", output)
+
+    def test_last_more_shows_advisory_only_line(self) -> None:
+        output = _render(self._DISPATCH_ENTRY, "more")
+        self.assertIn("Advisory only: planner", output)
+
+    def test_last_more_no_dispatch_shows_none(self) -> None:
+        output = _render(self._ADVISORY_ENTRY, "more")
+        self.assertIn("Dispatched roles: none", output)
+
+    def test_last_more_advisory_entry_shows_all_roles_advisory(self) -> None:
+        output = _render(self._ADVISORY_ENTRY, "more")
+        self.assertIn("Advisory only:", output)
+        self.assertIn("planner", output)
+        self.assertIn("executor", output)
+        self.assertIn("validator", output)
+
+    def test_last_more_legacy_entry_no_role_lines(self) -> None:
+        output = _render(self._LEGACY_ENTRY, "more")
+        self.assertNotIn("Dispatched roles:", output)
+        self.assertNotIn("Advisory only:", output)
+
+    def test_last_default_no_role_truth_block(self) -> None:
+        # The new block must not appear at default detail.
+        output = _render(self._DISPATCH_ENTRY, "default")
+        self.assertNotIn("Dispatched roles:", output)
+        self.assertNotIn("Advisory only:", output)
+
+
 if __name__ == "__main__":
     unittest.main()
