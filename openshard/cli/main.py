@@ -744,6 +744,77 @@ def models_mode(mode: str) -> None:
     click.echo(f"{'Status':<{_LABEL}}{status}")
 
 
+@models.command("sync-openrouter")
+def models_sync_openrouter() -> None:
+    """Fetch and cache OpenRouter model metadata locally."""
+    from openshard.models.openrouter_fetcher import (
+        _DEFAULT_CACHE_PATH,
+        OpenRouterFetchError,
+        fetch_openrouter_models,
+        normalize_model,
+        save_openrouter_cache,
+    )
+
+    click.echo("Fetching model list from OpenRouter...")
+    try:
+        raw_models = fetch_openrouter_models()
+    except OpenRouterFetchError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    normalized = [normalize_model(m) for m in raw_models]
+    save_openrouter_cache(normalized)
+
+    synced_count = len(normalized)
+    example_ids = [m["id"] for m in normalized if m.get("id")][:5]
+
+    from openshard.models.openrouter_fetcher import load_openrouter_cache
+
+    cache = load_openrouter_cache()
+    synced_at = cache.get("synced_at", "") if cache else ""
+
+    click.echo(f"Synced {synced_count} models")
+    click.echo(f"  Cache:     {_DEFAULT_CACHE_PATH}")
+    click.echo(f"  Synced at: {synced_at}")
+    if example_ids:
+        click.echo("  Example IDs:")
+        for mid in example_ids:
+            click.echo(f"    {mid}")
+
+
+@models.command("openrouter-cache")
+def models_openrouter_cache() -> None:
+    """Inspect the local OpenRouter model metadata cache."""
+    from openshard.models.openrouter_fetcher import (
+        _DEFAULT_CACHE_PATH,
+        OpenRouterCacheError,
+        load_openrouter_cache,
+    )
+
+    try:
+        cache = load_openrouter_cache()
+    except OpenRouterCacheError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if cache is None:
+        click.echo("No OpenRouter cache found. Run: openshard models sync-openrouter")
+        return
+
+    synced_at = cache.get("synced_at", "unknown")
+    model_count = cache.get("model_count", 0)
+    models_list = cache.get("models", [])
+    top_ids = [m["id"] for m in models_list if m.get("id")][:10]
+
+    click.echo("OpenRouter model cache")
+    click.echo("  Status:    present")
+    click.echo(f"  Cache:     {_DEFAULT_CACHE_PATH}")
+    click.echo(f"  Synced at: {synced_at}")
+    click.echo(f"  Models:    {model_count}")
+    if top_ids:
+        click.echo("\nTop 10 model IDs:")
+        for mid in top_ids:
+            click.echo(f"  {mid}")
+
+
 @cli.group(invoke_without_command=True)
 @click.pass_context
 def profiles(ctx: click.Context):
