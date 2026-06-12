@@ -94,6 +94,10 @@ class RoutingTruth:
     # 6. Model policy summary (v1). None when no policy was configured or
     #    policy was default (all flags off, no allow/block lists).
     policy_summary: dict | None = None
+    # 7. Per-role dispatch lists (v1). Derived from the *_dispatched booleans so
+    #    consumers do not have to combine three separate flags.
+    dispatched_roles: list[str] = field(default_factory=list)
+    advisory_only_roles: list[str] = field(default_factory=list)
 
 
 def _get(obj: object, key: str, default: object = None) -> object:
@@ -259,6 +263,14 @@ def build_routing_truth(entry: object) -> RoutingTruth:
     _ps_raw = entry.get("model_policy_summary")
     policy_summary = _ps_raw if isinstance(_ps_raw, dict) else None
 
+    _role_dispatch = {
+        "planner": planner_dispatched,
+        "executor": executor_dispatched,
+        "validator": validator_dispatched,
+    }
+    dispatched_roles = [role for role, d in _role_dispatch.items() if d]
+    advisory_only_roles = [role for role, d in _role_dispatch.items() if not d]
+
     return RoutingTruth(
         runtime_model=runtime_model,
         routing_mode=routing_mode,
@@ -284,6 +296,8 @@ def build_routing_truth(entry: object) -> RoutingTruth:
         provider_enforcement_rejected_model=provider_enforcement_rejected_model,
         provider_enforcement_routable_size=provider_enforcement_routable_size,
         policy_summary=policy_summary,
+        dispatched_roles=dispatched_roles,
+        advisory_only_roles=advisory_only_roles,
     )
 
 

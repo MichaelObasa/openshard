@@ -1254,6 +1254,16 @@ class RunPipeline:
                 )
                 _safe_checkpoint("generate", "passed", files=[f.path for f in exec_result.files])
 
+        # Record executor dispatch after the real call succeeded (non-native tier
+        # dispatch path only; native path sets this via build_native_tier_dispatch_receipt).
+        if (
+            _dispatch_executor_model is not None
+            and _tier_dispatch_receipt is not None
+            and exec_result is not None
+            and effective_executor != "native"
+        ):
+            _tier_dispatch_receipt.executor_model_actual = _dispatch_executor_model
+
         # --- Multi-candidate path (candidates > 1, native + write only) ---
         _multi_candidate_done = False
         if self._candidates > 1 and effective_executor == "native" and write and not dry_run:
@@ -1371,6 +1381,7 @@ class RunPipeline:
                     model=_tier_dispatch_receipt.validator_model,
                 )
                 _validator_result = _val_dict
+                _tier_dispatch_receipt.validator_model_actual = _tier_dispatch_receipt.validator_model
                 stage_runs.append(StageRun(
                     stage=Stage(stage_type="validation", description="Review implementation result"),
                     model=_tier_dispatch_receipt.validator_model,

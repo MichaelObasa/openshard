@@ -282,5 +282,123 @@ class TestCliSurfaces(unittest.TestCase):
             json.loads(result_json.output)
 
 
+# ---------------------------------------------------------------------------
+# 6. Per-role dispatch lists (dispatched_roles / advisory_only_roles) — v1
+# ---------------------------------------------------------------------------
+
+
+def _receipt_entry(
+    executor_model_actual: str | None = None,
+    validator_model_actual: str | None = None,
+    planner_model_actual: str | None = None,
+    validator_dispatch_status: str = "",
+) -> dict:
+    """Tier dispatch entry with configurable actual-model fields."""
+    tdr: dict = {
+        "enabled": True,
+        "applied": True,
+        "tier_source": "category_fallback",
+        "planner_model": "anthropic/claude-sonnet-4.6",
+        "executor_model": "z-ai/glm-5.1",
+        "validator_model": "anthropic/claude-sonnet-4.6",
+        "planner_model_actual": planner_model_actual,
+        "executor_model_actual": executor_model_actual,
+        "validator_model_actual": validator_model_actual,
+        "validator_dispatch_status": validator_dispatch_status,
+    }
+    return {
+        "schema_version": "1.2",
+        "task": "dispatch test",
+        "timestamp": "2025-01-01T00:00:00Z",
+        "execution_model": "z-ai/glm-5.1",
+        "tier_dispatch_receipt": tdr,
+    }
+
+
+class TestDispatchedRoleLists(unittest.TestCase):
+    def test_executor_dispatched_when_actual_set(self) -> None:
+        entry = _receipt_entry(executor_model_actual="anthropic/claude-sonnet-4.6")
+        rt = build_routing_truth(entry)
+        self.assertTrue(rt.executor_dispatched)
+        self.assertIn("executor", rt.dispatched_roles)
+        self.assertNotIn("executor", rt.advisory_only_roles)
+
+    def test_validator_dispatched_when_actual_set(self) -> None:
+        entry = _receipt_entry(
+            validator_model_actual="z-ai/glm-5.1",
+            validator_dispatch_status="applied",
+        )
+        rt = build_routing_truth(entry)
+        self.assertTrue(rt.validator_dispatched)
+        self.assertIn("validator", rt.dispatched_roles)
+        self.assertNotIn("validator", rt.advisory_only_roles)
+
+    def test_validator_dispatched_via_status_alone(self) -> None:
+        # validator_dispatch_status="applied" is sufficient even without model_actual.
+        entry = _receipt_entry(validator_dispatch_status="applied")
+        rt = build_routing_truth(entry)
+        self.assertTrue(rt.validator_dispatched)
+        self.assertIn("validator", rt.dispatched_roles)
+
+    def test_planner_always_advisory_no_actual_field(self) -> None:
+        # planner_model_actual is never set by real code paths.
+        entry = _receipt_entry(
+            executor_model_actual="z-ai/glm-5.1",
+            validator_model_actual="anthropic/claude-sonnet-4.6",
+        )
+        rt = build_routing_truth(entry)
+        self.assertFalse(rt.planner_dispatched)
+        self.assertIn("planner", rt.advisory_only_roles)
+        self.assertNotIn("planner", rt.dispatched_roles)
+
+    def test_advisory_only_roles_no_tier_dispatch(self) -> None:
+        rt = build_routing_truth(_keyword_entry())
+        self.assertEqual(rt.dispatched_roles, [])
+        self.assertIn("planner", rt.advisory_only_roles)
+        self.assertIn("executor", rt.advisory_only_roles)
+        self.assertIn("validator", rt.advisory_only_roles)
+
+    def test_advisory_only_roles_minimal_entry(self) -> None:
+        rt = build_routing_truth({"task": "x", "timestamp": "2024-01-01T00:00:00Z"})
+        self.assertEqual(rt.dispatched_roles, [])
+        self.assertEqual(set(rt.advisory_only_roles), {"planner", "executor", "validator"})
+
+    def test_dispatched_roles_partial_executor_only(self) -> None:
+        entry = _receipt_entry(executor_model_actual="z-ai/glm-5.1")
+        rt = build_routing_truth(entry)
+        self.assertEqual(rt.dispatched_roles, ["executor"])
+        self.assertIn("planner", rt.advisory_only_roles)
+        self.assertIn("validator", rt.advisory_only_roles)
+        self.assertNotIn("executor", rt.advisory_only_roles)
+
+    def test_dispatched_roles_full_dispatch(self) -> None:
+        rt = build_routing_truth(_tier_dispatch_entry(validator_applied=True))
+        self.assertEqual(set(rt.dispatched_roles), {"planner", "executor", "validator"})
+        self.assertEqual(rt.advisory_only_roles, [])
+
+    def test_dispatched_and_advisory_lists_are_exhaustive(self) -> None:
+        # Every role must appear in exactly one list.
+        for entry in [
+            _keyword_entry(),
+            _tier_dispatch_entry(validator_applied=True),
+            _tier_dispatch_entry(validator_applied=False),
+            _receipt_entry(executor_model_actual="z-ai/glm-5.1"),
+        ]:
+            rt = build_routing_truth(entry)
+            all_roles = set(rt.dispatched_roles) | set(rt.advisory_only_roles)
+            self.assertEqual(all_roles, {"planner", "executor", "validator"}, msg=str(entry))
+            overlap = set(rt.dispatched_roles) & set(rt.advisory_only_roles)
+            self.assertEqual(overlap, set(), msg=str(entry))
+
+    def test_new_fields_json_serialisable(self) -> None:
+        for entry in [_keyword_entry(), _tier_dispatch_entry()]:
+            d = routing_truth_to_dict(build_routing_truth(entry))
+            roundtripped = json.loads(json.dumps(d))
+            self.assertIn("dispatched_roles", roundtripped)
+            self.assertIn("advisory_only_roles", roundtripped)
+            self.assertIsInstance(roundtripped["dispatched_roles"], list)
+            self.assertIsInstance(roundtripped["advisory_only_roles"], list)
+
+
 if __name__ == "__main__":
     unittest.main()

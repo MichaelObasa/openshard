@@ -10,11 +10,9 @@ no real home config writes, no OpenRouter network access.
 """
 from __future__ import annotations
 
-import json
 import os
 import sys
 import unittest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
@@ -357,6 +355,107 @@ class TestCLIDispatch(unittest.TestCase):
             f"Expected exit_code=0 for normal run, got {result.exit_code}. "
             f"Output: {result.output!r}",
         )
+
+
+# ---------------------------------------------------------------------------
+# Group D2 — Narrow receipt mutation tests for per-role dispatch v1
+# (test the dataclass mutation and routing-truth derivation only;
+#  no full pipeline execution required)
+# ---------------------------------------------------------------------------
+
+class TestReceiptMutation(unittest.TestCase):
+    """Proves the receipt mutation points added in per-role dispatch v1."""
+
+    def _make_receipt(self, **kwargs):
+        from openshard.native.context import NativeTierDispatchReceipt
+        defaults = dict(
+            enabled=True,
+            applied=True,
+            tier_source="category_fallback",
+            planner_model="anthropic/claude-sonnet-4.6",
+            executor_model="z-ai/glm-5.1",
+            validator_model="anthropic/claude-sonnet-4.6",
+        )
+        defaults.update(kwargs)
+        return NativeTierDispatchReceipt(**defaults)
+
+    def _entry_with_receipt(self, receipt) -> dict:
+        from dataclasses import asdict
+        return {
+            "schema_version": "1.2",
+            "task": "dispatch test",
+            "timestamp": "2025-01-01T00:00:00Z",
+            "execution_model": "z-ai/glm-5.1",
+            "tier_dispatch_receipt": asdict(receipt),
+        }
+
+    def test_executor_model_actual_written_after_call(self):
+        """Simulates the pipeline assignment after generator.generate() returns."""
+        from openshard.history.routing_truth import build_routing_truth
+
+        receipt = self._make_receipt()
+        self.assertIsNone(receipt.executor_model_actual)
+
+        # Simulate what pipeline.py does after the executor call succeeds.
+        receipt.executor_model_actual = receipt.executor_model
+
+        self.assertEqual(receipt.executor_model_actual, "z-ai/glm-5.1")
+        rt = build_routing_truth(self._entry_with_receipt(receipt))
+        self.assertTrue(rt.executor_dispatched)
+        self.assertIn("executor", rt.dispatched_roles)
+
+    def test_validator_model_actual_written_after_stage(self):
+        """Simulates the pipeline assignment after run_validator_stage() returns."""
+        from openshard.history.routing_truth import build_routing_truth
+
+        receipt = self._make_receipt()
+        self.assertIsNone(receipt.validator_model_actual)
+
+        # Simulate what pipeline.py does after the validator stage succeeds.
+        receipt.validator_model_actual = receipt.validator_model
+        receipt.validator_dispatch_status = "applied"
+
+        self.assertEqual(receipt.validator_model_actual, "anthropic/claude-sonnet-4.6")
+        rt = build_routing_truth(self._entry_with_receipt(receipt))
+        self.assertTrue(rt.validator_dispatched)
+        self.assertIn("validator", rt.dispatched_roles)
+
+    def test_planner_not_in_dispatched_roles_without_actual(self):
+        """Planner has no real call site; planner_model_actual is never set."""
+        from openshard.history.routing_truth import build_routing_truth
+
+        # Set executor and validator actuals — planner stays None.
+        receipt = self._make_receipt(
+            executor_model_actual="z-ai/glm-5.1",
+            validator_model_actual="anthropic/claude-sonnet-4.6",
+            validator_dispatch_status="applied",
+        )
+        rt = build_routing_truth(self._entry_with_receipt(receipt))
+        self.assertFalse(rt.planner_dispatched)
+        self.assertNotIn("planner", rt.dispatched_roles)
+        self.assertIn("planner", rt.advisory_only_roles)
+
+    def test_receipt_with_no_actuals_gives_all_advisory(self):
+        """Receipt with enabled+applied but no *_actual fields → all advisory."""
+        from openshard.history.routing_truth import build_routing_truth
+
+        receipt = self._make_receipt()
+        rt = build_routing_truth(self._entry_with_receipt(receipt))
+        self.assertEqual(rt.dispatched_roles, [])
+        self.assertEqual(
+            set(rt.advisory_only_roles), {"planner", "executor", "validator"}
+        )
+
+    def test_no_eligible_model_for_executor_role_returns_none(self):
+        """Empty pool for executor role gives a clear None result, not silent wrong model."""
+        from openshard.routing.model_resolver import resolve_routing_model_for_context
+
+        # openai-only env, but only anthropic model in registry → pool is empty.
+        entries = [_entry(SONNET_46, lifecycle="active_default")]
+        pool = _pool(OPENAI_ONLY, entries)
+        resolution = resolve_routing_model_for_context("main", pool)
+        self.assertIsNone(resolution.model)
+        self.assertEqual(resolution.routable_pool_size, 0)
 
 
 # ---------------------------------------------------------------------------
