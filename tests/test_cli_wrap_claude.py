@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+# Cross-platform substitute for the Unix `echo hello` shell builtin.
+_ECHO_ARGV = [sys.executable, "-c", "print('hello')"]
 
 from click.testing import CliRunner
 
@@ -197,7 +201,7 @@ class TestErrorHandling(unittest.TestCase):
 class TestWrapWritePath(unittest.TestCase):
 
     def _invoke_with_echo(self, runner: CliRunner, task: str = "Fix the bug", **extra_args) -> object:
-        args = ["wrap", "claude", "--task", task] + list(extra_args.get("extra", [])) + ["--", "echo", "hello"]
+        args = ["wrap", "claude", "--task", task] + list(extra_args.get("extra", [])) + ["--"] + _ECHO_ARGV
         return runner.invoke(cli, args)
 
     def test_creates_runs_jsonl(self):
@@ -247,7 +251,7 @@ class TestWrapWritePath(unittest.TestCase):
         with runner.isolated_filesystem():
             runner.invoke(
                 cli,
-                ["wrap", "claude", "--task", "Add tests", "--model", "claude-sonnet-4-6", "--", "echo", "hello"],
+                ["wrap", "claude", "--task", "Add tests", "--model", "claude-sonnet-4-6", "--"] + _ECHO_ARGV,
             )
             entry = _load_jsonl(Path(".openshard/runs.jsonl"))[0]
             self.assertEqual(entry["execution_model"], "claude-sonnet-4-6")
@@ -311,7 +315,7 @@ class TestJsonOutput(unittest.TestCase):
         with runner.isolated_filesystem():
             result = runner.invoke(
                 cli,
-                ["wrap", "claude", "--task", "Fix bug", "--json", "--", "echo", "hello"],
+                ["wrap", "claude", "--task", "Fix bug", "--json", "--"] + _ECHO_ARGV,
             )
             self.assertEqual(result.exit_code, 0, msg=result.output)
             # Find and parse the JSON block (multi-line) in the output
@@ -337,7 +341,7 @@ class TestJsonOutput(unittest.TestCase):
         with runner.isolated_filesystem():
             runner.invoke(
                 cli,
-                ["wrap", "claude", "--task", "Fix bug", "--json", "--", "echo", "hello"],
+                ["wrap", "claude", "--task", "Fix bug", "--json", "--"] + _ECHO_ARGV,
             )
             self.assertTrue(Path(".openshard/runs.jsonl").exists())
 
@@ -351,7 +355,7 @@ class TestWrappedShardWithLastCommand(unittest.TestCase):
     def _write_wrapped_shard(self, runner: CliRunner) -> None:
         runner.invoke(
             cli,
-            ["wrap", "claude", "--task", "Fix the auth service", "--", "echo", "hello"],
+            ["wrap", "claude", "--task", "Fix the auth service", "--"] + _ECHO_ARGV,
         )
 
     def test_last_exits_zero_after_wrap(self):
