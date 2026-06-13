@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -422,11 +423,11 @@ class TestCapturePreRunState(unittest.TestCase):
 class TestRunWrappedCommand(unittest.TestCase):
 
     def test_returns_zero_on_success(self):
-        code = run_wrapped_command(["true"])
+        code = run_wrapped_command([sys.executable, "-c", "exit(0)"])
         self.assertEqual(code, 0)
 
     def test_returns_nonzero_on_failure(self):
-        code = run_wrapped_command(["false"])
+        code = run_wrapped_command([sys.executable, "-c", "exit(1)"])
         self.assertNotEqual(code, 0)
 
     def test_returns_127_for_missing_command(self):
