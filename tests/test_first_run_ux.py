@@ -329,5 +329,470 @@ class TestEnvCommand(unittest.TestCase):
         self.assertIn("not set", result.output)
 
 
+# ---------------------------------------------------------------------------
+# 10. First-run gate: _should_run_onboarding + CLI entrypoint
+# ---------------------------------------------------------------------------
+
+_NO_AGENT_ENV = {
+    **_NO_API_KEYS,
+    "CI": "",
+    "GITHUB_ACTIONS": "",
+    "GITLAB_CI": "",
+    "OPENSHARD_AGENT": "",
+    "NO_COLOR": "",
+}
+
+
+class TestFirstRunGate(unittest.TestCase):
+
+    def test_cli_no_args_calls_render_home_after_onboarding_complete(self):
+        """After completed_at set, openshard no-args calls render_home (not onboarding)."""
+        import yaml
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".openshard").mkdir()
+            Path(".openshard/config.yml").write_text(
+                yaml.safe_dump({"onboarding": {"completed_at": "2026-06-13T10:00:00+00:00"}}),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                with patch("openshard.cli.ui.onboarding.run_onboarding_flow") as mock_flow:
+                    with patch("openshard.cli.ui.home.render_home") as mock_home:
+                        runner.invoke(cli, [])
+        mock_flow.assert_not_called()
+        mock_home.assert_called_once()
+
+    def test_cli_no_args_does_not_launch_textual_in_ci(self):
+        """In CI environment, run_onboarding_flow is never called."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, {**_NO_AGENT_ENV, "CI": "true"}, clear=False):
+                with patch("openshard.cli.ui.onboarding.run_onboarding_flow") as mock_flow:
+                    with patch("openshard.cli.ui.home.render_home"):
+                        runner.invoke(cli, [])
+        mock_flow.assert_not_called()
+
+    def test_skip_writes_completed_at(self):
+        """After run_onboarding_flow writes a skip, completed_at is present in config."""
+        import yaml
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                # Simulate _write_onboarding_config with skipped=True
+                from openshard.cli.ui.onboarding import _write_onboarding_config
+                _write_onboarding_config({"skipped": True})
+                cfg = yaml.safe_load(Path(".openshard/config.yml").read_text(encoding="utf-8"))
+        self.assertIn("completed_at", cfg["onboarding"])
+        self.assertTrue(cfg["onboarding"]["skipped"])
+
+    def test_skip_writes_marker_so_flow_does_not_reappear(self):
+        """After skip, is_first_run() returns False."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, {**_NO_AGENT_ENV, "OPENSHARD_CONFIG": ""}, clear=False):
+                from openshard.cli.ui.onboarding import _write_onboarding_config
+                _write_onboarding_config({"skipped": True})
+                # Point config loader at the written file
+                cfg_path = str(Path(".openshard/config.yml"))
+                with patch.dict(os.environ, {"OPENSHARD_CONFIG": cfg_path}, clear=False):
+                    from openshard.config.onboarding import is_first_run
+                    self.assertFalse(is_first_run())
+
+    def test_api_key_status_shows_no_values(self):
+        """_build_key_status_body() output contains no actual key values."""
+        from openshard.cli.ui.onboarding import _build_key_status_body
+        env = {**_NO_AGENT_ENV, "ANTHROPIC_API_KEY": "sk-super-secret-anthropic-key-xyz"}
+        with patch.dict(os.environ, env, clear=False):
+            body = _build_key_status_body()
+        self.assertNotIn("sk-super-secret-anthropic-key-xyz", body)
+        self.assertIn("✓ set", body)
+
+    def test_api_key_status_no_keys_shows_not_set(self):
+        """_build_key_status_body() shows not-set when no keys present."""
+        from openshard.cli.ui.onboarding import _build_key_status_body
+        with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+            body = _build_key_status_body()
+        self.assertIn("✗ not set", body)
+
+    def test_no_api_keys_written_to_config(self):
+        """After writing onboarding config, no _API_KEY appears in config file."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, {**_NO_AGENT_ENV, "ANTHROPIC_API_KEY": "sk-secret"}, clear=False):
+                from openshard.cli.ui.onboarding import _write_onboarding_config
+                _write_onboarding_config({"user_type": "human", "executor": "native",
+                                          "provider_route": "openrouter", "provider": "openrouter",
+                                          "safety_profile": "recommended"})
+                raw = Path(".openshard/config.yml").read_text(encoding="utf-8")
+        self.assertNotIn("API_KEY", raw)
+        self.assertNotIn("sk-secret", raw)
+
+    def test_onboarding_config_saves_executor(self):
+        """_write_onboarding_config saves executor field."""
+        import yaml
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                from openshard.cli.ui.onboarding import _write_onboarding_config
+                _write_onboarding_config({"executor": "claude_code"})
+                cfg = yaml.safe_load(Path(".openshard/config.yml").read_text(encoding="utf-8"))
+        self.assertEqual(cfg["onboarding"]["executor"], "claude_code")
+
+    def test_onboarding_config_saves_provider_route(self):
+        """_write_onboarding_config saves provider_route field."""
+        import yaml
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                from openshard.cli.ui.onboarding import _write_onboarding_config
+                _write_onboarding_config({"provider_route": "direct", "provider": "anthropic"})
+                cfg = yaml.safe_load(Path(".openshard/config.yml").read_text(encoding="utf-8"))
+        self.assertEqual(cfg["onboarding"]["provider_route"], "direct")
+        self.assertEqual(cfg["onboarding"]["provider"], "anthropic")
+
+    def test_onboarding_config_saves_safety_profile(self):
+        """_write_onboarding_config saves safety_profile field."""
+        import yaml
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                from openshard.cli.ui.onboarding import _write_onboarding_config
+                _write_onboarding_config({"safety_profile": "strict"})
+                cfg = yaml.safe_load(Path(".openshard/config.yml").read_text(encoding="utf-8"))
+        self.assertEqual(cfg["onboarding"]["safety_profile"], "strict")
+
+    def test_planned_executor_saves_value_no_routing_change(self):
+        """Selecting a planned executor saves its value; no routing fields are set."""
+        import yaml
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                from openshard.cli.ui.onboarding import _write_onboarding_config
+                _write_onboarding_config({"executor": "goose"})
+                cfg = yaml.safe_load(Path(".openshard/config.yml").read_text(encoding="utf-8"))
+        self.assertEqual(cfg["onboarding"]["executor"], "goose")
+        # No routing-related keys outside onboarding block
+        self.assertNotIn("routing", cfg)
+
+    def test_planned_direct_provider_saves_value(self):
+        """Selecting a planned direct provider saves provider value."""
+        import yaml
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                from openshard.cli.ui.onboarding import _write_onboarding_config
+                _write_onboarding_config({"provider_route": "direct", "provider": "google"})
+                cfg = yaml.safe_load(Path(".openshard/config.yml").read_text(encoding="utf-8"))
+        self.assertEqual(cfg["onboarding"]["provider"], "google")
+
+    def test_onboarding_preserves_existing_config_keys(self):
+        """Writing onboarding block preserves other config keys."""
+        import yaml
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".openshard").mkdir()
+            Path(".openshard/config.yml").write_text(
+                yaml.safe_dump({"approval_mode": "ask", "workflow": "direct"}), encoding="utf-8"
+            )
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                from openshard.cli.ui.onboarding import _write_onboarding_config
+                _write_onboarding_config({"user_type": "human"})
+                cfg = yaml.safe_load(Path(".openshard/config.yml").read_text(encoding="utf-8"))
+        self.assertEqual(cfg["approval_mode"], "ask")
+        self.assertEqual(cfg["workflow"], "direct")
+
+    def test_windows_path_compatibility(self):
+        """Config path resolved via pathlib.Path — no hardcoded forward slashes."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                from openshard.cli.ui.onboarding import _write_onboarding_config
+                _write_onboarding_config({"user_type": "human"})
+                # File must exist (path was created correctly on this platform)
+                cfg_path = Path(".openshard") / "config.yml"
+                self.assertTrue(cfg_path.exists())
+
+
+# ---------------------------------------------------------------------------
+# 11. setup --agent --json command
+# ---------------------------------------------------------------------------
+
+
+class TestSetupAgentJson(unittest.TestCase):
+
+    def _run(self, extra_env: dict | None = None) -> object:
+        env = {**_NO_AGENT_ENV, **(extra_env or {})}
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, env, clear=False):
+                return runner.invoke(cli, ["setup", "--agent", "--json"])
+
+    def test_exits_zero(self):
+        result = self._run()
+        self.assertEqual(result.exit_code, 0, result.output)
+
+    def test_returns_valid_json(self):
+        import json
+        result = self._run()
+        data = json.loads(result.output)
+        self.assertIsInstance(data, dict)
+
+    def test_interactive_false(self):
+        import json
+        result = self._run()
+        data = json.loads(result.output)
+        self.assertFalse(data["interactive"])
+
+    def test_onboarding_completed_false_when_no_config(self):
+        import json
+        result = self._run()
+        data = json.loads(result.output)
+        self.assertFalse(data["onboarding_completed"])
+
+    def test_onboarding_completed_true_after_init(self):
+        import json
+
+        import yaml
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".openshard").mkdir()
+            Path(".openshard/config.yml").write_text(
+                yaml.safe_dump({"onboarding": {"completed_at": "2026-06-13T10:00:00+00:00"}}),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                result = runner.invoke(cli, ["setup", "--agent", "--json"])
+        data = json.loads(result.output)
+        self.assertTrue(data["onboarding_completed"])
+
+    def test_detected_providers_booleans_only(self):
+        import json
+        result = self._run({"ANTHROPIC_API_KEY": "sk-test-key"})
+        data = json.loads(result.output)
+        # Key names are present but no key values in output
+        self.assertNotIn("sk-test-key", result.output)
+        self.assertIn("anthropic", data["detected_providers"])
+
+    def test_next_actions_present(self):
+        import json
+        result = self._run()
+        data = json.loads(result.output)
+        self.assertIsInstance(data["next_actions"], list)
+        self.assertGreater(len(data["next_actions"]), 0)
+
+
+# ---------------------------------------------------------------------------
+# 12. Existing commands still work after onboarding changes
+# ---------------------------------------------------------------------------
+
+
+class TestExistingCommandsUnbroken(unittest.TestCase):
+
+    def test_init_help_exits_zero(self):
+        result = _runner().invoke(cli, ["init", "--help"])
+        self.assertEqual(result.exit_code, 0, result.output)
+
+    def test_env_exits_zero(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                result = runner.invoke(cli, ["env"])
+        self.assertEqual(result.exit_code, 0, result.output)
+
+    def test_doctor_exits_zero(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                result = runner.invoke(cli, ["doctor"])
+        self.assertEqual(result.exit_code, 0, result.output)
+
+    def test_init_yes_exits_zero(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                result = runner.invoke(cli, ["init", "--yes"])
+        self.assertEqual(result.exit_code, 0, result.output)
+
+
+# ---------------------------------------------------------------------------
+# 13. Interactive Textual flow — driven via the run_test pilot harness
+# ---------------------------------------------------------------------------
+
+
+class TestCliSelectScreenPilot(unittest.TestCase):
+    """Arrow-key selection path is testable: drive _SelectScreen via pilot."""
+
+    def test_navigate_and_confirm_selects_value(self):
+        import asyncio
+
+        from openshard.cli.ui.onboarding import _build_select_app_class
+        from openshard.onboarding.choices import USER_TYPE_CHOICES
+
+        async def _run():
+            Sel = _build_select_app_class()
+            app = Sel("Who is using OpenShard?", USER_TYPE_CHOICES)
+            async with app.run_test() as pilot:
+                await pilot.press("down")   # highlight index 1
+                await pilot.press("enter")  # confirm
+            return app.selected_value, app.skipped
+
+        value, skipped = asyncio.run(_run())
+        self.assertEqual(value, "agent")
+        self.assertFalse(skipped)
+
+    def test_escape_skips(self):
+        import asyncio
+
+        from openshard.cli.ui.onboarding import _build_select_app_class
+        from openshard.onboarding.choices import USER_TYPE_CHOICES
+
+        async def _run():
+            Sel = _build_select_app_class()
+            app = Sel("Who is using OpenShard?", USER_TYPE_CHOICES)
+            async with app.run_test() as pilot:
+                await pilot.press("escape")
+            return app.selected_value, app.skipped
+
+        value, skipped = asyncio.run(_run())
+        self.assertIsNone(value)
+        self.assertTrue(skipped)
+
+    def test_info_screen_enter_continues(self):
+        import asyncio
+
+        from openshard.cli.ui.onboarding import _build_info_app_class
+
+        async def _run(key):
+            Info = _build_info_app_class()
+            app = Info("body text", "footer")
+            async with app.run_test() as pilot:
+                await pilot.press(key)
+            return app.skipped
+
+        self.assertFalse(asyncio.run(_run("enter")))
+        self.assertTrue(asyncio.run(_run("escape")))
+
+
+class TestTuiOnboardingScreenPilot(unittest.TestCase):
+    """TUI first-run behaviour: drive OnboardingScreen via pilot in a host app."""
+
+    def _drive(self, presses: list[str]) -> dict:
+        import asyncio
+
+        import yaml
+        from textual.app import App
+
+        from openshard.tui.onboarding_screen import OnboardingScreen
+
+        class _Host(App):
+            def __init__(self) -> None:
+                super().__init__()
+                self.dismissed = False
+
+            def on_mount(self) -> None:
+                self.push_screen(OnboardingScreen(), lambda _r: setattr(self, "dismissed", True))
+
+        async def _run(td: Path) -> dict:
+            app = _Host()
+            async with app.run_test() as pilot:
+                for p in presses:
+                    await pilot.press(p)
+                await pilot.pause()
+            cfg = td / ".openshard" / "config.yml"
+            out: dict = {"exists": cfg.exists(), "dismissed": app.dismissed}
+            if cfg.exists():
+                out["onboarding"] = yaml.safe_load(cfg.read_text(encoding="utf-8")).get("onboarding")
+            return out
+
+        runner = CliRunner()
+        with runner.isolated_filesystem() as fs:
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                return asyncio.run(_run(Path(fs)))
+
+    def test_full_completion_writes_all_fields(self):
+        # 4 select screens (user_type, executor, route, safety) + 3 info screens
+        out = self._drive(["enter"] * 7)
+        self.assertTrue(out["exists"])
+        self.assertTrue(out["dismissed"])
+        ob = out["onboarding"]
+        self.assertFalse(ob["skipped"])
+        self.assertEqual(ob["user_type"], "human")
+        self.assertEqual(ob["executor"], "native")
+        self.assertEqual(ob["provider_route"], "openrouter")
+        self.assertEqual(ob["provider"], "openrouter")
+        self.assertEqual(ob["safety_profile"], "recommended")
+
+    def test_escape_skips_and_writes_marker(self):
+        out = self._drive(["escape"])
+        self.assertTrue(out["exists"])
+        self.assertTrue(out["dismissed"])
+        self.assertTrue(out["onboarding"]["skipped"])
+        self.assertIn("completed_at", out["onboarding"])
+
+    def test_direct_route_injects_provider_screen(self):
+        # user_type(enter) + executor(enter) + route: down->direct(enter)
+        # + direct provider(enter=anthropic) + key info(enter) + safety(enter)
+        # + local-first(enter) + finish(enter)
+        out = self._drive(["enter", "enter", "down", "enter", "enter", "enter", "enter", "enter", "enter"])
+        self.assertTrue(out["exists"])
+        ob = out["onboarding"]
+        self.assertEqual(ob["provider_route"], "direct")
+        self.assertEqual(ob["provider"], "anthropic")
+
+    def test_no_api_keys_in_written_config(self):
+        env = {**_NO_AGENT_ENV, "ANTHROPIC_API_KEY": "sk-secret-xyz"}
+        import asyncio
+
+        from textual.app import App
+
+        from openshard.tui.onboarding_screen import OnboardingScreen
+
+        class _Host(App):
+            def on_mount(self) -> None:
+                self.push_screen(OnboardingScreen())
+
+        async def _run(td: Path) -> str:
+            app = _Host()
+            async with app.run_test() as pilot:
+                await pilot.press("escape")
+                await pilot.pause()
+            return (td / ".openshard" / "config.yml").read_text(encoding="utf-8")
+
+        runner = CliRunner()
+        with runner.isolated_filesystem() as fs:
+            with patch.dict(os.environ, env, clear=False):
+                raw = asyncio.run(_run(Path(fs)))
+        self.assertNotIn("API_KEY", raw)
+        self.assertNotIn("sk-secret-xyz", raw)
+
+
+class TestTuiAppFirstRunGate(unittest.TestCase):
+    """OpenShardTui.on_mount pushes OnboardingScreen only when the gate allows."""
+
+    def _push_happened(self, gate_value: bool) -> bool:
+        import asyncio
+
+        from openshard.tui.app import OpenShardTui
+        from openshard.tui.onboarding_screen import OnboardingScreen
+
+        async def _run() -> bool:
+            app = OpenShardTui()
+            with patch("openshard.cli.ui.onboarding._should_run_onboarding", return_value=gate_value):
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    return any(isinstance(s, OnboardingScreen) for s in app.screen_stack)
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                return asyncio.run(_run())
+
+    def test_pushes_screen_when_gate_true(self):
+        self.assertTrue(self._push_happened(True))
+
+    def test_no_screen_when_gate_false(self):
+        self.assertFalse(self._push_happened(False))
+
+
 if __name__ == "__main__":
     unittest.main()

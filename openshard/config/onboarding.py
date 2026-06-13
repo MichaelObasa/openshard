@@ -219,6 +219,17 @@ def _display_path(config_path: Path | None, cwd: Path | None) -> str | None:
         return config_path.name
 
 
+def is_first_run() -> bool:
+    """Return True if the user has never completed openshard init or onboarding."""
+    from openshard.config.settings import load_config_safe
+
+    config, is_valid, _ = load_config_safe()
+    if not is_valid:
+        return True
+    ob = config.get("onboarding", {})
+    return not bool(ob.get("completed_at"))
+
+
 def build_state(
     *,
     version: str,
@@ -237,6 +248,11 @@ def build_state(
     provider = onboarding.get("provider")
     model_mode = onboarding.get("model_mode")
     output_mode = onboarding.get("output_mode")
+    # First-run onboarding fields (additive; absent in older configs).
+    user_type = onboarding.get("user_type")
+    executor = onboarding.get("executor")
+    provider_route = onboarding.get("provider_route")
+    safety_profile = onboarding.get("safety_profile")
 
     keys_present = api_key_present()
     any_key = any(keys_present.values())
@@ -305,6 +321,10 @@ def build_state(
         "model_mode": model_mode,
         "api_key_present": selected_key_present,
         "output_mode": output_mode,
+        "user_type": user_type,
+        "executor": executor,
+        "provider_route": provider_route,
+        "safety_profile": safety_profile,
         "warnings": warnings,
         "next_steps": next_steps,
     }

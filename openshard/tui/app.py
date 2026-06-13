@@ -333,6 +333,13 @@ class OpenShardTui(App):
         self._update_brand()
         self._session_writer.write("session_started", self._session_id, summary="TUI session started")
 
+        from openshard.cli.ui.onboarding import _should_run_onboarding
+
+        if _should_run_onboarding():
+            from openshard.tui.onboarding_screen import OnboardingScreen
+
+            self.push_screen(OnboardingScreen())
+
     def on_resize(self, event) -> None:
         self._update_brand()
 
