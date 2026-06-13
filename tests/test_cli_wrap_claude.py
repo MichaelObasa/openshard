@@ -8,12 +8,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-# Cross-platform substitute for the Unix `echo hello` shell builtin.
-_ECHO_ARGV = [sys.executable, "-c", "print('hello')"]
-
 from click.testing import CliRunner
 
 from openshard.cli.main import cli
+
+# Cross-platform substitute for the Unix `echo hello` shell builtin.
+_ECHO_ARGV = [sys.executable, "-c", "print('hello')"]
 
 # ---------------------------------------------------------------------------
 # Helpers
