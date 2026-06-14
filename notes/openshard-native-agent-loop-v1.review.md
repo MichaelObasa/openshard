@@ -22,7 +22,16 @@
 >    knowledge of this publicly published Anthropic blog post. Covers: augmented LLMs,
 >    workflows vs agents, routing, parallelisation, orchestrator-worker, evaluator-optimizer.
 >
-> 3. **OpenShard MasterFile v4.2** — product context only (not source of truth for code).
+> 3. **Theo - t3.gg YouTube library** — Google Drive / 04 Library / YouTube / Theo - t3.gg folder.
+>    "Agentic Coding Has A HUGE Problem" (Feb 2026) and "AI Mistakes You're Probably Making"
+>    (Jan 2026). Practical developer insights on context management, broken environments,
+>    plan mode, retry strategy, and MCP over-configuration.
+>
+> 4. **Agent Architecture & Theory folder** — Google Drive / AI Engineer folder.
+>    Includes "Memory and Dreaming for Self-Learning Agents" (Mahes, Anthropic, May 2026)
+>    and "Rethinking AI Agents: The Rise of Harness Engineering" (May 2026).
+>
+> 5. **OpenShard MasterFile v4.2** — product context only (not source of truth for code).
 >
 > No proprietary or leaked internals are used. No Claude Code source code is referenced.
 
@@ -915,6 +924,134 @@ When Michael approves Phase 1, the next PR should be:
 - No pipeline changes
 - No CLI changes
 - No receipt schema changes
+
+---
+
+## Appendix D — Insights from Theo (t3.gg) Library
+
+Source: Google Drive / 04 Library / YouTube / Theo - t3.gg folder.
+Two videos directly relevant to OpenShard Native agent loop design.
+
+---
+
+### D.1 "Agentic Coding Has A HUGE Problem" (Theo, Feb 2026)
+
+**Core problem**: Running multiple agents in parallel creates UX chaos — port collisions, auth
+cookie collisions, context switching between terminals/browsers, no clear signal which project
+you're in. Developers become the bottleneck managing parallel work, not the agents themselves.
+
+**Key quote**:
+> "Background agents just end up being a source of a bunch of PRs that don't get touched
+> because no one is going to look at this again after they run it. But when I'm running locally,
+> I'm actually going to play with the code. I'm going to test how it works. I'm going to be
+> more thorough and detailed when it's on my machine my way."
+
+> **OpenShard impact**: Validates that OpenShard should NOT build a background daemon or
+> cloud-run agent without explicit approval. The local-first, receipt-based approach is correct.
+> A single focused run with human checkpoints is better than parallel background runs that
+> nobody watches. This also validates NOT adding multi-agent execution until the single-agent
+> loop is solid.
+
+---
+
+### D.2 "AI Mistakes You're Probably Making" (Theo, Jan 2026)
+
+This is the most directly applicable Theo video. Key mistakes catalogued:
+
+#### Mistake 1: Wrong problem selection
+> "Most people don't try a new solution on a problem they already know how to solve. People
+> aren't using these tools to solve problems they already know and understand. They are using
+> them as almost like a safety net type thing once everything else they've tried has failed."
+
+> **OpenShard impact**: The task input matters. OpenShard should prompt users to give
+> well-scoped tasks with enough context — not vague "fix the bug" prompts. The `plan` phase
+> (which already exists) should clarify task scope before execution, not after.
+
+#### Mistake 2: Context dumping (context rot)
+> "Once you break 50k tokens of context, the model starts to perform worse. There is a very
+> important concept of context rot — when you have too much context and it is distracting you
+> from the thing that matters."
+
+> "The reason all of these new tools like Claude Code, Codex are doing so well is because they
+> don't give the whole codebase to the model. They give the model tools to find what it's
+> looking for in the codebase."
+
+> **OpenShard impact**: The existing bounded evidence collection (3 files max, 5000 chars
+> total, bounded search results) is exactly right. The agent loop must keep per-iteration
+> context tight — don't pass the full iteration history to the model every iteration. Summarise
+> observations, don't accumulate raw outputs.
+
+#### Mistake 3: The CLAUDE.md file is a "gotchas pile", not docs
+> "The role of this file isn't to describe every single thing about the codebase. It's not
+> just docs. It is specifically a gotchas pile — almost like listing the things you've seen it
+> do wrong to steer it away from that. This file should start really small and simple and slowly
+> have small additions added and tuning done to it."
+
+> "One of the most interesting things I learned about the Claude Code team is that whenever
+> they notice the model doing something poorly in the Claude Code codebase, they immediately go
+> and change the CLAUDE.md file to help steer the model in the right direction."
+
+> **OpenShard impact**: OpenShard's skills system is the equivalent. Skills should stay
+> minimal and task-specific — exactly what the current system does. The agent loop should
+> inject skills context sparsely, not dump everything.
+
+#### Mistake 4: Broken environments
+> "If you tell an AI agent about a ghost, it will chase it forever. You need to get rid of
+> the ghosts."
+
+> The pattern he describes: agent finds an error → tries to fix it → verifies → same error
+> still there → tries 10 random things → eventually gives up → re-applies original change →
+> ships. Then repeats the whole thing on the next task.
+
+> **OpenShard impact**: This is exactly the `repeated_failure` stop reason in the proposed
+> loop. The agent must detect when it's chasing a ghost (same command fails N times in a row)
+> and stop with `blocked (repeated_failure)` rather than looping. The pre-flight environment
+> check (existing `observation` phase) is important — catch broken state before generation.
+
+#### Mistake 5: MCP / skill over-configuration
+> "Theo uses zero MCPs. Skills are literally just markdown files and they're often way longer
+> than they should be. They are for the most part context bloat and context rot."
+
+> "You don't solve problems with AI coding tools by adding more things to them. More features,
+> more MCPs, more plugins, more skills — none of that's going to make you go from 'this thing
+> is useless' to 'this thing is useful.'"
+
+> **OpenShard impact**: OpenShard skills must remain small, sharp, and specific. The agent
+> loop should not inject all skills every iteration — only the relevant skill for the current
+> action. Context budget per iteration should enforce this.
+
+#### Mistake 6: Appending fixes instead of reverting
+> "When you notice that the output came out bad rather than try to fix it with a better input
+> being appended, revert, go back, make the better input the start. Because if you have a
+> better input as the start, the likelihood that the output is better too is much much higher."
+
+> "If it gets the whole thing wrong, reflect on why. Read a little bit of what it did. Read the
+> reasoning traces for why it made the change you don't like."
+
+> **OpenShard impact**: The agent loop's retry strategy should not append corrections to a
+> failed context — it should produce a fresh context with the failure summary injected cleanly.
+> This is already what `retry_diagnosis.py` does. The proposed loop must preserve this pattern.
+> Also: reading traces is validated again as the primary debugging loop.
+
+#### Mistake 7: Plan mode insight
+> "Plan mode is great because instead of the bad input resulting in a bad output, the output
+> will be confused questions — it'll be confused questions where instead of it doing a whole
+> bunch of things it shouldn't, it will add a little bit of additional context. Can you answer
+> these questions for me? And you might realize, oh, I should have put that at the start."
+
+> **OpenShard impact**: The `understood_task` state in the proposed loop (which may emit a
+> clarification request) mirrors plan mode. Forcing the model to plan before acting is correct
+> and validated. The existing `build_native_clarification_request` phase already captures this.
+
+#### Mistake 8: The agent as a new engineer every time
+> "The AI agent is a new engineer every time it runs. The role of this file is to take this
+> really skilled engineer who just joined your company and make sure they know all of the
+> things that are special about your company and your codebase."
+
+> **OpenShard impact**: This is why the agent loop trace matters for OpenShard specifically.
+> Between runs, OpenShard has JSONL receipts. The agent starts fresh each time. The context
+> packet (skills, repo summary, plan) is the "onboarding" for that fresh engineer. Keep it
+> tight, factual, and action-oriented.
 
 ---
 
