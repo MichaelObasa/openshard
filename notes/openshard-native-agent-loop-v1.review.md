@@ -8,12 +8,23 @@
 
 ---
 
-> **Note on Anthropic sources**: The Anthropic docs server (docs.anthropic.com) returned HTTP 403
-> for all direct fetch attempts during this session. The Anthropic principles cited below are
-> drawn from training knowledge of publicly published Anthropic materials:
-> "Building Effective Agents" (Dec 2024), Claude Code public docs, and the Anthropic API
-> reference. No proprietary or leaked internals are referenced. All principles cited are from
-> publicly available Anthropic engineering guidance.
+> **Sources used in this document**:
+>
+> 1. **"Building and Scaling Long-Running Agents" — Andrew & Ash (Anthropic Applied AI)**
+>    Sourced from: Michael's Google Drive / OpenShard / AI Engineer folder.
+>    AI Engineer talk, 18 May 2026. Video: youtube.com/watch?v=mR-WAvEPRwE
+>    Covers: RALPH loop, Generator-Evaluator pattern, harness co-evolution, context management,
+>    sprint decomposition, contract negotiation, reading traces as the primary debugging loop.
+>    This is an official Anthropic engineering source.
+>
+> 2. **"Building Effective Agents" (Anthropic, Dec 2024)**
+>    Docs.anthropic.com returned HTTP 403 for direct fetch. Content drawn from training
+>    knowledge of this publicly published Anthropic blog post. Covers: augmented LLMs,
+>    workflows vs agents, routing, parallelisation, orchestrator-worker, evaluator-optimizer.
+>
+> 3. **OpenShard MasterFile v4.2** — product context only (not source of truth for code).
+>
+> No proprietary or leaked internals are used. No Claude Code source code is referenced.
 
 ---
 
@@ -878,8 +889,10 @@ Use "agent loop" or "run loop" in all public-facing contexts.
 8. **Eval harness priority**: Should the eval harness (Phase 6) come before write-capable
    phases (Phase 4), as a safety gate? That would reorder to: 0→1→2→3→6→4→5→7.
 
-9. **RALPH shorthand**: Worth keeping as internal shorthand, or discard entirely to avoid
-   confusion? No preference assumed either way.
+9. **RALPH shorthand**: Now confirmed as a real Anthropic-credited technique (Jeffrey Huntley,
+   July 2025, integrated into Claude Code). The Anthropic engineers call it "Ralph loop" openly.
+   Worth keeping as internal shorthand — it has a legitimate provenance. Still not recommended
+   for public product copy without your explicit approval.
 
 10. **Verification loop relationship**: Current `NativeVerificationLoop` tracks test runs across
     retries. Should the agent loop's `ReceiptIteration` absorb this, or remain parallel?
@@ -902,6 +915,119 @@ When Michael approves Phase 1, the next PR should be:
 - No pipeline changes
 - No CLI changes
 - No receipt schema changes
+
+---
+
+## Appendix C — Verified Anthropic Engineering Insights (From Your Library)
+
+Source: "Building and Scaling Long-Running Agents" — Andrew & Ash, Anthropic Applied AI
+Talk at AI Engineer, 18 May 2026. Available in Google Drive / OpenShard / AI Engineer folder.
+
+These are directly applicable to OpenShard Native. Key findings:
+
+### C.1 The Three Core Problems Anthropic Identified
+
+Anthropic engineers stated these are the three problems that break long-running agents:
+
+1. **Context** — amnesia between sessions, context rot as the window fills, context anxiety
+   (model rushes to finish as it approaches the limit)
+2. **Planning** — models try to do everything in one shot, or build half a feature and stop
+3. **Self-evaluation** — models are sycophantic about their own output; they see half-baked
+   work and call it done
+
+> OpenShard impact: all three exist in the current single-pass native pipeline. The plan phase
+> partially addresses #2, but #1 and #3 are gaps. The proposed agent loop addresses all three.
+
+### C.2 The RALPH Loop — Officially Confirmed
+
+The RALPH loop was released by Jeffrey Huntley in July 2025 and integrated into Claude Code
+by Anthropic. From the transcript:
+
+> "July 2025 (Ralph Loop): Jeffrey Huntley released the Ralph technique. We integrated it into
+> Claude Code. Key idea: breaking down prompt into features, picking one feature, implementing
+> it in a fresh context window, then looping until done."
+
+The Anthropic engineers described it as "genius for fresh windows" — then noted that as
+models improved (Opus 4.6 with 1M context + server-side compaction), the Ralph loop became
+less necessary because the model could hold 12 hours of work in one session coherently.
+
+> OpenShard impact: RALPH as an internal engineering shorthand is sound and validated. But
+> the direction is to build a capable loop now, knowing that as models improve, some scaffold
+> complexity can be removed. Design for simplicity and evolvability.
+
+### C.3 Generator-Evaluator Pattern
+
+From Ash (Anthropic Applied AI):
+
+- Generator builds; Evaluator grades — separate system prompts, separate context windows
+- "Tuning a standalone critic to be harsh is tractable. Tuning a builder to be self-critical is not."
+- Evaluator uses live app testing (Playwright in their case) — not just static analysis
+- 27 contract criteria defined upfront; vague criteria produce vague critiques
+- The evaluator and generator negotiate contracts before building begins
+- "Done" must mean something concrete, not vague
+
+> OpenShard impact: This maps directly to Phase 7 (evaluator-optimizer). The key insight is
+> that the evaluator must use concrete, granular acceptance criteria — not "does it look right?"
+> For OpenShard: verification must run the actual test suite, not ask the model if tests pass.
+
+### C.4 Harness Co-Evolution
+
+From Andrew (Anthropic Applied AI):
+
+> "The harness doesn't disappear as models improve. It evolves. We find gaps, fill them with
+> harness, train model on that aspect, then remove it entirely."
+
+Timeline of what was added then sometimes removed:
+- Context resetting between sessions → added → later dropped (Opus 4.6 made it unnecessary)
+- Sprint decomposition → critical for 4.5 → simplified for 4.6
+- Skills with progressive disclosure → added (front matter auto-loads, body on-demand)
+- Server-side compaction → added (models can run indefinitely)
+- Agent teams → added (sub-agents communicate, report back only when needed)
+
+> OpenShard impact: the phased plan is the right approach. Build the scaffold, use it, then
+> simplify as the underlying model improves. Do not over-engineer for model capabilities
+> that don't exist yet. Do not under-engineer for gaps that currently exist.
+
+### C.5 Reading Traces Is the Primary Debugging Loop
+
+From the transcript:
+
+> "Reading traces is the primary debugging loop — not evals, not experiments; traces show
+> why the agent diverged."
+
+And:
+
+> "The whole art to building this system and making it good was reading what the agent actually
+> did, finding where its judgment diverged from ours as humans, and then tuning the prompt."
+
+> OpenShard impact: the agent loop trace (`.openshard/agent_loop_traces/`) is not a nice-to-have.
+> It is the primary debugging surface. Every iteration must be traceable. The trace must show
+> what the agent decided and why at each step — not just the final receipt.
+
+### C.6 Context Anxiety and Budget Awareness
+
+Models exhibit "context anxiety" — rushing to complete tasks as they approach the context limit,
+producing lower quality or incomplete work. The solution at Anthropic was server-side compaction
+and 1M context windows. For OpenShard:
+
+- Track token consumption per iteration in `IterationCost`
+- Warn the agent (via system prompt injection) when context is filling
+- Stop before the agent reaches the limit and produces degraded output
+- This is the `max_iterations` and `max_budget_usd` invariants in practice
+
+### C.7 What Changed as Models Improved (Lessons for OpenShard)
+
+| Harness feature | Why it was added | When it was simplified/removed |
+|---|---|---|
+| Context reset between sessions | Session amnesia | Opus 4.6 + server compaction |
+| Sprint decomposition | 4.5 couldn't hold long plans | 4.6 holds 2hr builds natively |
+| Fresh context windows (RALPH) | Context rot | 1M context window |
+| Planning stage separate from execution | Models bad at long plans | Still needed in Opus 4.6 |
+| Generator-Evaluator split | Self-evaluation failure | Still needed; model still sycophantic |
+| Granular acceptance criteria | Vague feedback = vague fixes | Always needed |
+
+> OpenShard lesson: build the scaffold for today's models. Mark each harness feature with a
+> "remove when model improves" note. The phased plan naturally supports this.
 
 ---
 
