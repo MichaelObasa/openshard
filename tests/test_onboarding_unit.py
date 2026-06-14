@@ -163,5 +163,129 @@ class TestBuildState(unittest.TestCase):
         self.assertNotIn(":", st["config_path_display"] or "")
 
 
+class TestIsFirstRun(unittest.TestCase):
+    """is_first_run() returns True until onboarding.completed_at is written."""
+
+    def _write_config(self, tmpdir: Path, onboarding_block: dict | None) -> None:
+        cfg_dir = tmpdir / ".openshard"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        data: dict = {"approval_mode": "smart"}
+        if onboarding_block is not None:
+            data["onboarding"] = onboarding_block
+        (cfg_dir / "config.yml").write_text(
+            __import__("yaml").safe_dump(data), encoding="utf-8"
+        )
+
+    def test_true_when_no_config_file(self):
+        runner = __import__("click.testing", fromlist=["CliRunner"]).CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, {"OPENSHARD_CONFIG": ""}, clear=False):
+                self.assertTrue(ob.is_first_run())
+
+    def test_true_when_no_onboarding_block(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / ".openshard" / "config.yml"
+            cfg_path.parent.mkdir(parents=True)
+            cfg_path.write_text(__import__("yaml").safe_dump({"approval_mode": "smart"}), encoding="utf-8")
+            with patch.dict(os.environ, {"OPENSHARD_CONFIG": str(cfg_path)}, clear=False):
+                self.assertTrue(ob.is_first_run())
+
+    def test_true_when_onboarding_block_has_no_completed_at(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / ".openshard" / "config.yml"
+            cfg_path.parent.mkdir(parents=True)
+            cfg_path.write_text(
+                __import__("yaml").safe_dump({"onboarding": {"mode": "native"}}), encoding="utf-8"
+            )
+            with patch.dict(os.environ, {"OPENSHARD_CONFIG": str(cfg_path)}, clear=False):
+                self.assertTrue(ob.is_first_run())
+
+    def test_false_when_completed_at_is_set(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / ".openshard" / "config.yml"
+            cfg_path.parent.mkdir(parents=True)
+            cfg_path.write_text(
+                __import__("yaml").safe_dump(
+                    {"onboarding": {"completed_at": "2026-06-13T10:00:00+00:00"}}
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"OPENSHARD_CONFIG": str(cfg_path)}, clear=False):
+                self.assertFalse(ob.is_first_run())
+
+    def test_false_when_completed_at_set_and_skipped_true(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / ".openshard" / "config.yml"
+            cfg_path.parent.mkdir(parents=True)
+            cfg_path.write_text(
+                __import__("yaml").safe_dump(
+                    {"onboarding": {"completed_at": "2026-06-13T10:00:00+00:00", "skipped": True}}
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"OPENSHARD_CONFIG": str(cfg_path)}, clear=False):
+                self.assertFalse(ob.is_first_run())
+
+
+class TestShouldRunOnboarding(unittest.TestCase):
+    """_should_run_onboarding() returns False in CI/non-TTY/post-init."""
+
+    def setUp(self):
+        from openshard.cli.ui.onboarding import _should_run_onboarding
+        self._fn = _should_run_onboarding
+
+    def test_false_when_not_first_run(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            cfg_path = Path(td) / ".openshard" / "config.yml"
+            cfg_path.parent.mkdir(parents=True)
+            cfg_path.write_text(
+                __import__("yaml").safe_dump(
+                    {"onboarding": {"completed_at": "2026-06-13T10:00:00+00:00"}}
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"OPENSHARD_CONFIG": str(cfg_path)}, clear=False):
+                self.assertFalse(self._fn())
+
+    def test_false_when_ci_env(self):
+        with patch.dict(os.environ, {"CI": "true", "OPENSHARD_CONFIG": ""}, clear=False):
+            self.assertFalse(self._fn())
+
+    def test_false_when_github_actions(self):
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "true", "OPENSHARD_CONFIG": ""}, clear=False):
+            self.assertFalse(self._fn())
+
+    def test_false_when_non_tty(self):
+        import io
+        runner = __import__("click.testing", fromlist=["CliRunner"]).CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, {"OPENSHARD_CONFIG": "", "CI": "", "GITHUB_ACTIONS": "",
+                                          "GITLAB_CI": "", "OPENSHARD_AGENT": "", "NO_COLOR": ""}, clear=False):
+                with patch("sys.stdin", io.StringIO("")):
+                    # sys.stdin.isatty() returns False for StringIO
+                    self.assertFalse(self._fn())
+
+    def test_true_when_first_run_and_tty(self):
+        import io
+
+        class _FakeTTY(io.StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        runner = __import__("click.testing", fromlist=["CliRunner"]).CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, {"OPENSHARD_CONFIG": "", "CI": "", "GITHUB_ACTIONS": "",
+                                          "GITLAB_CI": "", "OPENSHARD_AGENT": "", "NO_COLOR": ""}, clear=False):
+                with patch("sys.stdin", _FakeTTY()):
+                    with patch("sys.stdout", _FakeTTY()):
+                        result = self._fn()
+        self.assertTrue(result)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -118,6 +118,11 @@ from openshard.run.pipeline import (
 def cli(ctx: click.Context):
     """OpenShard - intelligent task routing and execution."""
     if ctx.invoked_subcommand is None:
+        from openshard.cli.ui.onboarding import _should_run_onboarding, run_onboarding_flow
+
+        if _should_run_onboarding():
+            run_onboarding_flow()
+
         from openshard.cli.ui.home import render_home
 
         render_home()
@@ -346,6 +351,58 @@ def env_cmd() -> None:
     click.echo(f"  Agent mode:    {agent_display}")
     click.echo(f"  Output mode:   {output_mode}")
     click.echo(f"  API key:       {key_label}")
+
+
+@cli.command("setup")
+@click.option("--agent", "as_agent", is_flag=True, default=False,
+              help="Machine-readable setup status for agent/CI use.")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Output as JSON (implied by --agent).")
+def setup_cmd(as_agent: bool, as_json: bool) -> None:
+    """Show setup status or run first-run onboarding (agent-friendly with --agent --json)."""
+    from openshard.config import onboarding as ob
+
+    if as_agent or as_json:
+        # Machine-readable path: no interactive UI, return JSON status and exit.
+        state = _current_state()
+        keys_present = ob.api_key_present()
+        detected_providers = [p for p, present in keys_present.items() if present]
+        payload = {
+            "mode": "agent",
+            "interactive": False,
+            "repo_detected": ob.detect_git_repo(),
+            "config_found": state["config_found"],
+            "onboarding_completed": not ob.is_first_run(),
+            "recommended_executor": state.get("executor") or "native",
+            "detected_providers": detected_providers,
+            "provider_route": state.get("provider_route"),
+            "provider": state.get("provider"),
+            "safety_profile": state.get("safety_profile"),
+            "receipts": {
+                "enabled": True,
+                "storage": ".openshard/",
+            },
+            "next_actions": [
+                "openshard env --json",
+                'openshard run "explain this repo"',
+                "openshard last --json",
+            ],
+        }
+        click.echo(json.dumps(payload, indent=2))
+        return
+
+    # Human path: run interactive onboarding (only in TTY).
+    from openshard.cli.ui.onboarding import _should_run_onboarding, run_onboarding_flow
+
+    if _should_run_onboarding():
+        run_onboarding_flow()
+    else:
+        # Non-TTY human path: just show doctor output.
+        state = _current_state()
+        click.echo("\nOpenShard Setup\n")
+        click.echo(f"  Onboarding completed: {'yes' if not ob.is_first_run() else 'no'}")
+        click.echo(f"  Config found:         {'yes' if state['config_found'] else 'no'}")
+        _echo_warnings_next_steps(state)
 
 
 @cli.command()
