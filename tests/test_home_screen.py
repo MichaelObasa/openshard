@@ -177,7 +177,9 @@ class TestHomeScreen(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Quick commands", result.output)
         self.assertIn("run", result.output)
-        self.assertIn("demo-run", result.output)
+        # Command suggestions are consistent on "demo shard" (the real command).
+        self.assertIn("demo shard", result.output)
+        self.assertNotIn("demo-run", result.output)
 
     def test_output_includes_prompt_hint(self):
         runner = CliRunner()
@@ -185,6 +187,36 @@ class TestHomeScreen(unittest.TestCase):
             result = runner.invoke(cli, [])
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Type a command", result.output)
+
+    def test_no_cost_does_not_split_across_lines(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([{
+                "task": "hello",
+                "workflow": "Run",
+                "verification_attempted": False,
+            }])
+            result = runner.invoke(cli, [])
+        self.assertEqual(result.exit_code, 0)
+        # "no cost" must render intact on one row, never split as "no\ncost".
+        self.assertIn("no cost", result.output)
+        self.assertNotIn("no\ncost", result.output)
+
+    def test_recent_receipts_header_row(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            _write_runs([{
+                "task": "explain this repo",
+                "workflow": "Run",
+                "verification_attempted": False,
+                "estimated_cost": 0.0017,
+            }])
+            result = runner.invoke(cli, [])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Task", result.output)
+        self.assertIn("Cost", result.output)
+        self.assertIn("Verify", result.output)
+        self.assertIn("$0.0017", result.output)
 
     def test_recent_receipts_no_repeated_dashes(self):
         runner = CliRunner()
@@ -200,6 +232,35 @@ class TestHomeScreen(unittest.TestCase):
         self.assertIn("alpha task", result.output)
         self.assertNotIn("· ·", result.output)
         self.assertNotIn("receipt saved", result.output)
+
+
+class TestFriendlyModelDisplay(unittest.TestCase):
+    def test_friendly_model_strips_provider_prefix(self):
+        from openshard.cli.ui.home import _friendly_model
+        self.assertEqual(
+            _friendly_model("anthropic/claude-sonnet-4.6"), "Claude Sonnet 4.6"
+        )
+
+    def test_friendly_model_passthrough_sentinel(self):
+        from openshard.cli.ui.home import _friendly_model
+        self.assertEqual(_friendly_model("Not configured"), "Not configured")
+
+    def test_friendly_model_unknown_id_falls_back(self):
+        from openshard.cli.ui.home import _friendly_model
+        # Unknown ids with no registry display name fall back to the raw id.
+        self.assertEqual(_friendly_model("some/unknown-model"), "some/unknown-model")
+
+    def test_dashboard_shows_friendly_not_raw_model(self):
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch(
+                "openshard.cli.ui.home.load_config",
+                return_value={"execution_model": "anthropic/claude-sonnet-4.6"},
+            ):
+                result = runner.invoke(cli, [])
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Claude Sonnet 4.6", result.output)
+        self.assertNotIn("anthropic/claude-sonnet-4.6", result.output)
 
 
 if __name__ == "__main__":

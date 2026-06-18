@@ -14,6 +14,7 @@ from rich.text import Text
 
 from openshard.analysis.repo import RepoFacts, analyze_repo
 from openshard.config.settings import load_config
+from openshard.models.registry import display_name_for
 from openshard.run.pipeline import _LOG_PATH
 
 from .console import make_console
@@ -24,8 +25,8 @@ TAGLINE = "The control layer for AI coding agents."
 QUICK_COMMANDS = [
     ("run",      "Make a controlled change"),
     ("last",     "Inspect latest receipt"),
-    ("models",   "View model route"),
-    ("demo-run", "Preview OpenShard output"),
+    ("models",     "View model route"),
+    ("demo shard", "Preview OpenShard output"),
 ]
 
 
@@ -87,7 +88,7 @@ def render_brand_panel(state: HomeState) -> Table:
     status.add_column(style=SECTION_STYLE, no_wrap=True)
     status.add_column()
     status.add_row("Mode:", state.mode)
-    status.add_row("Model:", state.model)
+    status.add_row("Model:", _friendly_model(state.model))
     status.add_row("Repo:", state.repo_short)
     status.add_row("Git:", state.git_state)
     status.add_row("Stack:", state.stack_state)
@@ -102,22 +103,35 @@ def render_tips_panel() -> Text:
     for tip in (
         'openshard run "explain this repo"',
         "openshard last --full",
-        "openshard demo-run",
+        "openshard demo shard",
         "openshard models",
     ):
         t.append(f"  > {tip}\n", style=TIP_STYLE)
     return t
 
 
-def render_recent_receipts(receipts: list[dict[str, Any]]) -> Text:
-    t = Text()
-    t.append("Recent receipts\n", style=ACCENT_STYLE)
+def render_recent_receipts(receipts: list[dict[str, Any]]) -> Table:
+    outer = Table.grid()
+    outer.add_column()
+    outer.add_row(Text("Recent receipts", style=ACCENT_STYLE))
     if not receipts:
-        t.append("  No recent receipts yet.", style=MUTED_STYLE)
-        return t
+        outer.add_row(Text("  No recent receipts yet.", style=MUTED_STYLE))
+        return outer
+
+    # Fixed columns keep each receipt on one clean row. no_wrap stops "no cost"
+    # (and costs) from splitting across lines; min_width protects the Cost/Verify
+    # columns so only the Task cell ellipsizes in a narrow panel.
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style=SECTION_STYLE, no_wrap=True, overflow="ellipsis")  # Task
+    table.add_column(style=MUTED_STYLE, no_wrap=True, justify="left", min_width=7)  # Cost
+    table.add_column(style=MUTED_STYLE, no_wrap=True, min_width=7)  # Verify
+    table.add_row("Task", "Cost", "Verify")
     for entry in reversed(receipts):
-        t.append(f"  {_receipt_line(entry)}\n", style=MUTED_STYLE)
-    return t
+        task, cost, verify = _receipt_row(entry)
+        table.add_row(task, cost, verify)
+
+    outer.add_row(table)
+    return outer
 
 
 def render_controls_row() -> Text:
@@ -199,6 +213,19 @@ def _safe_analyze_repo(path: Path) -> RepoFacts | None:
         return analyze_repo(path)
     except Exception:
         return None
+
+
+def _friendly_model(model: str) -> str:
+    """Human-friendly model name for the dashboard, e.g. 'Claude Sonnet 4.6'.
+
+    Uses the registry display name and drops the '<Provider>: ' prefix so the
+    dashboard reads naturally. Raw model IDs are kept elsewhere (JSON/debug/registry).
+    """
+    if not model or model == "Not configured":
+        return model
+    display = display_name_for(model)
+    _provider, sep, name = display.partition(": ")
+    return name if sep else display
 
 
 def _extract_model(config: dict[str, Any]) -> str | None:
@@ -288,28 +315,22 @@ def _recent_receipts(log_path: Path) -> list[dict[str, Any]]:
     return entries[-3:]
 
 
-def _receipt_line(entry: dict[str, Any]) -> str:
-    mode = (
-        entry.get("execution_mode_label")
-        or entry.get("execution_form_factor")
-        or entry.get("workflow")
-        or "Run"
-    )
-    task = _shorten(str(entry.get("task") or entry.get("summary") or "untitled run"), 34)
-    verify = _verify_label(entry)
+def _receipt_row(entry: dict[str, Any]) -> tuple[str, str, str]:
+    """Return (task, cost, verify) cells for one recent-receipt row."""
+    task = _shorten(str(entry.get("task") or entry.get("summary") or "untitled run"), 16)
     cost = entry.get("estimated_cost")
     cost_label = f"${cost:.4f}" if isinstance(cost, (int, float)) else "no cost"
-    return f"{mode:<12} {task:<36} {verify:<16} {cost_label}"
+    return task, cost_label, _verify_label(entry)
 
 
 def _verify_label(entry: dict[str, Any]) -> str:
     if entry.get("verification_passed") is True:
         return "verified"
     if entry.get("verification_passed") is False:
-        return "verify failed"
+        return "failed"
     if entry.get("verification_attempted") is False:
-        return "verify skipped"
-    return "no verification"
+        return "skipped"
+    return "none"
 
 
 def _shorten(value: str, limit: int) -> str:

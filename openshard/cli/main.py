@@ -367,6 +367,16 @@ def setup_cmd(as_agent: bool, as_json: bool) -> None:
         state = _current_state()
         keys_present = ob.api_key_present()
         detected_providers = [p for p, present in keys_present.items() if present]
+        # Clearer, additive fields. provider_route/provider are kept for back-compat.
+        selected_route = state.get("provider_route") or "demo"
+        selected_provider = state.get("provider") or "none"
+        available_routes = [*detected_providers, "demo"]
+        # Surface a next action when a provider key exists but the route is demo/skip.
+        recommended_next_action = None
+        if detected_providers and selected_route in ("demo", "skip"):
+            recommended_next_action = (
+                f"Run `openshard setup` to switch from demo to {detected_providers[0]}."
+            )
         payload = {
             "mode": "agent",
             "interactive": False,
@@ -375,6 +385,10 @@ def setup_cmd(as_agent: bool, as_json: bool) -> None:
             "onboarding_completed": not ob.is_first_run(),
             "recommended_executor": state.get("executor") or "native",
             "detected_providers": detected_providers,
+            "available_routes": available_routes,
+            "selected_route": selected_route,
+            "selected_provider": selected_provider,
+            "recommended_next_action": recommended_next_action,
             "provider_route": state.get("provider_route"),
             "provider": state.get("provider"),
             "safety_profile": state.get("safety_profile"),

@@ -20,6 +20,7 @@ from typing import Any
 from openshard.onboarding.choices import (
     DIRECT_PROVIDER_CHOICES,
     EXECUTOR_CHOICES,
+    LEGACY_EXECUTOR_LABELS,
     LOCAL_FIRST_NOTICE,
     NEXT_COMMANDS,
     PROVIDER_ROUTE_CHOICES,
@@ -286,7 +287,7 @@ def run_onboarding_flow() -> None:
         return
 
     # Screen 2
-    val = _run_select("Which executor should OpenShard use?", EXECUTOR_CHOICES)
+    val = _run_select("How do you want to use OpenShard?", EXECUTOR_CHOICES)
     if val is not None:
         result["executor"] = val
     if result["skipped"]:
@@ -340,10 +341,16 @@ def run_onboarding_flow() -> None:
 def _finish_summary_body(result: dict[str, Any]) -> str:
     """Build the human-readable finish summary from confirmed selections."""
     _label_map: dict[str, dict[str, str]] = {
-        "user_type": {"human": "Human developer", "agent": "Agent / automation", "demo": "Just exploring / demo"},
-        "executor": {"native": "OpenShard Native", "claude_code": "Claude Code", "codex": "Codex / OpenAI",
-                     "opencode": "OpenCode (planned)", "goose": "Goose (planned)",
-                     "antigravity": "Antigravity CLI (planned)", "other": "Other"},
+        "user_type": {"human": "I'm a Human", "agent": "I'm an AI Agent", "demo": "Just exploring / demo"},
+        "executor": {
+            "native": "OpenShard Native",
+            "cli_agent": "Connect an installed CLI agent",
+            "review": "Review output from another tool",
+            "agent_ci": "Agent / CI setup",
+            "demo": "Demo mode",
+            # Legacy values from older configs still render safely.
+            **LEGACY_EXECUTOR_LABELS,
+        },
         "provider_route": {"openrouter": "OpenRouter aggregator", "direct": "Direct provider API", "demo": "Demo / skip"},
         "provider": {"openrouter": "OpenRouter", "anthropic": "Anthropic", "openai": "OpenAI",
                      "google": "Google Gemini", "xai": "xAI Grok", "deepseek": "DeepSeek",
