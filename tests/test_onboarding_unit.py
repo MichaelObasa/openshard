@@ -286,6 +286,44 @@ class TestShouldRunOnboarding(unittest.TestCase):
                         result = self._fn()
         self.assertTrue(result)
 
+    def test_true_for_human_tty_even_with_no_color(self):
+        """Regression: a real human in a TTY who set NO_COLOR still gets onboarding.
+
+        NO_COLOR is a colour preference (no-color.org), not an agent signal, so it
+        must not skip first-run onboarding (previously it did, sending fresh users
+        straight to the dashboard)."""
+        import io
+
+        class _FakeTTY(io.StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        runner = __import__("click.testing", fromlist=["CliRunner"]).CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, {"OPENSHARD_CONFIG": "", "CI": "", "GITHUB_ACTIONS": "",
+                                          "GITLAB_CI": "", "OPENSHARD_AGENT": "", "NO_COLOR": "1"}, clear=False):
+                with patch("sys.stdin", _FakeTTY()):
+                    with patch("sys.stdout", _FakeTTY()):
+                        result = self._fn()
+        self.assertTrue(result)
+
+    def test_false_for_ci_even_with_tty(self):
+        """A genuine CI session is still skipped even if both streams look like TTYs."""
+        import io
+
+        class _FakeTTY(io.StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        runner = __import__("click.testing", fromlist=["CliRunner"]).CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, {"OPENSHARD_CONFIG": "", "CI": "true", "GITHUB_ACTIONS": "",
+                                          "GITLAB_CI": "", "OPENSHARD_AGENT": "", "NO_COLOR": ""}, clear=False):
+                with patch("sys.stdin", _FakeTTY()):
+                    with patch("sys.stdout", _FakeTTY()):
+                        result = self._fn()
+        self.assertFalse(result)
+
 
 class TestOnboardingChoiceWording(unittest.TestCase):
     """First-run onboarding wording polish (labels are human-facing)."""

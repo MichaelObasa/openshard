@@ -63,11 +63,21 @@ KEY_VARS = (
 )
 _KEY_VARS = KEY_VARS  # backward-compatible private alias
 
-_AGENT_VARS = (
+# Explicit agent/CI signals. Used to gate first-run onboarding: these mark a
+# genuinely non-interactive (agent or CI) session. NO_COLOR is deliberately NOT
+# here — it is a human color preference (https://no-color.org/), not an agent
+# signal, so it must not skip onboarding for a real person in a terminal.
+_CI_AGENT_VARS = (
     "OPENSHARD_AGENT",
     "CI",
     "GITHUB_ACTIONS",
     "GITLAB_CI",
+)
+
+# Headless/agent signals for output formatting (output_mode=agent_json). This is
+# broader than _CI_AGENT_VARS and includes NO_COLOR as a conventional headless hint.
+_AGENT_VARS = (
+    *_CI_AGENT_VARS,
     "NO_COLOR",
 )
 
@@ -93,6 +103,20 @@ def is_agent_environment() -> bool:
     """
     try:
         return any(os.environ.get(v, "") for v in _AGENT_VARS)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def is_ci_or_agent_environment() -> bool:
+    """Return True only for explicit agent/CI sessions (OPENSHARD_AGENT, CI,
+    GITHUB_ACTIONS, GITLAB_CI).
+
+    Unlike :func:`is_agent_environment`, this excludes NO_COLOR so that a real
+    human who simply prefers uncoloured output is not mistaken for an agent and
+    skipped past first-run onboarding.  Never raises.
+    """
+    try:
+        return any(os.environ.get(v, "") for v in _CI_AGENT_VARS)
     except Exception:  # noqa: BLE001
         return False
 
