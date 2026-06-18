@@ -220,8 +220,20 @@ def _display_path(config_path: Path | None, cwd: Path | None) -> str | None:
 
 
 def is_first_run() -> bool:
-    """Return True if the user has never completed openshard init or onboarding."""
-    from openshard.config.settings import load_config_safe
+    """Return True if the user has never completed openshard init or onboarding.
+
+    A first run means there is no real on-disk user config carrying an
+    onboarding completion marker. The bundled default config and any API keys
+    injected from the environment must never count as completed onboarding — so
+    when no user config file exists, this is always a first run regardless of
+    what ``load_config`` would synthesise from defaults/env.
+    """
+    from openshard.config.settings import find_config_path, load_config_safe
+
+    # No on-disk user config -> definitely a first run. Guards against the bundled
+    # default config (and env-injected provider keys) being treated as completed.
+    if find_config_path() is None:
+        return True
 
     config, is_valid, _ = load_config_safe()
     if not is_valid:

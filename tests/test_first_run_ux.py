@@ -10,7 +10,12 @@ import yaml
 from click.testing import CliRunner
 
 from openshard.cli.main import cli
-from openshard.config.settings import detect_provider, is_agent_environment, load_config
+from openshard.config.settings import (
+    detect_provider,
+    is_agent_environment,
+    is_ci_or_agent_environment,
+    load_config,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -222,6 +227,36 @@ class TestIsAgentEnvironment(unittest.TestCase):
                 self.assertIsInstance(result, bool)
             except Exception as exc:  # noqa: BLE001
                 self.fail(f"is_agent_environment() raised unexpectedly: {exc}")
+
+
+class TestIsCiOrAgentEnvironment(unittest.TestCase):
+    """is_ci_or_agent_environment() is the onboarding-gate predicate; unlike
+    is_agent_environment() it excludes NO_COLOR (a human colour preference)."""
+
+    def test_false_by_default(self):
+        with patch.dict(os.environ, _NO_KEYS, clear=True):
+            self.assertFalse(is_ci_or_agent_environment())
+
+    def test_true_for_ci(self):
+        with patch.dict(os.environ, {**_NO_KEYS, "CI": "true"}, clear=True):
+            self.assertTrue(is_ci_or_agent_environment())
+
+    def test_true_for_github_actions(self):
+        with patch.dict(os.environ, {**_NO_KEYS, "GITHUB_ACTIONS": "true"}, clear=True):
+            self.assertTrue(is_ci_or_agent_environment())
+
+    def test_true_for_gitlab_ci(self):
+        with patch.dict(os.environ, {**_NO_KEYS, "GITLAB_CI": "true"}, clear=True):
+            self.assertTrue(is_ci_or_agent_environment())
+
+    def test_true_for_openshard_agent(self):
+        with patch.dict(os.environ, {**_NO_KEYS, "OPENSHARD_AGENT": "1"}, clear=True):
+            self.assertTrue(is_ci_or_agent_environment())
+
+    def test_false_for_no_color(self):
+        """NO_COLOR alone is NOT an agent/CI signal (regression guard)."""
+        with patch.dict(os.environ, {**_NO_KEYS, "NO_COLOR": "1"}, clear=True):
+            self.assertFalse(is_ci_or_agent_environment())
 
 
 # ---------------------------------------------------------------------------
@@ -873,6 +908,106 @@ class TestOnboardingWordingAndSummary(unittest.TestCase):
         body = _finish_summary_body({"executor": "native"})
         self.assertIn("OpenShard Native", body)
         self.assertNotIn("local runner", body.lower())
+
+
+class TestIsFirstRunGuards(unittest.TestCase):
+    """is_first_run() must not treat bundled defaults / env keys as completed."""
+
+    def test_no_user_config_is_first_run(self):
+        from openshard.config import onboarding as ob
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, {**_NO_AGENT_ENV, "OPENSHARD_CONFIG": ""}, clear=False):
+                self.assertTrue(ob.is_first_run())
+
+    def test_openrouter_key_does_not_complete_onboarding(self):
+        """Detecting OPENROUTER_API_KEY must not falsely mark onboarding complete."""
+        from openshard.config import onboarding as ob
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, {**_NO_AGENT_ENV, "OPENSHARD_CONFIG": "",
+                                          "OPENROUTER_API_KEY": "sk-test"}, clear=False):
+                self.assertTrue(ob.is_first_run())
+
+    def test_default_config_with_marker_ignored_without_user_file(self):
+        """Even if load_config synthesised a completed onboarding block, the absence
+        of a real on-disk user config means it is still a first run."""
+        from openshard.config import onboarding as ob
+        runner = CliRunner()
+        completed = ({"onboarding": {"completed_at": "2026-01-01T00:00:00+00:00"}}, True, None)
+        with runner.isolated_filesystem():
+            with patch.dict(os.environ, {**_NO_AGENT_ENV, "OPENSHARD_CONFIG": ""}, clear=False):
+                # find_config_path() returns None (no user file) -> first run wins
+                # before load_config_safe is even consulted.
+                with patch("openshard.config.settings.load_config_safe", return_value=completed):
+                    self.assertTrue(ob.is_first_run())
+
+
+class TestFreshNewUserScenario(unittest.TestCase):
+    """Regression for the manual fake-new-user report: fresh isolated home +
+    fresh repo + no onboarding marker."""
+
+    def _fake_home_env(self, tmp: Path) -> dict:
+        home = tmp / "home"
+        (home / "AppData" / "Roaming").mkdir(parents=True, exist_ok=True)
+        (home / "AppData" / "Local").mkdir(parents=True, exist_ok=True)
+        return {
+            **_NO_AGENT_ENV,
+            "OPENSHARD_CONFIG": "",
+            "USERPROFILE": str(home),
+            "HOME": str(home),
+            "APPDATA": str(home / "AppData" / "Roaming"),
+            "LOCALAPPDATA": str(home / "AppData" / "Local"),
+        }
+
+    def test_human_tty_launches_onboarding(self):
+        """Fresh human + TTY in a fresh repo => onboarding gate opens."""
+        import io
+
+        from openshard.cli.ui.onboarding import _should_run_onboarding
+
+        class _FakeTTY(io.StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        runner = CliRunner()
+        with runner.isolated_filesystem() as fs:
+            Path(".git").mkdir()
+            with patch.dict(os.environ, self._fake_home_env(Path(fs)), clear=False):
+                with patch("sys.stdin", _FakeTTY()), patch("sys.stdout", _FakeTTY()):
+                    self.assertTrue(_should_run_onboarding())
+
+    def test_agent_json_non_interactive_and_not_completed(self):
+        """The agent JSON path stays non-interactive and reports not-completed."""
+        import json
+
+        runner = CliRunner()
+        with runner.isolated_filesystem() as fs:
+            Path(".git").mkdir()
+            with patch.dict(os.environ, self._fake_home_env(Path(fs)), clear=False):
+                with patch("openshard.cli.ui.onboarding.run_onboarding_flow") as flow:
+                    result = runner.invoke(cli, ["setup", "--agent", "--json"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        data = json.loads(result.output)
+        self.assertFalse(data["interactive"])
+        self.assertFalse(data["config_found"])
+        self.assertFalse(data["onboarding_completed"])
+        flow.assert_not_called()
+
+    def test_completed_user_not_nagged(self):
+        """An existing user with completed onboarding is not sent through it again."""
+        import yaml
+
+        from openshard.config import onboarding as ob
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".openshard").mkdir()
+            Path(".openshard/config.yml").write_text(
+                yaml.safe_dump({"onboarding": {"completed_at": "2026-06-13T10:00:00+00:00"}}),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {**_NO_AGENT_ENV, "OPENSHARD_CONFIG": ""}, clear=False):
+                self.assertFalse(ob.is_first_run())
 
 
 if __name__ == "__main__":

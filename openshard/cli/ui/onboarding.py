@@ -34,15 +34,19 @@ def _should_run_onboarding() -> bool:
 
     All three conditions must hold:
     - user has not completed onboarding before
-    - not running in an agent / CI environment
+    - not running in an explicit agent / CI environment
     - both stdin and stdout are real TTYs
+
+    Note: NO_COLOR alone must NOT skip onboarding — it is a human colour
+    preference, not an agent signal — so this uses ``is_ci_or_agent_environment``
+    rather than the broader ``is_agent_environment``.
     """
     from openshard.config.onboarding import is_first_run
-    from openshard.config.settings import is_agent_environment
+    from openshard.config.settings import is_ci_or_agent_environment
 
     if not is_first_run():
         return False
-    if is_agent_environment():
+    if is_ci_or_agent_environment():
         return False
     if not sys.stdin.isatty() or not sys.stdout.isatty():
         return False
