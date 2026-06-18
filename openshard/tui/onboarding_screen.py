@@ -20,6 +20,7 @@ from textual.widgets import OptionList, Static
 from openshard.onboarding.choices import (
     DIRECT_PROVIDER_CHOICES,
     EXECUTOR_CHOICES,
+    LEGACY_EXECUTOR_LABELS,
     LOCAL_FIRST_NOTICE,
     NEXT_COMMANDS,
     PROVIDER_ROUTE_CHOICES,
@@ -29,7 +30,7 @@ from openshard.onboarding.choices import (
 
 _SELECT_SCREENS = [
     ("user_type", "Who is using OpenShard?", USER_TYPE_CHOICES),
-    ("executor", "Which executor should OpenShard use?", EXECUTOR_CHOICES),
+    ("executor", "How do you want to use OpenShard?", EXECUTOR_CHOICES),
     ("provider_route", "How do you want OpenShard to access models?", PROVIDER_ROUTE_CHOICES),
     # provider_direct is injected conditionally after provider_route = "direct"
     ("safety_profile", "Which safety profile should OpenShard use?", SAFETY_PROFILE_CHOICES),
@@ -180,10 +181,16 @@ class OnboardingScreen(Screen):
 
     def _finish_body(self) -> str:
         _label_map: dict[str, dict[str, str]] = {
-            "user_type": {"human": "Human developer", "agent": "Agent / automation", "demo": "Just exploring / demo"},
-            "executor": {"native": "OpenShard Native", "claude_code": "Claude Code", "codex": "Codex / OpenAI",
-                         "opencode": "OpenCode (planned)", "goose": "Goose (planned)",
-                         "antigravity": "Antigravity CLI (planned)", "other": "Other"},
+            "user_type": {"human": "I'm a Human", "agent": "I'm an AI Agent", "demo": "Just exploring / demo"},
+            "executor": {
+                "native": "OpenShard Native",
+                "cli_agent": "Connect an installed CLI agent",
+                "review": "Review output from another tool",
+                "agent_ci": "Agent / CI setup",
+                "demo": "Demo mode",
+                # Legacy values from older configs still render safely.
+                **LEGACY_EXECUTOR_LABELS,
+            },
             "provider_route": {"openrouter": "OpenRouter aggregator", "direct": "Direct provider API", "demo": "Demo / skip"},
             "provider": {"openrouter": "OpenRouter", "anthropic": "Anthropic", "openai": "OpenAI",
                          "google": "Google Gemini", "xai": "xAI Grok", "deepseek": "DeepSeek",

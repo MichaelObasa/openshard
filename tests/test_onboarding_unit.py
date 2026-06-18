@@ -287,5 +287,46 @@ class TestShouldRunOnboarding(unittest.TestCase):
         self.assertTrue(result)
 
 
+class TestOnboardingChoiceWording(unittest.TestCase):
+    """First-run onboarding wording polish (labels are human-facing)."""
+
+    def test_user_type_first_labels(self):
+        from openshard.onboarding.choices import USER_TYPE_CHOICES
+        labels = [label for label, *_ in USER_TYPE_CHOICES]
+        self.assertIn("I'm a Human", labels)
+        self.assertIn("I'm an AI Agent", labels)
+        # Values must stay stable for config/tests.
+        self.assertEqual([v for _, v, *_ in USER_TYPE_CHOICES], ["human", "agent", "demo"])
+
+    def test_executor_native_is_recommended_and_first(self):
+        from openshard.onboarding.choices import EXECUTOR_CHOICES
+        first_label, first_value, first_note, _ = EXECUTOR_CHOICES[0]
+        self.assertEqual(first_label, "OpenShard Native (recommended)")
+        self.assertEqual(first_value, "native")
+        self.assertIn("receipts", first_note)
+
+    def test_no_local_runner_or_osn_in_onboarding(self):
+        from openshard import onboarding as _pkg  # noqa: F401
+        from openshard.onboarding import choices
+        haystacks = []
+        for name in dir(choices):
+            val = getattr(choices, name)
+            if isinstance(val, str):
+                haystacks.append(val)
+            elif isinstance(val, list):
+                for item in val:
+                    haystacks.append(repr(item))
+            elif isinstance(val, dict):
+                haystacks.append(repr(val))
+        blob = "\n".join(haystacks).lower()
+        self.assertNotIn("local runner", blob)
+        self.assertNotIn("osn", blob)
+
+    def test_legacy_executor_labels_present(self):
+        from openshard.onboarding.choices import LEGACY_EXECUTOR_LABELS
+        for legacy in ("claude_code", "codex", "opencode", "goose", "antigravity"):
+            self.assertIn(legacy, LEGACY_EXECUTOR_LABELS)
+
+
 if __name__ == "__main__":
     unittest.main()

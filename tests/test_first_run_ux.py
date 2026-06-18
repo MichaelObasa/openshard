@@ -580,6 +580,60 @@ class TestSetupAgentJson(unittest.TestCase):
         self.assertIsInstance(data["next_actions"], list)
         self.assertGreater(len(data["next_actions"]), 0)
 
+    def test_clearer_fields_present(self):
+        import json
+        result = self._run()
+        data = json.loads(result.output)
+        for field in ("selected_route", "selected_provider", "available_routes",
+                      "recommended_next_action"):
+            self.assertIn(field, data)
+        # Back-compat fields are retained.
+        self.assertIn("provider_route", data)
+        self.assertIn("provider", data)
+
+    def test_defaults_to_demo_when_unconfigured(self):
+        import json
+        result = self._run()
+        data = json.loads(result.output)
+        self.assertEqual(data["selected_route"], "demo")
+        self.assertEqual(data["selected_provider"], "none")
+        self.assertIn("demo", data["available_routes"])
+
+    def test_recommended_next_action_when_key_but_demo(self):
+        import json
+        result = self._run({"OPENROUTER_API_KEY": "any-key"})
+        data = json.loads(result.output)
+        self.assertIn("openrouter", data["detected_providers"])
+        self.assertIn("openrouter", data["available_routes"])
+        self.assertIsNotNone(data["recommended_next_action"])
+        self.assertIn("openshard setup", data["recommended_next_action"])
+
+    def test_no_recommended_action_when_no_key(self):
+        import json
+        result = self._run()
+        data = json.loads(result.output)
+        self.assertIsNone(data["recommended_next_action"])
+
+    def test_legacy_executor_value_preserved(self):
+        import json
+
+        import yaml
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".openshard").mkdir()
+            Path(".openshard/config.yml").write_text(
+                yaml.safe_dump({"onboarding": {
+                    "completed_at": "2026-06-13T10:00:00+00:00",
+                    "executor": "claude_code",
+                }}),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, _NO_AGENT_ENV, clear=False):
+                result = runner.invoke(cli, ["setup", "--agent", "--json"])
+        data = json.loads(result.output)
+        # Legacy executor value passes through unchanged (advisory only).
+        self.assertEqual(data["recommended_executor"], "claude_code")
+
 
 # ---------------------------------------------------------------------------
 # 12. Existing commands still work after onboarding changes
@@ -792,6 +846,33 @@ class TestTuiAppFirstRunGate(unittest.TestCase):
 
     def test_no_screen_when_gate_false(self):
         self.assertFalse(self._push_happened(False))
+
+
+class TestOnboardingWordingAndSummary(unittest.TestCase):
+    """Executor question wording + finish-summary rendering (incl. legacy values)."""
+
+    def test_executor_question_reworded(self):
+        from openshard.tui.onboarding_screen import _SELECT_SCREENS
+        questions = [q for _f, q, _c in _SELECT_SCREENS]
+        self.assertIn("How do you want to use OpenShard?", questions)
+        self.assertNotIn("Which executor should OpenShard use?", questions)
+
+    def test_finish_summary_new_executor_label(self):
+        from openshard.cli.ui.onboarding import _finish_summary_body
+        body = _finish_summary_body({"executor": "cli_agent"})
+        self.assertIn("Connect an installed CLI agent", body)
+
+    def test_finish_summary_renders_legacy_executor(self):
+        from openshard.cli.ui.onboarding import _finish_summary_body
+        # A config carrying a legacy value still renders a friendly label, no crash.
+        body = _finish_summary_body({"executor": "goose"})
+        self.assertIn("Goose", body)
+
+    def test_finish_summary_native_recommended_wording(self):
+        from openshard.cli.ui.onboarding import _finish_summary_body
+        body = _finish_summary_body({"executor": "native"})
+        self.assertIn("OpenShard Native", body)
+        self.assertNotIn("local runner", body.lower())
 
 
 if __name__ == "__main__":

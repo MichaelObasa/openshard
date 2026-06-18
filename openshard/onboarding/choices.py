@@ -9,20 +9,34 @@ Each tuple is (label, value, note, is_planned).
 from __future__ import annotations
 
 USER_TYPE_CHOICES: list[tuple[str, str, str, bool]] = [
-    ("Human developer", "human", "", False),
-    ("Agent / automation", "agent", "", False),
+    ("I'm a Human", "human", "", False),
+    ("I'm an AI Agent", "agent", "", False),
     ("Just exploring / demo", "demo", "", False),
 ]
 
 EXECUTOR_CHOICES: list[tuple[str, str, str, bool]] = [
-    ("OpenShard Native (default)", "native", "", False),
-    ("Claude Code import/wrap", "claude_code", "", False),
-    ("Codex / OpenAI", "codex", "", False),
-    ("OpenCode (planned)", "opencode", "Not yet directly integrated. OpenShard will use local-only mode.", True),
-    ("Goose (planned)", "goose", "Not yet directly integrated. OpenShard will use local-only mode.", True),
-    ("Antigravity CLI (planned)", "antigravity", "Not yet directly integrated. OpenShard will use local-only mode.", True),
-    ("Other / not sure yet", "other", "", False),
+    ("OpenShard Native (recommended)", "native",
+     "Use OpenShard's own coding agent, built to work with receipts, policy, checks, and approvals.", False),
+    ("Connect an installed CLI agent", "cli_agent",
+     "Use Claude Code CLI, Codex CLI, OpenCode, etc. if already installed.", False),
+    ("Review output from another tool", "review",
+     "Use this if you work in Claude.ai, Claude Desktop, Cursor, VS Code, or another tool.", False),
+    ("Agent / CI setup", "agent_ci",
+     "Machine-readable setup for agents, scripts, and automation.", False),
+    ("Demo mode", "demo",
+     "Try OpenShard receipts without connecting a model.", False),
 ]
+
+# Legacy executor values written by older configs. Kept so summaries and JSON
+# render them safely without migrating or rewriting existing config files.
+LEGACY_EXECUTOR_LABELS: dict[str, str] = {
+    "claude_code": "Claude Code",
+    "codex": "Codex / OpenAI",
+    "opencode": "OpenCode",
+    "goose": "Goose",
+    "antigravity": "Antigravity CLI",
+    "other": "Other",
+}
 
 PROVIDER_ROUTE_CHOICES: list[tuple[str, str, str, bool]] = [
     ("OpenRouter aggregator", "openrouter", "Broadest model access through one key.", False),
