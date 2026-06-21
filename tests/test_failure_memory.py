@@ -30,6 +30,8 @@ from openshard.history.failure_memory import (
     NativeFailureMemoryEvent,
     _dict_to_event,
     _event_to_dict,
+    compute_failure_memory_adjustment_reasons,
+    compute_failure_memory_adjustments,
     failure_memory_events_for_run,
     load_failure_memory_events,
     log_failure_memory_event,
@@ -860,3 +862,74 @@ class TestRenderFailureMemoryBlock(TestCase):
         )
         combined = "\n".join(lines)
         self.assertIn("src/foo.py", combined)
+
+
+class TestFailureMemoryAdjustments(TestCase):
+    """compute_failure_memory_adjustments turns recorded failures into a
+    conservative, penalty-only routing signal."""
+
+    def _events(self, model: str, n: int, **flags) -> list:
+        return [_make_event(model=model, **flags) for _ in range(n)]
+
+    def test_no_events_no_adjustments(self):
+        self.assertEqual(compute_failure_memory_adjustments([]), {})
+
+    def test_below_min_evidence_omitted(self):
+        # Two failures is not enough signal to act on.
+        adj = compute_failure_memory_adjustments(
+            self._events("m1", 2, retry_attempted=False, retry_succeeded=False)
+        )
+        self.assertNotIn("m1", adj)
+
+    def test_penalty_applied_with_enough_evidence(self):
+        adj = compute_failure_memory_adjustments(
+            self._events("m1", 3, retry_attempted=False, retry_succeeded=False)
+        )
+        self.assertIn("m1", adj)
+        self.assertAlmostEqual(adj["m1"], -0.10)
+
+    def test_unrecovered_failures_penalized_more_than_recovered(self):
+        events = (
+            self._events("rec", 3, retry_attempted=True, retry_succeeded=True)
+            + self._events("unrec", 3, retry_attempted=True, retry_succeeded=False)
+        )
+        adj = compute_failure_memory_adjustments(events)
+        self.assertLess(adj["unrec"], adj["rec"])
+
+    def test_penalty_only_and_within_bounds(self):
+        events = (
+            self._events("a", 4, retry_attempted=True, retry_succeeded=False)
+            + self._events("b", 5, retry_attempted=True, retry_succeeded=True)
+        )
+        for value in compute_failure_memory_adjustments(events).values():
+            self.assertLessEqual(value, 0.0)      # failures never reward
+            self.assertGreaterEqual(value, -0.4)  # clamped floor
+
+    def test_events_without_model_ignored(self):
+        adj = compute_failure_memory_adjustments(
+            self._events("", 4, retry_attempted=False, retry_succeeded=False)
+        )
+        self.assertEqual(adj, {})
+
+    def test_input_list_not_mutated(self):
+        events = self._events("m1", 3, retry_attempted=False, retry_succeeded=False)
+        before = list(events)
+        compute_failure_memory_adjustments(events)
+        self.assertEqual(events, before)
+
+    def test_reasons_present_for_penalized_models(self):
+        events = self._events(
+            "m1", 3, retry_attempted=True, retry_succeeded=False,
+            failure_type="test_failure",
+        )
+        reasons = compute_failure_memory_adjustment_reasons(events)
+        self.assertIn("m1", reasons)
+        self.assertTrue(reasons["m1"].startswith("failure memory:"))
+        self.assertIn("3 failures", reasons["m1"])
+
+    def test_reasons_omit_unpenalized_models(self):
+        # One event is below the evidence threshold, so no reason is produced.
+        reasons = compute_failure_memory_adjustment_reasons(
+            self._events("m1", 1, retry_attempted=False, retry_succeeded=False)
+        )
+        self.assertEqual(reasons, {})

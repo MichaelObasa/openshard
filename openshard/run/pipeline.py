@@ -365,6 +365,9 @@ class RunPipeline:
             _use_history_scoring = history_scoring or bool(_cfg.get("history_scoring", False))
             _use_eval_scoring = eval_scoring or bool(_cfg.get("eval_scoring", False))
             _use_feedback_scoring = feedback_scoring or bool(_cfg.get("feedback_scoring", False))
+            # Failure-memory routing signal is active by default (penalty-only and
+            # conservative). Set failure_memory_scoring: false in config to disable.
+            _use_failure_memory_scoring = bool(_cfg.get("failure_memory_scoring", True))
             _policy_executor, _policy_reason, _executor_advisory_result = _suggest_executor(task)
             _executor_source: str = "heuristic"
             _fra_result: dict | None = None
@@ -625,6 +628,7 @@ class RunPipeline:
         _scored: ScoredRoutingResult | None = None
         _runs: list[dict] = []
         _feedback_receipt: dict | None = None
+        _failure_receipt: dict | None = None
 
         # Attempt scored model selection; fall back silently to keyword routing.
         if not opencode_mode and routing_decision is not None:
@@ -711,6 +715,30 @@ class RunPipeline:
                         }
                     except Exception:
                         pass
+                # Failure-memory routing signal — penalty for models that
+                # repeatedly fail real runs. Active by default; never raises.
+                _failure_adjustments: dict[str, float] = {}
+                _failure_reasons: dict[str, str] = {}
+                if _use_failure_memory_scoring:
+                    try:
+                        from openshard.history.failure_memory import (
+                            compute_failure_memory_adjustment_reasons,
+                            compute_failure_memory_adjustments,
+                            load_failure_memory_events,
+                        )
+                        _fm_events = load_failure_memory_events()
+                        _failure_adjustments = compute_failure_memory_adjustments(_fm_events)
+                        _failure_reasons = compute_failure_memory_adjustment_reasons(_fm_events)
+                        if _failure_adjustments:
+                            _failure_receipt = {
+                                "routing_failure_memory_scoring_used": True,
+                                "routing_failure_memory_adjustments": {
+                                    m: round(v, 3) for m, v in _failure_adjustments.items()
+                                },
+                                "routing_failure_memory_reasons": dict(_failure_reasons),
+                            }
+                    except Exception:
+                        pass
                 # Feedback Routing Advisory (FRA) — session signal-based
                 # penalties applied before scoring. Soft signal only; never
                 # raises. Stored for Shard recording via _log_run.
@@ -738,7 +766,7 @@ class RunPipeline:
                     pass
 
                 _merged_adjustments: dict[str, float] | None = None
-                if _hist_adjustments is not None or _eval_adjustments or _cat_adjustments or _feedback_adjustments or _fra_adjustments:
+                if _hist_adjustments is not None or _eval_adjustments or _cat_adjustments or _feedback_adjustments or _fra_adjustments or _failure_adjustments:
                     _merged_adjustments = dict(_hist_adjustments or {})
                     _all_eval_models = set(_eval_adjustments) | set(_cat_adjustments)
                     for _em in _all_eval_models:
@@ -755,6 +783,10 @@ class RunPipeline:
                     for _frm, _frval in _fra_adjustments.items():
                         _merged_adjustments[_frm] = max(
                             _merged_clamp_min, min(_merged_clamp_max, _merged_adjustments.get(_frm, 0.0) + _frval)
+                        )
+                    for _flm, _flval in _failure_adjustments.items():
+                        _merged_adjustments[_flm] = max(
+                            _merged_clamp_min, min(_merged_clamp_max, _merged_adjustments.get(_flm, 0.0) + _flval)
                         )
                 _scored = select_with_info(_entries, _reqs, routing_decision.category, history_adjustments=_merged_adjustments)
                 if (
@@ -1670,6 +1702,10 @@ class RunPipeline:
                 if _dr_extra is None:
                     _dr_extra = {}
                 _dr_extra.update(_feedback_receipt)
+            if _failure_receipt is not None:
+                if _dr_extra is None:
+                    _dr_extra = {}
+                _dr_extra.update(_failure_receipt)
             if _findings_extra:
                 if _dr_extra is None:
                     _dr_extra = {}
@@ -2019,6 +2055,10 @@ class RunPipeline:
                         if _vf_extra is None:
                             _vf_extra = {}
                         _vf_extra.update(_feedback_receipt)
+                    if _failure_receipt is not None:
+                        if _vf_extra is None:
+                            _vf_extra = {}
+                        _vf_extra.update(_failure_receipt)
                     if _findings_extra:
                         if _vf_extra is None:
                             _vf_extra = {}
@@ -2441,6 +2481,10 @@ class RunPipeline:
             if _extra_metadata is None:
                 _extra_metadata = {}
             _extra_metadata.update(_feedback_receipt)
+        if _failure_receipt is not None:
+            if _extra_metadata is None:
+                _extra_metadata = {}
+            _extra_metadata.update(_failure_receipt)
         # Capture adapter metadata for explicit OpenCode runs
         if opencode_mode and exec_result is not None and exec_result.adapter_meta:
             if _extra_metadata is None:

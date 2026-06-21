@@ -716,3 +716,60 @@ class TestFeedbackScoringDisplay(unittest.TestCase):
         generator = _make_generator_mock()
         result = self._run(["implement a feature", "--more"], manager, generator)
         self.assertNotIn("Feedback scoring", result.output, result.output)
+
+
+class TestFailureMemoryRoutingIntegration(unittest.TestCase):
+    """Failure-memory adjustments flow through the routing merge end to end.
+    Active by default (no flag), so no flag is passed."""
+
+    def _events(self, model: str, n: int):
+        from openshard.history.failure_memory import NativeFailureMemoryEvent
+        return [
+            NativeFailureMemoryEvent(
+                model=model, failure_type="test_failure",
+                retry_attempted=True, retry_succeeded=False,
+            )
+            for _ in range(n)
+        ]
+
+    def test_failure_adjustments_reach_run_metadata(self):
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
+        manager = _make_manager_mock([entry], ["openrouter"])
+        generator = _make_generator_mock()
+        log_mock = MagicMock()
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.history.failure_memory.load_failure_memory_events",
+                   return_value=self._events("openrouter/fast-model", 3)), \
+             patch("openshard.run.pipeline._log_run", log_mock):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run", "implement a feature"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        log_mock.assert_called_once()
+        meta = log_mock.call_args.kwargs.get("extra_metadata") or {}
+        self.assertTrue(meta.get("routing_failure_memory_scoring_used"))
+        self.assertIn(
+            "openrouter/fast-model",
+            meta.get("routing_failure_memory_adjustments", {}),
+        )
+
+    def test_disabled_by_config_skips_failure_signal(self):
+        entry = _make_entry("openrouter/fast-model", pricing={"prompt": "0.0000005"})
+        manager = _make_manager_mock([entry], ["openrouter"])
+        generator = _make_generator_mock()
+        log_mock = MagicMock()
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator), \
+             patch("openshard.cli.main.load_config",
+                   return_value={"approval_mode": "smart", "failure_memory_scoring": False}), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.history.failure_memory.load_failure_memory_events",
+                   return_value=self._events("openrouter/fast-model", 3)), \
+             patch("openshard.run.pipeline._log_run", log_mock):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["run", "implement a feature"])
+        self.assertEqual(result.exit_code, 0, result.output)
+        meta = log_mock.call_args.kwargs.get("extra_metadata") or {}
+        self.assertNotIn("routing_failure_memory_scoring_used", meta)
