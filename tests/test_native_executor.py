@@ -65,6 +65,7 @@ from openshard.native.executor import (
     _extract_snippet_lines,
     _infer_result_count,
     _infer_result_quality,
+    _infer_zero_result_case,
     _parse_search_result_line,
 )
 from openshard.native.repo_context import NativeRepoContextSummary
@@ -6424,6 +6425,39 @@ class TestInferResultHelpers(unittest.TestCase):
     def test_quality_weak_when_not_injected(self):
         self.assertEqual(_infer_result_quality(3, False), "weak")
 
+    def test_zero_result_case_true_for_empty_successful_search(self):
+        result = self._ok("search_repo", output="", metadata={"matches": 0})
+        self.assertTrue(_infer_zero_result_case("search_repo", result, 0))
+
+    def test_zero_result_case_false_when_search_found_matches(self):
+        result = self._ok("search_repo", output="f.py:1:x", metadata={"matches": 3})
+        self.assertFalse(_infer_zero_result_case("search_repo", result, 3))
+
+    def test_zero_result_case_false_when_tool_failed(self):
+        # A failed call also reports count 0, but that is an error, not an
+        # empty-result signal.
+        result = self._fail("search_repo")
+        self.assertFalse(_infer_zero_result_case("search_repo", result, 0))
+
+    def test_zero_result_case_false_for_empty_read_file(self):
+        # Successfully reading an existing empty file is a valid state, not a
+        # search miss — it must not flag as a zero-result signal.
+        result = self._ok("read_file", output="")
+        self.assertFalse(_infer_zero_result_case("read_file", result, 0))
+
+    def test_zero_result_case_false_for_empty_git_diff(self):
+        # A clean working tree is an observation, not a failed search.
+        result = self._ok("get_git_diff", output="")
+        self.assertFalse(_infer_zero_result_case("get_git_diff", result, 0))
+
+    def test_zero_result_case_false_for_non_search_tool(self):
+        result = self._ok("run_verification", output="")
+        self.assertFalse(_infer_zero_result_case("run_verification", result, 0))
+
+    def test_zero_result_case_true_for_empty_list_files(self):
+        result = self._ok("list_files", output="")
+        self.assertTrue(_infer_zero_result_case("list_files", result, 0))
+
 
 class TestNativeToolSearchEventRecording(unittest.TestCase):
     """NativeAgentExecutor records NativeToolSearchEvent at call sites."""
@@ -6499,6 +6533,23 @@ class TestNativeToolSearchEventRecording(unittest.TestCase):
         )
         self.assertEqual(ev.result_quality, "useful")
         self.assertEqual(ev.result_count, 1)
+        self.assertFalse(ev.zero_result_case)
+
+    def test_record_tool_search_event_zero_result_case(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            executor = self._make_executor_with_repo(root)
+        from openshard.native.tools import NativeToolResult
+        result = NativeToolResult(tool_name="search_repo", ok=True, output="", metadata={"matches": 0})
+        ev = executor._record_tool_search_event(
+            "search_repo", result,
+            selected_reason="test",
+            query="missing-symbol",
+            context_injected=False,
+        )
+        self.assertTrue(ev.zero_result_case)
+        self.assertEqual(ev.result_count, 0)
+        self.assertEqual(ev.result_quality, "empty")
 
     def test_record_tool_search_event_weak_quality(self):
         with tempfile.TemporaryDirectory() as tmp:

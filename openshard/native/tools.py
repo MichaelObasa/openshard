@@ -44,6 +44,7 @@ class NativeToolSearchEvent:
     query: str = ""
     result_count: int = 0
     result_quality: str = "unknown"  # unknown | empty | weak | useful
+    zero_result_case: bool = False
     retry_count: int = 0
     fallback_tool: str | None = None
     context_injected: bool = False
