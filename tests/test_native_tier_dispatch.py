@@ -10,7 +10,10 @@ from openshard.native.context import (
     build_native_tier_dispatch_receipt,
 )
 from openshard.native.dispatch import (
+    _TIER_CANDIDATES,
     _TIER_MODEL_MAP,
+    TierCandidate,
+    provider_for_candidate,
     resolve_tier,
     resolve_tier_for_category,
 )
@@ -770,6 +773,44 @@ class TestActualModelRendering(unittest.TestCase):
         lines = self._render(tdr, "full")
         joined = "\n".join(lines)
         self.assertIn("reserved for validation", joined)
+
+
+class TestProviderForCandidate(unittest.TestCase):
+    """provider_for_candidate derives the provider from the model registry,
+    falling back to the candidate's hardcoded literal on a registry miss."""
+
+    def test_provider_derived_from_registry_for_known_model(self):
+        from openshard.models.registry import get_model
+
+        tc = _TIER_CANDIDATES["frontier-reasoning-model"]
+        entry = get_model(tc.preferred)
+        self.assertIsNotNone(entry, "test assumes preferred model is registered")
+        # Derived provider must equal the registry entry's provider, not the
+        # stored literal — proving it tracks the model.
+        self.assertEqual(provider_for_candidate(tc), entry.provider)
+
+    def test_provider_falls_back_to_literal_on_registry_miss(self):
+        tc = TierCandidate(preferred="no-such/model-xyz", provider="literal-provider")
+        # Unregistered model → registry miss → hardcoded literal is used.
+        self.assertEqual(provider_for_candidate(tc), "literal-provider")
+
+    def test_derived_provider_matches_registry_for_all_real_tiers(self):
+        # Behavior-preserving guard: for every real tier the derived provider
+        # equals the provider its preferred model actually has in the registry,
+        # so provider and model can never drift apart.
+        from openshard.models.registry import get_model
+
+        for tier, tc in _TIER_CANDIDATES.items():
+            with self.subTest(tier=tier):
+                entry = get_model(tc.preferred)
+                self.assertIsNotNone(entry, f"{tier} preferred model unregistered")
+                self.assertEqual(provider_for_candidate(tc), entry.provider)
+                # The stored literal remains the vendor prefix of the model id,
+                # matching the registry provider case-insensitively today.
+                self.assertEqual(
+                    provider_for_candidate(tc).lower(),
+                    tc.preferred.split("/")[0].lower(),
+                )
 
 
 if __name__ == "__main__":

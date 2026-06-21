@@ -79,6 +79,22 @@ def get_tier_candidate(tier_name: str) -> TierCandidate | None:
     return _TIER_CANDIDATES.get(tier_name)
 
 
+def provider_for_candidate(tc: TierCandidate) -> str:
+    """Return the provider for *tc*, derived from its preferred model's registry entry.
+
+    The registry is the single source of truth for a model's vendor, so the
+    provider can never drift away from the model the tier points at. The
+    hardcoded ``tc.provider`` literal is used only as a fallback when the
+    preferred model is absent from the registry (a registry miss).
+    """
+    from openshard.models.registry import get_model
+
+    entry = get_model(tc.preferred)
+    if entry is not None and entry.provider:
+        return entry.provider
+    return tc.provider
+
+
 def resolve_tier(
     tier_name: str | None,
     blocked_models: set[str] | None = None,
