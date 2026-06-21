@@ -9,7 +9,7 @@ from openshard.analysis.repo import RepoFacts
 from openshard.cli.main import cli
 from openshard.providers.base import ModelInfo
 from openshard.providers.manager import InventoryEntry
-from openshard.routing.engine import MODEL_MAIN, MODEL_STRONG
+from openshard.routing.engine import MODEL_CHEAP, MODEL_MAIN, MODEL_STRONG
 from openshard.routing.workflow_selector import WorkflowDecision
 
 _DEFAULT_CONFIG = {"approval_mode": "smart"}
@@ -608,6 +608,38 @@ class TestTierDispatchRouting(unittest.TestCase):
                    return_value=WorkflowDecision("staged", "test forced")), \
              patch("openshard.native.dispatch.resolve_tier_for_category",
                    return_value=(None, "", True, "unknown category in test")), \
+             patch("openshard.run.pipeline._log_run"):
+            runner = CliRunner()
+            runner.invoke(cli, ["run", "implement a feature", "--experimental-tier-dispatch"])
+        generator.generate.assert_called_once()
+        self.assertEqual(generator.generate.call_args.kwargs["model"], _DISPATCH_ROUTED)
+
+    def test_unroutable_role_models_fall_back_to_single(self):
+        """When the routable pool excludes a role's tier models, per-role
+        dispatch falls back to single-model execution rather than dispatching
+        to a model whose provider is not configured."""
+        from openshard.models.registry import get_model
+        from openshard.routing.provider_availability import RoutablePool
+        # Non-empty pool, but the executor tier's models (balanced-coding:
+        # MODEL_MAIN plus its MODEL_CHEAP fallback) are excluded, so the
+        # executor role resolves to None and dispatch falls back to single.
+        pool = RoutablePool(
+            routable=(get_model(MODEL_STRONG),),
+            excluded=((MODEL_MAIN, "no_api_key"), (MODEL_CHEAP, "no_api_key")),
+            available_providers=("openrouter",),
+            executor="staged",
+        )
+        manager = _make_manager_mock([_DISPATCH_ENTRY], ["openrouter"])
+        generator = _make_generator_mock()
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator), \
+             patch("openshard.run.pipeline.build_routable_pool", return_value=pool), \
+             patch("openshard.cli.main.load_config", return_value=_DEFAULT_CONFIG), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.run.pipeline.run_planning_stage",
+                   return_value=("mock plan", None)), \
+             patch("openshard.run.pipeline.select_workflow",
+                   return_value=WorkflowDecision("staged", "test forced")), \
              patch("openshard.run.pipeline._log_run"):
             runner = CliRunner()
             runner.invoke(cli, ["run", "implement a feature", "--experimental-tier-dispatch"])

@@ -122,6 +122,36 @@ class TestResolveTierForCategory(unittest.TestCase):
         self.assertTrue(fallback)
 
 
+class TestResolveTierForCategoryBlocked(unittest.TestCase):
+    """resolve_tier_for_category forwards blocked_models so per-role dispatch
+    never selects a model that is not routable in the current environment."""
+
+    def test_blocked_preferred_falls_back(self):
+        # Block the preferred model for 'standard' (balanced-coding tier);
+        # resolution substitutes a reachable fallback rather than returning it.
+        model, _tier, fallback, _reason = resolve_tier_for_category(
+            "standard", {MODEL_MAIN}
+        )
+        self.assertIsNotNone(model)
+        self.assertNotEqual(model, MODEL_MAIN)
+        self.assertTrue(fallback)
+
+    def test_all_blocked_returns_none(self):
+        # Block every candidate for the tier; category resolves to None so the
+        # caller falls back to single-model dispatch instead of failing later.
+        model, _tier, fallback, _reason = resolve_tier_for_category(
+            "standard", {MODEL_MAIN, MODEL_CHEAP}
+        )
+        self.assertIsNone(model)
+        self.assertTrue(fallback)
+
+    def test_no_block_is_backward_compatible(self):
+        self.assertEqual(
+            resolve_tier_for_category("standard"),
+            resolve_tier_for_category("standard", None),
+        )
+
+
 class TestDispatchReceiptDefaults(unittest.TestCase):
     def test_enabled_false_by_default(self):
         r = NativeTierDispatchReceipt()
