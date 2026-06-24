@@ -122,13 +122,6 @@ pipx upgrade openshard
 See [docs/install.md](docs/install.md) for upgrade instructions and notes.
 
 ---
-
-## Quick demo
-
-<p align="center">
-  <img src="demos/Openshard_Final_Demo_Full.gif" alt="OpenShard Demo" width="800"/>
-</p>
-
 Launch the TUI:
 
 ```bash
@@ -161,10 +154,6 @@ Or from the shell:
 ```bash
 openshard last --more
 ```
-
-<p align="center">
-  <img src="demos/openshard_last_--more.gif" alt="OpenShard Last --more" width="800"/>
-</p>
 
 The `--more` view includes a PROOF SUMMARY block when OSN proof metadata is present, showing observation, progress, verification, loop, retry, and PR comment status.
 
