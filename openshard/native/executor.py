@@ -226,6 +226,30 @@ def _infer_result_quality(result_count: int, context_injected: bool) -> str:
     return "weak"
 
 
+# Discovery tools whose empty result is a genuine "looked and found nothing"
+# signal. Restricted to search and listing: an empty result there is evidence
+# of a weak query or wrong search path. Direct fetches (read_file, get_git_diff)
+# are excluded — successfully reading an empty file, or observing a clean working
+# tree, is a valid state, not a search miss, and counting it would poison the
+# signal with false positives.
+_ZERO_RESULT_SIGNAL_TOOLS: frozenset[str] = frozenset({"search_repo", "list_files"})
+
+
+def _infer_zero_result_case(
+    tool_name: str, result: NativeToolResult, result_count: int
+) -> bool:
+    """True iff a discovery tool (search/list) ran successfully but found nothing.
+
+    Deliberately narrower than ``result_count == 0``. A failed call, a direct
+    fetch of an empty file, or a non-search tool can all report a count of 0,
+    but none of those is a genuine empty-search signal. Distinguishing the real
+    "searched and found nothing" case is what makes this useful for context
+    engineering: it is evidence that an agent used a weak query or the wrong
+    search path, not that a tool errored or a file happened to be empty.
+    """
+    return tool_name in _ZERO_RESULT_SIGNAL_TOOLS and result.ok and result_count == 0
+
+
 def _parse_search_result_line(line: str) -> tuple[str, int] | None:
     parts = line.split(":", 2)
     if len(parts) < 3:
@@ -646,12 +670,14 @@ class NativeAgentExecutor:
     ) -> NativeToolSearchEvent:
         count = _infer_result_count(tool_name, result)
         quality = _infer_result_quality(count, context_injected)
+        zero_result = _infer_zero_result_case(tool_name, result, count)
         event = NativeToolSearchEvent(
             tool_name=tool_name,
             selected_reason=selected_reason,
             query=query,
             result_count=count,
             result_quality=quality,
+            zero_result_case=zero_result,
             context_injected=context_injected,
             warnings=list(warnings or []),
             available_tools=[t.name for t in list_native_tools()],
