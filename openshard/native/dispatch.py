@@ -166,18 +166,23 @@ def resolve_role(
     return (model, default_tier, True, reason)
 
 
-def resolve_tier_for_category(category: str | None) -> tuple[str | None, str, bool, str]:
+def resolve_tier_for_category(
+    category: str | None,
+    blocked_models: set[str] | None = None,
+) -> tuple[str | None, str, bool, str]:
     """Map a routing category to a tier then resolve to a model ID.
 
     Returns (model_id, tier_name, fallback_used, fallback_reason).
     fallback_used=True for unknown categories and the visual approximation.
+    *blocked_models* is forwarded to resolve_tier so unavailable models are
+    skipped in favour of routable fallbacks (model_id is None if none remain).
     """
     if not category:
         return (None, "", True, "category is None or empty")
     tier = _CATEGORY_TIER_MAP.get(category)
     if tier is None:
         return (None, "", True, f"unknown category {category!r}")
-    model_id, fb, reason = resolve_tier(tier)
+    model_id, fb, reason = resolve_tier(tier, blocked_models)
     if category == "visual":
         return (model_id, tier, True, "visual approximated to balanced-coding-model")
     return (model_id, tier, fb, reason)

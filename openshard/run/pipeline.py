@@ -1057,22 +1057,53 @@ class RunPipeline:
             from openshard.native.dispatch import resolve_tier, resolve_tier_for_category
 
             _cat = routing_decision.category if routing_decision else None
+            # Per-role dispatch must only select models that are actually
+            # routable in this environment. When the routable pool is known and
+            # non-empty, block everything excluded from it so resolve_tier
+            # substitutes a reachable fallback; if a role then has no routable
+            # model at all it resolves to None and we fall back to single-model
+            # dispatch below, rather than dispatching to a model whose provider
+            # is not configured (which would fail at call time). An empty pool
+            # means no provider info is available here (e.g. no API keys), not
+            # that every model is unroutable, so we do not over-restrict then.
+            _dispatch_blocked: set[str] = set()
+            if _routable_pool_cache is not None and _routable_pool_cache.routable:
+                _dispatch_blocked = {_mid for _mid, _ in _routable_pool_cache.excluded}
             _p_tier = "frontier-reasoning-model"
-            _p_model, _p_fb, _p_reason = resolve_tier(_p_tier)
-            _e_model, _e_tier, _e_fb, _e_reason = resolve_tier_for_category(_cat)
+            _p_model, _p_fb, _p_reason = resolve_tier(_p_tier, _dispatch_blocked)
+            _e_model, _e_tier, _e_fb, _e_reason = resolve_tier_for_category(_cat, _dispatch_blocked)
             _v_tier = "independent-validator-model"
-            _v_model, _v_fb, _v_reason = resolve_tier(_v_tier)
+            _v_model, _v_fb, _v_reason = resolve_tier(_v_tier, _dispatch_blocked)
 
+            _unresolved_roles = [
+                _role for _role, _m in (
+                    ("planner", _p_model),
+                    ("executor", _e_model),
+                    ("validator", _v_model),
+                ) if _m is None
+            ]
+            _all_roles_resolved = not _unresolved_roles
             _any_fb = _p_fb or _e_fb or _v_fb
             _warns = [r for r in [
                 (f"planner fallback: {_p_reason}" if _p_fb and _p_reason else ""),
                 (f"executor fallback: {_e_reason}" if _e_fb and _e_reason else ""),
                 (f"validator fallback: {_v_reason}" if _v_fb and _v_reason else ""),
             ] if r]
+            if not _all_roles_resolved:
+                _warns.append(
+                    "per-role dispatch unavailable: no routable model for "
+                    + ", ".join(_unresolved_roles)
+                    + "; using single model"
+                )
             _first_reason = next((r for r in (_p_reason, _e_reason, _v_reason) if r), "")
 
-            _applied = not dry_run
-            _not_applied_reason = "dry-run" if dry_run else ""
+            if dry_run:
+                _not_applied_reason = "dry-run"
+            elif not _all_roles_resolved:
+                _not_applied_reason = "no routable model for " + ", ".join(_unresolved_roles)
+            else:
+                _not_applied_reason = ""
+            _applied = (not dry_run) and _all_roles_resolved
 
             _tier_dispatch_receipt = NativeTierDispatchReceipt(
                 enabled=True,
@@ -1084,7 +1115,7 @@ class RunPipeline:
                 executor_model=_e_model,
                 validator_tier=_v_tier,
                 validator_model=_v_model,
-                fallback_used=_any_fb,
+                fallback_used=_any_fb or not _all_roles_resolved,
                 fallback_reason=_not_applied_reason or _first_reason,
                 warnings=_warns,
             )
