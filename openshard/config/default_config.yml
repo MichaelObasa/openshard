@@ -23,6 +23,10 @@ workflow: auto
 approval_mode: smart
 cost_gate_threshold: 0.10
 
+# Per-role model dispatch: when true, planning / execution / validation each
+# use a routing-selected model (opt-in; same as --experimental-tier-dispatch).
+tier_dispatch: false
+
 executor: direct
 
 # Model policy: controls which models are routable beyond what provider

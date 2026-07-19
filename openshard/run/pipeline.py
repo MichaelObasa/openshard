@@ -328,6 +328,17 @@ class RunPipeline:
         self._model_policy = model_policy
         self._candidates = candidates
 
+    def _tier_dispatch_enabled(self) -> bool:
+        """True when per-role tier dispatch is on, via CLI flag or config.
+
+        Mirrors how the scoring flags read config: the
+        ``--experimental-tier-dispatch`` flag or ``tier_dispatch: true`` in
+        config turns it on. Default off.
+        """
+        return bool(self._experimental_tier_dispatch) or bool(
+            self._config.get("tier_dispatch", False)
+        )
+
     def run(self, task: str) -> RunResult:  # noqa: C901
         result_obj = RunResult()
         detail = self._detail
@@ -1048,7 +1059,7 @@ class RunPipeline:
         _validator_policy: ValidatorPolicyDecision | None = None
 
         _can_dispatch = (
-            self._experimental_tier_dispatch
+            self._tier_dispatch_enabled()
             and not opencode_mode
             and effective_executor != "native"
         )
@@ -2161,7 +2172,7 @@ class RunPipeline:
                 model_policy_receipt=_native_meta.model_policy_receipt,
                 run_trust_score=_native_meta.run_trust_score,
             )
-            if self._experimental_tier_dispatch:
+            if self._tier_dispatch_enabled():
                 from openshard.native.context import build_native_tier_dispatch_receipt
                 _native_meta.tier_dispatch_receipt = build_native_tier_dispatch_receipt(
                     routing_receipt=_native_meta.routing_receipt,
