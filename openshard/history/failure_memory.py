@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import json
 import uuid
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -120,3 +121,85 @@ def failure_memory_events_for_run(run_id: str) -> list[NativeFailureMemoryEvent]
 def recent_failure_memory(limit: int = 10) -> list[NativeFailureMemoryEvent]:
     events = load_failure_memory_events()
     return events[-limit:] if len(events) > limit else events
+
+
+# --- Failure-memory routing signal -------------------------------------------
+# Models that repeatedly fail real runs are nudged down in routing selection.
+# The signal is deliberately conservative: penalty-only (a failing model is
+# never rewarded), it requires several events before acting, and it is clamped,
+# so a single bad run cannot distort routing. This mirrors the shape of
+# history/feedback_scoring.compute_feedback_adjustments so the two signals
+# compose cleanly in the routing merge.
+
+_FM_MIN_EVIDENCE = 3
+_FM_ADJ_MIN = -0.4  # most negative adjustment a single model can accumulate
+_FM_ADJ_MAX = 0.0   # failures never improve a model's score
+
+
+def _failure_event_signal(event: NativeFailureMemoryEvent) -> float:
+    """Per-event penalty.
+
+    A retry that recovered is mild (the model self-corrected); an unrecovered
+    failure is the strongest signal; a plain failure sits between.
+    """
+    if event.retry_attempted and event.retry_succeeded:
+        return -0.05
+    if event.retry_attempted and not event.retry_succeeded:
+        return -0.20
+    return -0.10
+
+
+def _model_of(event: NativeFailureMemoryEvent) -> str:
+    return (getattr(event, "model", "") or "").strip()
+
+
+def compute_failure_memory_adjustments(
+    events: list[NativeFailureMemoryEvent],
+) -> dict[str, float]:
+    """Return per-model routing penalties derived from recorded failure events.
+
+    Models with fewer than ``_FM_MIN_EVIDENCE`` events are omitted (insufficient
+    signal). Penalties are averaged per model and clamped to
+    ``[_FM_ADJ_MIN, _FM_ADJ_MAX]``. Events without a model are ignored. The
+    input list is never mutated.
+    """
+    signals_by_model: dict[str, list[float]] = {}
+    for event in events:
+        model = _model_of(event)
+        if not model:
+            continue
+        signals_by_model.setdefault(model, []).append(_failure_event_signal(event))
+
+    result: dict[str, float] = {}
+    for model, sigs in signals_by_model.items():
+        if len(sigs) < _FM_MIN_EVIDENCE:
+            continue
+        avg = sum(sigs) / len(sigs)
+        clamped = max(_FM_ADJ_MIN, min(_FM_ADJ_MAX, avg))
+        if clamped != 0.0:
+            result[model] = clamped
+    return result
+
+
+def compute_failure_memory_adjustment_reasons(
+    events: list[NativeFailureMemoryEvent],
+) -> dict[str, str]:
+    """Return a short human-readable reason for each penalized model."""
+    adjustments = compute_failure_memory_adjustments(events)
+    reasons: dict[str, str] = {}
+    for model in adjustments:
+        model_events = [e for e in events if _model_of(e) == model]
+        unrecovered = sum(
+            1 for e in model_events if e.retry_attempted and not e.retry_succeeded
+        )
+        ftypes = Counter(
+            e.failure_type for e in model_events if getattr(e, "failure_type", "")
+        )
+        parts = [f"{len(model_events)} failures"]
+        if unrecovered:
+            parts.append(f"{unrecovered} unrecovered")
+        top = ftypes.most_common(1)
+        if top:
+            parts.append(top[0][0])
+        reasons[model] = "failure memory: " + ", ".join(parts)
+    return reasons
