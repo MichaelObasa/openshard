@@ -565,6 +565,34 @@ class TestTierDispatchRouting(unittest.TestCase):
         generator.generate.assert_called_once()
         self.assertEqual(generator.generate.call_args.kwargs["model"], _DISPATCH_ROUTED)
 
+    def _run_staged_with_config(self, config: dict):
+        manager = _make_manager_mock([_DISPATCH_ENTRY], ["openrouter"])
+        generator = _make_generator_mock()
+        with patch("openshard.run.pipeline.ProviderManager", return_value=manager), \
+             patch("openshard.run.pipeline.ExecutionGenerator", return_value=generator), \
+             patch("openshard.cli.main.load_config", return_value=config), \
+             patch("openshard.run.pipeline.analyze_repo", return_value=_PYTHON_REPO), \
+             patch("openshard.run.pipeline.run_planning_stage",
+                   return_value=("mock plan", None)), \
+             patch("openshard.run.pipeline.select_workflow",
+                   return_value=WorkflowDecision("staged", "test forced")), \
+             patch("openshard.run.pipeline._log_run"):
+            runner = CliRunner()
+            runner.invoke(cli, ["run", "implement a feature"])  # no CLI dispatch flag
+        return generator
+
+    def test_config_enables_dispatch_without_flag(self):
+        """tier_dispatch: true in config enables per-role dispatch with no CLI flag."""
+        generator = self._run_staged_with_config({**_DEFAULT_CONFIG, "tier_dispatch": True})
+        generator.generate.assert_called_once()
+        self.assertEqual(generator.generate.call_args.kwargs["model"], MODEL_MAIN)
+
+    def test_config_false_leaves_dispatch_off(self):
+        """tier_dispatch: false (the default) leaves single-model routing in place."""
+        generator = self._run_staged_with_config({**_DEFAULT_CONFIG, "tier_dispatch": False})
+        generator.generate.assert_called_once()
+        self.assertEqual(generator.generate.call_args.kwargs["model"], _DISPATCH_ROUTED)
+
     def test_flag_on_executor_uses_dispatch_model(self):
         """With dispatch flag, standard task routes implementation to MODEL_MAIN (GLM-5.1).
 
